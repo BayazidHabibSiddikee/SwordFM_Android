@@ -15,46 +15,13 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
   final _service = BluetoothShareService();
   final List<BluetoothDeviceItem> _devices = [];
   String? _statusMessage;
+  // ignore: prefer_final_fields — mutated via setState
   bool _permissionsReady = false;
-  bool _checkingPermissions = true;
 
   @override
   void initState() {
     super.initState();
-    _checkPermissions();
     _listenStreams();
-  }
-
-  /// Requests runtime BT permissions BEFORE any socket operations.
-  Future<void> _checkPermissions() async {
-    final supported = await _service.isSupported();
-    if (!supported) {
-      setState(() {
-        _checkingPermissions = false;
-        _statusMessage = 'Bluetooth not supported on this device.';
-      });
-      return;
-    }
-    final granted = await BtPermissions.ensurePermissions();
-    if (granted) {
-      final enabled = await _service.isEnabled();
-      if (!enabled) {
-        await _service.requestEnable();
-      }
-      await _refreshDevices();
-    }
-    setState(() {
-      _permissionsReady = granted;
-      _checkingPermissions = false;
-      if (!granted) {
-        _statusMessage = 'Bluetooth permissions required. Tap "Request Permissions" below.';
-      }
-    });
-  }
-
-  Future<void> _requestPermissionsAgain() async {
-    setState(() => _checkingPermissions = true);
-    await _checkPermissions();
   }
 
   void _listenStreams() {
@@ -68,6 +35,30 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
     });
     _service.messageStream.listen((msg) {
       setState(() => _statusMessage = msg);
+    });
+  }
+
+  Future<void> _requestPermissions() async {
+    final supported = await _service.isSupported();
+    if (!supported) {
+      setState(() => _statusMessage = 'Bluetooth not supported on this device.');
+      return;
+    }
+    final granted = await BtPermissions.ensurePermissions();
+    if (granted) {
+      final enabled = await _service.isEnabled();
+      if (!enabled) {
+        await _service.requestEnable();
+      }
+      await _refreshDevices();
+    }
+    setState(() {
+      _permissionsReady = granted;
+      if (!granted) {
+        _statusMessage = 'Bluetooth permissions were denied.';
+      } else {
+        _statusMessage = null;
+      }
     });
   }
 
@@ -136,24 +127,20 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
           ),
           const SizedBox(height: 16),
 
-          // Action buttons
+          // Action buttons — always visible
           Wrap(
             spacing: 8,
             children: [
-              if (_checkingPermissions)
-                const CircularProgressIndicator()
-              else if (!_permissionsReady)
-                FilledButton.icon(
-                  onPressed: _requestPermissionsAgain,
-                  icon: const Icon(Icons.privacy_tip),
-                  label: const Text('Request Permissions'),
-                )
-              else
-                FilledButton.icon(
-                  onPressed: state == BluetoothState.disconnected ? _startServer : null,
-                  icon: const Icon(Icons.bluetooth_connected),
-                  label: const Text('Start Listening'),
-                ),
+              FilledButton.icon(
+                onPressed: _requestPermissions,
+                icon: const Icon(Icons.privacy_tip),
+                label: const Text('Request Permissions'),
+              ),
+              FilledButton.icon(
+                onPressed: _permissionsReady && state == BluetoothState.disconnected ? _startServer : null,
+                icon: const Icon(Icons.bluetooth_connected),
+                label: const Text('Start Listening'),
+              ),
             ],
           ),
           const SizedBox(height: 16),

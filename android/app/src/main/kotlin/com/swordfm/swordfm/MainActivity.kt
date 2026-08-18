@@ -22,6 +22,27 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.*
 import java.util.*
 import kotlin.concurrent.thread
+import org.json.JSONObject
+
+/**
+ * ┌───────────────────────────────────────────────────────────────┐
+ * │ SWORDFM RFCOMM FRAME FORMAT (MUST MATCH swordblue / path.md)  │
+ * ├───────────────────────────────────────────────────────────────┤
+ * │ Every file transfer is a single frame on the socket:          │
+ * │                                                               │
+ * │   [ 4-byte uint32 metadataLength  ]  (big-endian)             │
+ * │   [ metadataLength bytes of JSON  ]                           │
+ * │   [ raw file bytes (exactly "size" bytes) ]                   │
+ * │                                                               │
+ * │ JSON metadata:                                                │
+ * │   { "filename": "example.pdf", "size": 12345 }                │
+ * │                                                               │
+ * │ The sender writes metadata then streams the raw bytes; the    │
+ * │ receiver reads the 4-byte length, parses JSON, then reads     │
+ * │ exactly "size" raw bytes. Do NOT change this without also     │
+ * │ updating the Dart side and /home/sword/SwordFM/tools/swordblue│
+ * └───────────────────────────────────────────────────────────────┘
+ */
 
 class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
     private val CHANNEL = "com.swordfm/bluetooth"
@@ -228,31 +249,21 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
 
             while (!isCancelled) {
                 try {
-                    // Protocol header: 8 bytes file length, 4 bytes filename length
-                    val headerBuffer = ByteArray(12)
-                    var headerBytesRead = 0
-                    while (headerBytesRead < 12 && !isCancelled) {
-                        val read = mmInStream.read(headerBuffer, headerBytesRead, 12 - headerBytesRead)
-                        if (read == -1) throw IOException("Socket closed")
-                        headerBytesRead += read
+                    // Read 4-byte JSON metadata length (see frame-format comment at top).
+                    val lenBuffer = ByteArray(4)
+                    readFully(mmInStream, lenBuffer)
+                    val metadataLength = DataInputStream(ByteArrayInputStream(lenBuffer)).readInt()
+                    if (metadataLength <= 0 || metadataLength > 1024 * 1024) {
+                        throw IOException("Invalid metadata length: $metadataLength")
                     }
-                    if (isCancelled) break
 
-                    val dataInputStream = DataInputStream(ByteArrayInputStream(headerBuffer))
-                    val fileLength = dataInputStream.readLong()
-                    val nameLength = dataInputStream.readInt()
+                    // Read JSON metadata
+                    val metaBuffer = ByteArray(metadataLength)
+                    readFully(mmInStream, metaBuffer)
+                    val metaJson = JSONObject(String(metaBuffer, Charsets.UTF_8))
+                    val fileLength = metaJson.getLong("size")
+                    val filename = metaJson.getString("filename")
 
-                    // Read filename
-                    val nameBuffer = ByteArray(nameLength)
-                    var nameBytesRead = 0
-                    while (nameBytesRead < nameLength && !isCancelled) {
-                        val read = mmInStream.read(nameBuffer, nameBytesRead, nameLength - nameBytesRead)
-                        if (read == -1) throw IOException("Socket closed")
-                        nameBytesRead += read
-                    }
-                    if (isCancelled) break
-
-                    val filename = String(nameBuffer, Charsets.UTF_8)
                     runOnMain {
                         methodChannel?.invokeMethod("onTransferStarted", mapOf("filename" to filename, "isSending" to false))
                     }
@@ -302,6 +313,14 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                         }
                     }
                     break
+                } catch (e: Exception) {
+                    if (!isCancelled) {
+                        runOnMain {
+                            methodChannel?.invokeMethod("onDisconnected", null)
+                            methodChannel?.invokeMethod("onTransferError", mapOf("message" to "Transfer failed: ${e.message}"))
+                        }
+                    }
+                    break
                 }
             }
         }
@@ -310,20 +329,22 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             thread {
                 try {
                     val fileLength = file.length()
-                    val filenameBytes = file.name.toByteArray(Charsets.UTF_8)
-                    val nameLength = filenameBytes.size
 
                     runOnMain {
                         methodChannel?.invokeMethod("onTransferStarted", mapOf("filename" to file.name, "isSending" to true))
                     }
 
-                    // Write header (8 bytes file length + 4 bytes filename length)
-                    val bos = ByteArrayOutputStream()
-                    val dos = DataOutputStream(bos)
-                    dos.writeLong(fileLength)
-                    dos.writeInt(nameLength)
-                    mmOutStream.write(bos.toByteArray())
-                    mmOutStream.write(filenameBytes)
+                    // Write the JSON metadata frame (see frame-format comment at top).
+                    val metadata = JSONObject()
+                        .put("filename", file.name)
+                        .put("size", fileLength)
+                    val metadataBytes = metadata.toString().toByteArray(Charsets.UTF_8)
+
+                    // 4-byte big-endian metadata length
+                    val lenBos = ByteArrayOutputStream()
+                    DataOutputStream(lenBos).use { it.writeInt(metadataBytes.size) }
+                    mmOutStream.write(lenBos.toByteArray())
+                    mmOutStream.write(metadataBytes)
                     mmOutStream.flush()
 
                     val fileInputStream = FileInputStream(file)
@@ -371,5 +392,19 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             } catch (e: IOException) {
             }
         }
+    }
+}
+
+/**
+ * Reads exactly [buffer.size] bytes from [stream], blocking until the buffer
+ * is full or the stream ends. Used by [TransferThread.run] to read the
+ * length-prefixed JSON metadata frame (see frame-format comment at top).
+ */
+private fun readFully(stream: InputStream, buffer: ByteArray) {
+    var offset = 0
+    while (offset < buffer.size) {
+        val read = stream.read(buffer, offset, buffer.size - offset)
+        if (read == -1) throw IOException("Stream closed while reading")
+        offset += read
     }
 }

@@ -38,10 +38,20 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 - [ ] Implement Bluetooth scanning and service advertisement (RFCOMM).
 - [ ] Create simple peer-to-peer file sender and receiver protocol.
 - [ ] Sync Bluetooth data transfer progress bar in UI.
+      - v1 approach: rely on OS-level pairing. Implement "connect to already-paired
+        device" from a simple picker (see `BluetoothScreen`). Do NOT build a "make
+        Android discoverable" toggle yet — that defers BLUETOOTH_ADVERTISE edge cases.
+        The RFCOMM frame format matches swordblue (see frame-format comments in
+        `MainActivity.kt` and `bluetooth_share_service.dart`).
 
 ### Phase 5: Folder Graph & Tools
 - [ ] Interactive folder graph visualizer built natively in Flutter.
-- [ ] Document conversion integration (Markdown <-> HTML <-> Text, and optional PDF/Word handlers).
+- [x] Document conversion integration (Markdown <-> HTML <-> Text, and optional PDF/Word handlers).
+      - Status: Basic Markdown → HTML/Text conversion implemented in `lib/services/doc_converter.dart`.
+      - DEFERRED → **Phase 2**: native/offloaded PDF & DOCX export (`lib/services/convert_offload.dart`
+        plus a receiving endpoint in swordconv/C++). Heavy native dependencies (pandoc / LibreOffice /
+        cloud API) are not feasible for an on-device v1 Android build. Get Bluetooth fallback and
+        QR/HTTP sharing solid first — that is the actual pain point. Revisit once those are stable.
 
 ---
 

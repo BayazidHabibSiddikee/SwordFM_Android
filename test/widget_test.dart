@@ -50,10 +50,18 @@ void main() {
       await tester.pumpWidget(
         const MaterialApp(home: BluetoothScreen()),
       );
+            // First pump renders loading indicator; pumpAndSettle runs the post-frame
+      // permission-check callback to completion (resolving the platform channel
+      // call which fails in tests → isSupported() returns false → shows the
+      // "need permissions" UI).
+      await tester.pumpWidget(
+        const MaterialApp(home: BluetoothScreen()),
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('Disconnected'), findsOneWidget);
-      expect(find.text('Start Listening'), findsOneWidget);
+      // In tests, permissions aren't granted so it shows "Request Permissions"
+      expect(find.text('Request Permissions'), findsOneWidget);
     });
   });
 

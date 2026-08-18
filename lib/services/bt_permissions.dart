@@ -8,7 +8,12 @@ import 'package:permission_handler/permission_handler.dart';
 /// Permission mapping:
 ///   BLUETOOTH_SCAN      → android.permission.BLUETOOTH_SCAN
 ///   BLUETOOTH_CONNECT   → android.permission.BLUETOOTH_CONNECT
-///   BLUETOOTH_ADVERTISE → android.permission.BLUETOOTH_ADVERTISE (not requested for v1)
+///   BLUETOOTH_ADVERTISE → android.permission.BLUETOOTH_ADVERTISE
+///
+/// Note: BLUETOOTH_ADVERTISE is requested here because the server-side
+/// listener (accepting an inbound RFCOMM connection) needs it. The
+/// discoverability *UI toggle* itself is intentionally deferred for v1 —
+/// see plan.md. We rely on OS-level pairing instead.
 class BtPermissions {
   /// Requests all required BT permissions and returns true if granted.
   static Future<bool> ensurePermissions() async {
@@ -16,14 +21,27 @@ class BtPermissions {
     // the legacy BLUETOOTH / BLUETOOTH_ADMIN which are granted at install.
     final scanStatus = await Permission.bluetoothScan.request();
     final connectStatus = await Permission.bluetoothConnect.request();
-    return scanStatus.isGranted && connectStatus.isGranted;
+    final advertiseStatus = await Permission.bluetoothAdvertise.request();
+    return scanStatus.isGranted &&
+        connectStatus.isGranted &&
+        advertiseStatus.isGranted;
   }
 
-  /// Returns whether both scan and connect permissions are currently granted.
+  /// Returns whether all Bluetooth permissions are currently granted.
   static Future<bool> areGranted() async {
     final scan = await Permission.bluetoothScan.status;
     final connect = await Permission.bluetoothConnect.status;
-    return scan.isGranted && connect.isGranted;
+    final advertise = await Permission.bluetoothAdvertise.status;
+    return scan.isGranted && connect.isGranted && advertise.isGranted;
+  }
+
+  /// Requests each permission individually and reports which are granted.
+  static Future<Map<Permission, PermissionStatus>> requestAll() async {
+    return {
+      Permission.bluetoothScan: await Permission.bluetoothScan.request(),
+      Permission.bluetoothConnect: await Permission.bluetoothConnect.request(),
+      Permission.bluetoothAdvertise: await Permission.bluetoothAdvertise.request(),
+    };
   }
 
   /// Opens the system settings so the user can grant BT permissions manually.

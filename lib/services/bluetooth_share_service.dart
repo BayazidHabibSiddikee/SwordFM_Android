@@ -1,17 +1,14 @@
-/// Bluetooth file transfer shared protocol frame format:
-///
-/// [Header: 12 bytes]
-///   Bytes 0-7:   File length as uint64 (little-endian)
-///   Bytes 8-11:  Filename length as int32 (little-endian)
-/// [Filename: N bytes] UTF-8 encoded
-/// [Payload: L bytes] Raw file content (L = file length from header)
-///
-/// This frame format is implemented identically in:
-///   - lib/services/bluetooth_share_service.dart (Dart/Flutter side)
-///   - android/app/src/main/kotlin/com/swordfm/swordfm/MainActivity.kt (Kotlin native side)
-///   - /home/sword/SwordFM/tools/swordblue (Python reference implementation)
-///
-/// Keep these three implementations in sync — any change here must be mirrored there.
+// Bluetooth file transfer shared protocol frame format (MUST MATCH MainActivity.kt & /home/sword/SwordFM/tools/swordblue):
+//
+//   [4-byte uint32 metadataLength]  (big-endian)
+//   [metadataLength bytes of JSON]
+//   [raw file bytes = "size" from JSON]
+//
+// JSON metadata: {"filename": "example.pdf", "size": 12345}
+//
+// Sender writes: 4B length + JSON + raw bytes
+// Receiver reads: 4B length → parse JSON → read "size" bytes
+// Keep these three implementations in sync — any change here must be mirrored there.
 import 'dart:async';
 import 'package:flutter/services.dart';
 
@@ -152,6 +149,8 @@ class BluetoothShareService {
     }
   }
 
+  /// Initiates file send by path. The native side handles the swordblue frame:
+  /// [4B len][JSON {filename,size}][raw bytes].
   Future<void> sendFile(String filePath) async {
     try {
       _updateState(BluetoothState.sending);
@@ -177,7 +176,8 @@ class BluetoothShareService {
         _updateState(BluetoothState.listening);
         break;
       case 'onConnected':
-        final name = call.arguments['name'] as String? ?? 'Device';
+        final args = call.arguments as Map<dynamic, dynamic>? ?? {};
+        final name = args['name'] as String? ?? 'Device';
         _connectedDeviceName = name;
         _deviceConnectedController.add(name);
         _updateState(BluetoothState.connected);
@@ -187,14 +187,16 @@ class BluetoothShareService {
         _updateState(BluetoothState.disconnected);
         break;
       case 'onTransferStarted':
-        final isSending = call.arguments['isSending'] as bool? ?? false;
+        final args = call.arguments as Map<dynamic, dynamic>? ?? {};
+        final isSending = args['isSending'] as bool? ?? false;
         _updateState(isSending ? BluetoothState.sending : BluetoothState.receiving);
         break;
       case 'onTransferProgress':
-        final filename = call.arguments['filename'] as String? ?? '';
-        final bytes = call.arguments['bytesTransferred'] as int? ?? 0;
-        final total = call.arguments['totalBytes'] as int? ?? 0;
-        final isSending = call.arguments['isSending'] as bool? ?? false;
+        final args = call.arguments as Map<dynamic, dynamic>? ?? {};
+        final filename = args['filename'] as String? ?? '';
+        final bytes = args['bytesTransferred'] as int? ?? 0;
+        final total = args['totalBytes'] as int? ?? 0;
+        final isSending = args['isSending'] as bool? ?? false;
         _progressController.add(BluetoothTransferProgress(
           filename: filename,
           bytesTransferred: bytes,
