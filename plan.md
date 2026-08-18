@@ -64,13 +64,7 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 - ~~Document conversion~~ → Deferred: PDF/DOCX/TXT/HTML exports require native helpers (pandoc/LibreOffice) or cloud API. v1 ships markdown-only preview. Revisit after Bluetooth + LAN sharing are production-stable.
 - Background search via Dart isolates — **TODO**: move _searchInDir to Isolate spawn for non-blocking UI
 
-### Phase 6: CI & Polish
-- [ ] GitHub Actions CI (analyze + test on push)
-- [ ] SearchService isolate offload (current doc says isolate but uses sync)
-- [ ] Material You dynamic color support
-- [ ] i18n scaffolding (easy_localization)
 
-### Phase 5: Folder Graph & Tools
 - [x] Interactive folder graph visualizer built natively in Flutter.
 - [x] Document conversion integration (Markdown <-> HTML <-> Text, and optional PDF/Word handlers).
       - Status: Real PDF/DOCX conversion possible entirely in Dart, no external binaries needed.
