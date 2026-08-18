@@ -26,6 +26,17 @@ class _NetworkScreenState extends State<NetworkScreen> {
     _service.logStream.listen((List<ConnLog> logs) {
       if (mounted) _logController.add(logs);
     });
+    // Load persisted profiles on startup
+    _service.loadProfiles().then((_) {
+      if (mounted) {
+        setState(() {
+          _profiles.clear();
+          for (final p in _service.profiles.values) {
+            _profiles.add(_ProfileEntry(p));
+          }
+        });
+      }
+    });
   }
 
   @override
@@ -38,21 +49,23 @@ class _NetworkScreenState extends State<NetworkScreen> {
     showDialog(
       context: context,
       builder: (_) => _AddProfileDialog(
-        onSaved: (p) {
-          _service.addProfile(p);
-          setState(() => _profiles.add(_ProfileEntry(p)));
+        onSaved: (p) async {
+          await _service.addProfile(p);
+          if (mounted) setState(() => _profiles.add(_ProfileEntry(p)));
         },
       ),
     );
   }
 
-  void _removeProfile(String id) {
-    _service.removeProfile(id);
-    setState(() => _profiles.removeWhere((e) => e.profile.id == id));
-    if (_currentProfileId == id) {
+  Future<void> _removeProfile(String id) async {
+    await _service.removeProfile(id);
+    if (mounted) {
       setState(() {
-        _currentProfileId = null;
-        _remoteEntries = [];
+        _profiles.removeWhere((e) => e.profile.id == id);
+        if (_currentProfileId == id) {
+          _currentProfileId = null;
+          _remoteEntries = [];
+        }
       });
     }
   }

@@ -51,6 +51,8 @@ dependencies:
   webdav_client: ^1.2.2
   dio: ^5.1.0
   dartssh2: ^3.3.0
+  shared_preferences: ^2.2.0
+  flutter_secure_storage: ^11.0.0
 
 dev_dependencies:
   flutter_test:
