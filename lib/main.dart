@@ -10,6 +10,7 @@ import 'screens/bluetooth_screen.dart';
 import 'screens/lan_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
+import 'screens/network_screen.dart';
 
 void main() {
   runApp(const SwordFM());
@@ -242,6 +243,7 @@ class _MainScreenState extends State<MainScreen> {
           const LANSharingScreen(),
           const SettingsScreen(),
           const StorageAnalysisScreen(),
+          const NetworkScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -258,6 +260,7 @@ class _MainScreenState extends State<MainScreen> {
           NavigationDestination(icon: Icon(Icons.wifi), label: 'LAN'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Storage'),
+          NavigationDestination(icon: Icon(Icons.cloud), label: 'Network'),
         ],
       ),
     );
