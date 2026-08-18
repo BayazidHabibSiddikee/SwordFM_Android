@@ -30,9 +30,14 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 - [ ] Implement background search (recursive and local) using Dart isolates.
 
 ### Phase 3: LAN Web Sharing (Re-implementing swordshare)
-- [ ] Build pure Dart local server.
-- [ ] Create web UI for download and file upload.
-- [ ] Add PIN verification and app-side client authorization dialog ("Allow connection from IP?").
+- [x] Build pure Dart local server.
+- [x] Create web UI for download and file upload.
+- [x] Add PIN-gated session auth (cookie-based, constant-time comparison).
+- [x] Path-traversal-safe uploads/downloads (`sanitizeName` + realpath check).
+- [x] Streaming I/O: uploads write chunk-by-chunk to disk; downloads pipe `file.openRead()` to response.
+- [x] Configurable share root + subdirectory browsing via `?subdir=` query param.
+- [x] Client IP access log + PIN rotation button in LAN screen.
+- [x] Dart unit tests (22 total): sanitizeName, constantTimeCompare, extractCookie, randomHex, rotatePin.
 
 ### Phase 4: Bluetooth File Sharing
 - [ ] Implement Bluetooth scanning and service advertisement (RFCOMM).

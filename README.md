@@ -18,7 +18,7 @@ A cross-platform file manager built with Flutter, recreating the C++/Qt6 **Sword
 - **Breadcrumb Navigation** — Tap any path segment to jump directly
 
 ### Wireless Sharing
-- **LAN Web Sharing** — Pure Dart HTTP server with QR code generation, PIN authentication, file browsing/download/upload via web UI (no Python needed)
+- **LAN Web Sharing** — Pure Dart HTTP server with QR code generation, PIN-gated session auth (cookie-based), path-traversal-safe uploads/downloads, streaming I/O, configurable share root, and client IP access log
 - **Bluetooth File Sharing** — RFCOMM socket connection to paired devices; binary protocol: `[8-byte length][4-byte filename length][filename][raw bytes]`
 
 ### UI
@@ -92,21 +92,21 @@ The app declares the following permissions in `AndroidManifest.xml`:
 
 ## 🔄 Protocol (Bluetooth)
 
-File transfers use a custom RFCOMM binary protocol compatible with the Linux `swordblue` tool:
+File transfers use an RFCOMM frame format compatible with the Linux `swordblue` tool.
+Both Android (`MainActivity.kt`) and Linux sides share this exact layout:
 
 ```
-[Header: 12 bytes]
-  Bytes 0-7:   File length as uint64 (little-endian)
-  Bytes 8-11:  Filename length as int32 (little-endian)
-
-[Filename: N bytes]
-  UTF-8 encoded filename string
-
-[Payload: L bytes]
-  Raw file bytes (where L = file length from header)
+[4-byte uint32 metadataLength]  (big-endian)
+[metadataLength bytes of JSON]  {"filename": "example.pdf", "size": 12345}
+[raw file bytes — exactly "size" bytes]
 ```
 
-Both sender and receiver stream progress updates at ≤10 Hz via the method channel.
+Sender writes: 4B length → JSON → raw bytes
+Receiver reads: 4B length → parse JSON → read "size" bytes
+Both sides use a 64 KB buffer; progress updates are sent at ≤10 Hz via the method channel.
+
+**Note:** The Android side uses the standard SerialPort UUID (`00001101-0000-1000-8000-00805F9B34FB`)
+for Bluetooth RFCOMM interop with `swordblue` on Linux.
 
 ---
 
@@ -116,9 +116,10 @@ Both sender and receiver stream progress updates at ≤10 Hz via the method chan
 |--------|-------|--------|
 | FileItem (properties) | 12 | ✅ |
 | FileUtils (CRUD ops) | 11 | ✅ |
-| WebShareServer | 3 | ✅ |
+| WebShareServer (unit) | 22 | ✅ |
+| DocConverter | 22 | ✅ |
 | App integration | 6 | ✅ |
-| **Total** | **32** | **100% pass** |
+| **Total** | **73** | **100% pass** |
 
 Run tests:
 ```bash
