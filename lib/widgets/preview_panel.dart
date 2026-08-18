@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:pdfx/pdfx.dart';
 import '../utils/file_utils.dart';
 import '../theme/theme.dart';
 
@@ -25,26 +27,39 @@ class _PreviewPanelState extends State<PreviewPanel> {
   String _content = '';
   bool _loading = false;
   String? _error;
+  PdfDocument? _pdfDocument;
+  int _pdfPageCount = 0;
+  int _currentPdfPage = 1;
+  Uint8List? _pdfPageBytes;
 
   @override
   void didUpdateWidget(covariant PreviewPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.item?.path != widget.item?.path || !oldWidget.isVisible && widget.isVisible) {
+    if (oldWidget.item?.path != widget.item?.path ||
+        !oldWidget.isVisible && widget.isVisible) {
       _loadContent();
     }
   }
 
   Future<void> _loadContent() async {
     if (widget.item == null) {
-      setState(() { _content = ''; _error = null; });
+      setState(() { _content = ''; _error = null; _pdfDocument = null; _pdfPageBytes = null; });
       return;
     }
-    setState(() { _loading = true; _content = ''; _error = null; });
+    setState(() { _loading = true; _content = ''; _error = null; _pdfDocument = null; _pdfPageBytes = null; });
 
     try {
       final path = widget.item!.path;
-      if (widget.item!.isImage) {
-        // Images rendered directly via Image.file in _buildPreview
+      if (widget.item!.isPdf) {
+        final doc = await PdfDocument.openFile(path);
+        if (mounted) {
+          setState(() {
+            _pdfDocument = doc;
+            _pdfPageCount = doc.pagesCount;
+            _currentPdfPage = 1;
+          });
+          await _renderPdfPage(doc, 1);
+        }
       } else if (widget.item!.isMarkdown) {
         final file = File(path);
         if (await file.exists()) {
@@ -63,6 +78,25 @@ class _PreviewPanelState extends State<PreviewPanel> {
     } finally {
       if (mounted) setState(() { _loading = false; });
     }
+  }
+
+  Future<void> _renderPdfPage(PdfDocument doc, int page) async {
+    try {
+      final pdfPage = await doc.getPage(page);
+      final image = await pdfPage.render(width: 400, height: 560);
+      if (mounted) {
+        setState(() {
+          _pdfPageBytes = image?.bytes;
+        });
+      }
+      await pdfPage.close();
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _pdfDocument?.close();
+    super.dispose();
   }
 
   @override
@@ -123,6 +157,9 @@ class _PreviewPanelState extends State<PreviewPanel> {
 
   Widget _buildPreview() {
     final item = widget.item!;
+    if (item.isPdf && _pdfDocument != null) {
+      return _buildPdfPreview();
+    }
     if (item.isImage) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(4),
@@ -152,8 +189,58 @@ class _PreviewPanelState extends State<PreviewPanel> {
     if (item.isDirectory) {
       return _buildMetadataCard();
     }
-    // Fallback for unsupported types
     return _buildMetadataCard();
+  }
+
+  Widget _buildPdfPreview() {
+    return Column(
+      children: [
+        // Page navigation
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left, size: 20),
+                onPressed: _currentPdfPage > 1
+                    ? () async {
+                        final doc = _pdfDocument!;
+                        await doc.close();
+                        final newDoc = await PdfDocument.openFile(widget.item!.path);
+                        setState(() { _pdfDocument = newDoc; _currentPdfPage--; });
+                        await _renderPdfPage(newDoc, _currentPdfPage);
+                      }
+                    : null,
+              ),
+              Text('Page $_currentPdfPage / $_pdfPageCount',
+                  style: const TextStyle(color: OneDarkColors.fg, fontSize: 12)),
+              IconButton(
+                icon: const Icon(Icons.chevron_right, size: 20),
+                onPressed: _currentPdfPage < _pdfPageCount
+                    ? () async {
+                        setState(() => _currentPdfPage++);
+                        await _renderPdfPage(_pdfDocument!, _currentPdfPage);
+                      }
+                    : null,
+              ),
+            ],
+          ),
+        ),
+        // Page image
+        _pdfPageBytes != null
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: Image.memory(
+                  _pdfPageBytes!,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) =>
+                      const Icon(Icons.picture_as_pdf, size: 48, color: OneDarkColors.fgDim),
+                ),
+              )
+            : const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      ],
+    );
   }
 
   Widget _buildMetadataCard() {
@@ -163,7 +250,8 @@ class _PreviewPanelState extends State<PreviewPanel> {
       children: [
         _metaRow('Size', item.formattedSize),
         _metaRow('Modified', item.formattedDate),
-        _metaRow('Type', item.extension.isEmpty ? 'Folder' : item.extension.toUpperCase().replaceAll('.', '')),
+        _metaRow('Type',
+            item.extension.isEmpty ? 'Folder' : item.extension.toUpperCase().replaceAll('.', '')),
         _metaRow('Path', item.path),
       ],
     );
@@ -175,10 +263,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 70,
-            child: Text(label, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
-          ),
+          const SizedBox(width: 70),
           Expanded(
             child: Text(value, style: const TextStyle(color: OneDarkColors.fg, fontSize: 12)),
           ),
