@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:intl/intl.dart';
+import 'constants.dart' show AppPaths;
 export 'constants.dart';
 
 /// Represents a single file or directory entry.
@@ -240,5 +241,40 @@ class FileUtils {
   static void clearClipboard() {
     _clipboardPath = null;
     _clipboardOp = 'none';
+  }
+
+  // --- Trash ---
+
+  /// Moves [path] into the app-local trash directory.
+  /// Returns the trash path of the moved item.
+  static Future<String> moveToTrash(String path) async {
+    final trashDir = await AppPaths.trashDir;
+    await Directory(trashDir).create(recursive: true);
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final trashName = '${timestamp}_${p.basename(path)}';
+    final trashPath = p.join(trashDir, trashName);
+    await move(path, trashPath);
+    return trashPath;
+  }
+
+  /// Returns all items currently in the trash.
+  static Future<List<FileItem>> listTrash() async {
+    final trashDir = await AppPaths.trashDir;
+    return listDirectory(trashDir, includeHidden: false);
+  }
+
+  /// Restores a trashed item to [originalPath].
+  static Future<void> restoreFromTrash(String trashPath, String originalPath) async {
+    await move(trashPath, originalPath);
+  }
+
+  /// Permanently deletes everything in the trash.
+  static Future<void> emptyTrash() async {
+    final trashDir = await AppPaths.trashDir;
+    final dir = Directory(trashDir);
+    if (await dir.exists()) {
+      await dir.delete(recursive: true);
+      await dir.create(recursive: true);
+    }
   }
 }

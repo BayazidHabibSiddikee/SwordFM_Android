@@ -127,23 +127,31 @@ class _FileBrowserState extends State<FileBrowser> {
 
   Future<void> _deleteSelected() async {
     if (_selectedPaths.isEmpty) return;
-    final confirmed = await showDialog<bool>(
+    final choice = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
         title: Text('Delete ${_selectedPaths.length} items?', style: const TextStyle(color: OneDarkColors.fg)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete', style: TextStyle(color: OneDarkColors.red))),
+          TextButton(onPressed: () => Navigator.pop(context, 'cancel'), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, 'trash'), child: const Text('Move to Trash')),
+          TextButton(onPressed: () => Navigator.pop(context, 'delete'), child: const Text('Delete', style: TextStyle(color: OneDarkColors.red))),
         ],
       ),
     );
-    if (confirmed == true && mounted) {
+    if (choice == 'trash' && mounted) {
+      for (final path in _selectedPaths.toList()) {
+        try { await FileUtils.moveToTrash(path); } catch (_) {}
+      }
+      _selectedPaths.clear();
+      if (mounted) _loadDirectory();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Moved to trash'), backgroundColor: OneDarkColors.amber));
+    } else if (choice == 'delete' && mounted) {
       for (final path in _selectedPaths.toList()) {
         try { await FileUtils.delete(path); } catch (_) {}
       }
       _selectedPaths.clear();
-      _loadDirectory();
+      if (mounted) _loadDirectory();
     }
   }
 
@@ -288,18 +296,26 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   Future<void> _confirmDelete(FileItem item) async {
-    final confirmed = await showDialog<bool>(
+    final choice = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
         title: Text('Delete "${item.name}"?', style: const TextStyle(color: OneDarkColors.fg)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete', style: TextStyle(color: OneDarkColors.red))),
+          TextButton(onPressed: () => Navigator.pop(context, 'cancel'), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, 'trash'), child: const Text('Move to Trash')),
+          TextButton(onPressed: () => Navigator.pop(context, 'delete'), child: const Text('Delete', style: TextStyle(color: OneDarkColors.red))),
         ],
       ),
     );
-    if (confirmed == true) { await FileUtils.delete(item.path); _loadDirectory(); }
+    if (choice == 'trash' && mounted) {
+      try { await FileUtils.moveToTrash(item.path); } catch (_) {}
+      if (mounted) { _loadDirectory(); _exitSelectMode(); }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Moved to trash'), backgroundColor: OneDarkColors.amber));
+    } else if (choice == 'delete' && mounted) {
+      await FileUtils.delete(item.path);
+      if (mounted) { _loadDirectory(); _exitSelectMode(); }
+    }
   }
 
   Widget _buildToolbar() {
@@ -436,7 +452,7 @@ class _FileBrowserState extends State<FileBrowser> {
     return ListView.separated(
       padding: const EdgeInsets.only(top: 4),
       itemCount: _items.length + 1,
-      separatorBuilder: (_, _) => const Divider(height: 1),
+      separatorBuilder: (_, index) => const Divider(height: 1),
       itemBuilder: (context, index) {
         if (index == 0) return _buildColumnHeaders();
         final item = _items[index - 1];

@@ -4,6 +4,7 @@ import 'utils/file_utils.dart';
 import 'widgets/file_browser.dart';
 import 'widgets/preview_panel.dart';
 import 'screens/folder_graph_screen.dart';
+import 'screens/search_screen.dart';
 
 void main() {
   runApp(const SwordFM());
@@ -83,6 +84,13 @@ class _MainScreenState extends State<MainScreen> {
                           _sidebarTile(Icons.image, 'Pictures', AppPaths.pictures),
                           _sidebarTile(Icons.music_note, 'Music', AppPaths.music),
                           _sidebarTile(Icons.movie, 'Videos', AppPaths.videos),
+                        ListTile(
+                          leading: Icon(Icons.delete_outline, size: 18, color: OneDarkColors.fgDim),
+                          title: const Text('Trash', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13)),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const TrashScreen()),
+                          ),
+                        ),
                           const Divider(),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -142,7 +150,17 @@ class _MainScreenState extends State<MainScreen> {
                       const SizedBox(width: 4),
                       IconButton(
                         icon: const Icon(Icons.search, color: OneDarkColors.fgDim),
-                        onPressed: () {},
+                        onPressed: () async {
+                          final result = await Navigator.push<String>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => SearchScreen(startPath: _currentPath),
+                            ),
+                          );
+                          if (result != null && mounted) {
+                            setState(() => _currentPath = result);
+                          }
+                        },
                         tooltip: 'Search',
                       ),
                       IconButton(
