@@ -42,7 +42,7 @@ class FileItem {
   /// Recursively computes total size of a directory (bytes).
   static Future<int> getTotalSize(FileItem item) async {
     if (!item.isDirectory) return item.size;
-    final items = await listDirectory(item.path, includeHidden: false);
+    final items = await FileUtils.listDirectory(item.path, includeHidden: false);
     int total = item.size;
     for (final child in items) {
       total += await getTotalSize(child);
