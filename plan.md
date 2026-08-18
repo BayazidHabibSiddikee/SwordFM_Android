@@ -25,7 +25,17 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 - [x] Duplicate file finder (SHA-256 based)
 - [x] Storage analysis screen (folder size breakdown by depth)
 
-### Phase 2: Native File System Integration
+### Phase 2: Network & Cloud
+- [x] WebDAV client (webdav_client + dio) — list/upload/download
+- [x] NetworkProfile model with JSON serialization
+- [x] NetworkScreen UI — profile management + remote file browser
+- [x] Connection log (ring buffer, broadcast stream)
+- [ ] SFTP via dartssh2 (stubbed, not yet integrated)
+- [ ] Connection profiles persistence (SharedPreferences)
+- [ ] Background transfer engine (queue, chunked, pause/resume)
+- [ ] Cloud SDK adapters (Drive/Dropbox/OneDrive)
+
+### Phase 2b: Native File System Integration (renamed from original Phase 2)
 - [ ] List directory contents, display metadata, filter by extension or date.
 - [ ] Implement CRUD operations: Copy, Cut, Paste, Rename, Delete (send to trash).
 - [ ] Implement background search (recursive and local) using Dart isolates.
