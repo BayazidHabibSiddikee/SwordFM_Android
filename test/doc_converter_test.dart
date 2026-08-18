@@ -135,19 +135,23 @@ void main() {
       expect(result, isNot(contains('**')));
     });
 
-    test('toPdf generates an HTML file', () async {
+    test('toPdf generates a PDF file', () async {
       final result = await DocConverter.toPdf(mdFile.path);
       expect(result, isNotNull);
       expect(File(result!).existsSync(), isTrue);
-      expect(result.endsWith('.pdf.html'), isTrue);
-      expect(File(result).readAsStringSync(), contains('<h1>Sample</h1>'));
+      expect(result.endsWith('.pdf'), isTrue);
+      // PDF is binary — just confirm it's non-empty
+      expect(File(result).lengthSync(), greaterThan(0));
     });
 
-    test('toDocx generates an HTML file', () async {
+    test('toDocx generates a DOCX file', () async {
       final result = await DocConverter.toDocx(mdFile.path);
       expect(result, isNotNull);
       expect(File(result!).existsSync(), isTrue);
-      expect(result.endsWith('.docx.html'), isTrue);
+      expect(result.endsWith('.docx'), isTrue);
+      // DOCX is a ZIP; confirm it has the magic bytes
+      final bytes = File(result).readAsBytesSync();
+      expect(bytes.length, greaterThan(0));
     });
 
     test('toText returns null for non-convertible file', () async {

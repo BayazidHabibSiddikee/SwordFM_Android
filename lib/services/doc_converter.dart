@@ -1,34 +1,50 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 /// Document conversion utilities for SwordFM Android.
 ///
-/// Provides robust Markdown -> HTML and Markdown -> Plain Text conversion
-/// entirely in Dart. PDF/DOCX export requires native helpers; [toPdf] and
-/// [toDocx] return the generated HTML path as a placeholder that can be
-/// re-served or opened with a reader.
+/// Provides Markdown -> HTML, Markdown -> plain text, Markdown -> PDF, and
+/// Markdown -> DOCX conversion entirely in Dart (no native helpers required).
+/// PDF export uses the `pdf` package; DOCX export is built as a real OOXML
+/// (ZIP) document via the `archive` package.
 class DocConverter {
-  /// Converts a file to PDF format.
+  /// Converts a Markdown/text file to a real PDF, writing `<base>.pdf` next to
+  /// the source. Returns the output path, or null if the source is not
+  /// convertible or missing.
   ///
-  /// For now returns the generated HTML file path (openable in any browser).
-  /// Returns null if the source is not convertible.
+  /// Supported Markdown constructs: headings (h1-h6), paragraphs, fenced and
+  /// inline code, unordered lists, ordered lists, blockquotes, and horizontal
+  /// rules.
   static Future<String?> toPdf(String sourcePath) async {
     if (!canConvert(sourcePath)) return null;
-    final html = await markdownFileToHtml(sourcePath);
-    if (html == null) return null;
-    return _writeHtmlToFile(html, sourcePath, 'pdf');
+    final file = File(sourcePath);
+    if (!await file.exists()) return null;
+    final content = await file.readAsString();
+    final bytes = await _buildPdfBytes(content);
+    final outPath = p.setExtension(sourcePath, '.pdf');
+    await File(outPath).writeAsBytes(bytes);
+    return outPath;
   }
 
-  /// Converts a file to DOCX format.
-  ///
-  /// For now returns the generated HTML file path. Returns null if the
-  /// source is not convertible.
+  /// Converts a Markdown/text file to a real DOCX (OOXML ZIP), writing
+  /// `<base>.docx` next to the source. Returns the output path, or null if the
+  /// source is not convertible or missing.
   static Future<String?> toDocx(String sourcePath) async {
     if (!canConvert(sourcePath)) return null;
-    final html = await markdownFileToHtml(sourcePath);
-    if (html == null) return null;
-    return _writeHtmlToFile(html, sourcePath, 'docx');
+    final file = File(sourcePath);
+    if (!await file.exists()) return null;
+    final content = await file.readAsString();
+    final bytes = await _buildDocxBytes(content);
+    final outPath = p.setExtension(sourcePath, '.docx');
+    await File(outPath).writeAsBytes(bytes);
+    return outPath;
   }
+
 
   /// Converts a file to plain text (Markdown stripped).
   static Future<String?> toText(String sourcePath) async {
@@ -55,15 +71,6 @@ class DocConverter {
         'code{background:#f4f4f4;padding:2px 4px;border-radius:3px}'
         'blockquote{border-left:4px solid #61afef;margin:0;padding-left:12px;color:#555}'
         '</style>\n</head>\n<body>\n$body\n</body>\n</html>\n';
-  }
-
-  static Future<String> _writeHtmlToFile(
-      String html, String sourcePath, String format) async {
-    final dir = p.dirname(sourcePath);
-    final base = p.basenameWithoutExtension(sourcePath);
-    final outPath = p.join(dir, '$base.$format.html');
-    await File(outPath).writeAsString(html);
-    return outPath;
   }
 
   /// Converts Markdown content to a full HTML string.
@@ -257,9 +264,336 @@ class DocConverter {
     return ['.md', '.markdown', '.txt', '.html', '.csv', '.rst'].contains(ext);
   }
 
-  /// Lists available output formats for a given file.
+    /// Lists available output formats for a given file.
   static List<String> getAvailableFormats(String path) {
     if (!canConvert(path)) return [];
     return ['PDF', 'DOCX', 'HTML', 'TXT'];
   }
+
+  // ---------------------------------------------------------------------------
+  // Markdown -> PDF / DOCX
+  //
+  // [markdownToHtml] already classifies Markdown into HTML; the PDF and DOCX
+  // builders below reuse the *same* classification rules but emit structured
+  // blocks ([_MdNode]) so one input renders consistently in every format.
+  // ---------------------------------------------------------------------------
+
+  static List<_MdNode> _parseMarkdown(String markdown) {
+    final lines = markdown.split('\n');
+    final nodes = <_MdNode>[];
+    var i = 0;
+    var inCode = false;
+    final codeBuf = <String>[];
+    final paraBuf = <String>[];
+    String codeLang = '';
+
+    void flushPara() {
+      if (paraBuf.isEmpty) return;
+      final joined = paraBuf
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty)
+          .join(' ');
+      if (joined.isNotEmpty) {
+        nodes.add(_MdNode(kind: 'paragraph', text: joined));
+      }
+      paraBuf.clear();
+    }
+
+    void flushCode() {
+      if (codeBuf.isNotEmpty) {
+        nodes.add(_MdNode(kind: 'code', text: codeBuf.join('\n'), lang: codeLang));
+      }
+      codeBuf.clear();
+      codeLang = '';
+    }
+
+    while (i < lines.length) {
+      final line = lines[i];
+
+      if (inCode) {
+        if (line.trimLeft().startsWith('```')) {
+          inCode = false;
+          flushCode();
+        } else {
+          codeBuf.add(line);
+        }
+        i++;
+        continue;
+      }
+
+      // Opening fence of a fenced code block.
+      final open = RegExp(r'^\s*```(\S*)\s*$').firstMatch(line);
+      if (open != null) {
+        flushPara();
+        codeLang = open.group(1) ?? '';
+        inCode = true;
+        i++;
+        continue;
+      }
+
+      // Headings (h1-h6).
+      final h = RegExp(r'^(#{1,6})\s+(.+)$').firstMatch(line);
+      if (h != null) {
+        flushPara();
+        nodes.add(_MdNode(
+          kind: 'heading',
+          text: h.group(2)!,
+          level: h.group(1)!.length,
+        ));
+        i++;
+        continue;
+      }
+
+      // Horizontal rule.
+      if (RegExp(r'^\s*(-{3,}|\*{3,}|_{3,})\s*$').hasMatch(line)) {
+        flushPara();
+        flushCode();
+        nodes.add(const _MdNode(kind: 'hr'));
+        i++;
+        continue;
+      }
+
+      // Blockquote.
+      if (line.startsWith('> ')) {
+        flushPara();
+        final buf = <String>[];
+        while (i < lines.length && lines[i].startsWith('> ')) {
+          buf.add(lines[i].substring(2).trim());
+          i++;
+        }
+        nodes.add(_MdNode(kind: 'blockquote', text: buf.join(' ')));
+        continue;
+      }
+
+      // Unordered list.
+      if (RegExp(r'^\s*[-*+]\s+').hasMatch(line)) {
+        flushPara();
+        final buf = <String>[];
+        while (i < lines.length &&
+            RegExp(r'^\s*[-*+]\s+').hasMatch(lines[i])) {
+          buf.add(lines[i].replaceFirst(RegExp(r'^\s*[-*+]\s+'), '').trim());
+          i++;
+        }
+        nodes.add(_MdNode(kind: 'ul', items: buf));
+        continue;
+      }
+
+      // Ordered list.
+      if (RegExp(r'^\s*\d+\.\s+').hasMatch(line)) {
+        flushPara();
+        final buf = <String>[];
+        while (i < lines.length &&
+            RegExp(r'^\s*\d+\.\s+').hasMatch(lines[i])) {
+          buf.add(lines[i].replaceFirst(RegExp(r'^\s*\d+\.\s+'), '').trim());
+          i++;
+        }
+        nodes.add(_MdNode(kind: 'ol', items: buf));
+        continue;
+      }
+
+      // Blank line ends the current paragraph.
+      if (line.trim().isEmpty) {
+        flushPara();
+        i++;
+        continue;
+      }
+
+      // Otherwise it is a paragraph line.
+      paraBuf.add(line);
+      i++;
+    }
+        flushPara();
+    flushCode();
+    return nodes;
+  }
+
+  static int _pdfHeaderLevel(int level) => level.clamp(1, 5);
+
+  static pw.Widget _pdfCode(String text) {
+    return pw.Container(
+      decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+      padding: const pw.EdgeInsets.all(6),
+      margin: const pw.EdgeInsets.symmetric(vertical: 4),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(
+          font: pw.Font.courier(),
+          fontSize: 9,
+          color: PdfColors.grey900,
+        ),
+      ),
+    );
+  }
+
+  static pw.Widget _pdfBulletList(List<String> items) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: items.map((i) => pw.Text('• $i')).toList(),
+    );
+  }
+
+  static pw.Widget _pdfNumberedList(List<String> items) {
+    var n = 0;
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: items.map((i) => pw.Text('${++n}. $i')).toList(),
+    );
+  }
+
+  static pw.Widget _pdfBlockquote(String text) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(left: 12),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(
+          fontStyle: pw.FontStyle.italic,
+          color: PdfColors.grey800,
+        ),
+      ),
+    );
+  }
+
+  /// Builds a real PDF document (bytes) from Markdown content.
+  static Future<Uint8List> _buildPdfBytes(String markdown) async {
+    final nodes = _parseMarkdown(markdown);
+    final doc = pw.Document();
+    final widgets = <pw.Widget>[];
+    for (final n in nodes) {
+      switch (n.kind) {
+        case 'heading':
+          widgets.add(pw.Header(level: _pdfHeaderLevel(n.level), text: n.text));
+          break;
+        case 'paragraph':
+          widgets.add(pw.Text(n.text));
+          break;
+        case 'code':
+          widgets.add(_pdfCode(n.text));
+          break;
+        case 'ul':
+          widgets.add(_pdfBulletList(n.items));
+          break;
+        case 'ol':
+          widgets.add(_pdfNumberedList(n.items));
+          break;
+        case 'blockquote':
+          widgets.add(_pdfBlockquote(n.text));
+          break;
+        case 'hr':
+          widgets.add(pw.Divider());
+          break;
+      }
+    }
+    doc.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      build: (pw.Context context) => widgets,
+    ));
+    return doc.save();
+  }
+
+  static String _docxHeadingLevel(int level) => level.clamp(1, 9).toString();
+
+  static String _escapeXml(String s) => _escapeHtml(s);
+
+  static void _writeDocxNode(StringBuffer buffer, _MdNode n) {
+    final esc = _escapeXml;
+    switch (n.kind) {
+      case 'heading':
+        buffer.write(
+          '<w:p><w:pPr><w:pStyle w:val="Heading${_docxHeadingLevel(n.level)}"/></w:pPr>'
+          '<w:r><w:t>${esc(n.text)}</w:t></w:r></w:p>',
+        );
+        break;
+      case 'paragraph':
+        buffer.write('<w:p><w:r><w:t>${esc(n.text)}</w:t></w:r></w:p>');
+        break;
+      case 'code':
+        buffer.write(
+          '<w:p><w:pPr><w:pStyle w:val="HTMLPreformatted"/></w:pPr>'
+          '<w:r><w:t>${esc(n.text)}</w:t></w:r></w:p>',
+        );
+        break;
+      case 'ul':
+        for (final item in n.items) {
+          buffer.write('<w:p><w:r><w:t>\u2022 ${esc(item)}</w:t></w:r></w:p>');
+        }
+        break;
+      case 'ol':
+        var number = 0;
+        for (final item in n.items) {
+          number++;
+          buffer.write('<w:p><w:r><w:t>$number. ${esc(item)}</w:t></w:r></w:p>');
+        }
+        break;
+      case 'blockquote':
+        buffer.write(
+          '<w:p><w:r><w:rPr><w:i/></w:rPr><w:t>${esc(n.text)}</w:t></w:r></w:p>',
+        );
+        break;
+      case 'hr':
+        buffer.write('<w:p><w:r><w:t>\u2014\u2014\u2014</w:t></w:r></w:p>');
+        break;
+    }
+  }
+
+  /// Builds a real DOCX (OOXML) document as a ZIP byte buffer from Markdown.
+  static Future<Uint8List> _buildDocxBytes(String markdown) async {
+    final nodes = _parseMarkdown(markdown);
+    final buffer = StringBuffer();
+    buffer.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
+    buffer.write(
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">',
+    );
+    buffer.write('<w:body>');
+    for (final n in nodes) {
+      _writeDocxNode(buffer, n);
+    }
+    buffer.write('<w:sectPr/>');
+    buffer.write('</w:body></w:document>');
+
+    final archive = Archive();
+    archive.addFile(
+      ArchiveFile.bytes('[Content_Types].xml', utf8.encode(_kDocxContentTypes)),
+    );
+    archive.addFile(ArchiveFile.bytes('_rels/.rels', utf8.encode(_kDocxRels)));
+    archive.addFile(
+      ArchiveFile.bytes('word/_rels/document.xml.rels', utf8.encode(_kDocxDocRels)),
+    );
+    archive.addFile(
+      ArchiveFile.bytes('word/document.xml', utf8.encode(buffer.toString())),
+    );
+    final List<int> zip = ZipEncoder().encode(archive);
+    return Uint8List.fromList(zip);
+  }
 }
+
+/// A single classified Markdown block, shared by the PDF and DOCX builders.
+///
+/// [kind] is one of: `heading`, `paragraph`, `code`, `ul`, `ol`, `blockquote`,
+/// or `hr`.
+class _MdNode {
+  final String kind;
+  final String text;
+  final int level; // heading level (1..6)
+  final List<String> items; // list items (ul/ol)
+  final String lang; // code-fence language
+  const _MdNode({
+    required this.kind,
+    this.text = '',
+    this.level = 0,
+    this.items = const [],
+    this.lang = '',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Minimal OOXML (DOCX) package parts. A .docx is a ZIP containing these XML
+// files; together they form a valid, openable Word document.
+// ---------------------------------------------------------------------------
+const String _kDocxContentTypes = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>''';
+
+const String _kDocxRels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>''';
+
+const String _kDocxDocRels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>''';
