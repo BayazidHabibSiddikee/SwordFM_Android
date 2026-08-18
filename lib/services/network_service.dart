@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
@@ -293,22 +295,72 @@ class NetworkService {
     await File(filePath).writeAsBytes(bytes.data as List<int>);
   }
 
-  // ─── SFTP helpers (placeholder — dartssh2 integration) ─────────────────────
+  // ─── SFTP helpers (dartssh2) ────────────────────────────────────────────────
 
   static Future<List<RemoteEntry>> _listSftp(
       NetworkProfile profile, String path) async {
-    // TODO: integrate dartssh2 SFTP client
-    throw UnimplementedError('SFTP not yet implemented');
+    final socket = await SSHSocket.connect(profile.host, profile.port);
+    final client = SSHClient(
+      socket,
+      username: profile.username,
+      onPasswordRequest: () => profile.password,
+    );
+    await client.authenticated;
+    final sftp = await client.sftp();
+    try {
+      final items = await sftp.listdir(path);
+      return items.map((item) => RemoteEntry(
+        name: item.filename,
+        isDir: item.attr.isDirectory,
+      )).toList();
+    } finally {
+      await sftp.close();
+      await client.close();
+    }
   }
 
   static Future<void> _uploadSftp(
       NetworkProfile profile, String localPath, String remotePath) async {
-    throw UnimplementedError('SFTP not yet implemented');
+    final socket = await SSHSocket.connect(profile.host, profile.port);
+    final client = SSHClient(
+      socket,
+      username: profile.username,
+      onPasswordRequest: () => profile.password,
+    );
+    await client.authenticated;
+    final sftp = await client.sftp();
+    try {
+      final file = await sftp.open(
+        '$remotePath/${p.basename(localPath)}',
+        mode: SftpFileOpenMode.create | SftpFileOpenMode.write,
+      );
+      await file.write(File(localPath).openRead().cast<Uint8List>());
+      await file.close();
+    } finally {
+      await sftp.close();
+      await client.close();
+    }
   }
 
   static Future<void> _downloadSftp(
       NetworkProfile profile, String remotePath, String localDir) async {
-    throw UnimplementedError('SFTP not yet implemented');
+    final socket = await SSHSocket.connect(profile.host, profile.port);
+    final client = SSHClient(
+      socket,
+      username: profile.username,
+      onPasswordRequest: () => profile.password,
+    );
+    await client.authenticated;
+    final sftp = await client.sftp();
+    try {
+      final localFile = File('$localDir/${p.basename(remotePath)}');
+      await localFile.parent.create(recursive: true);
+      final sink = localFile.openWrite();
+      await sftp.download(remotePath, sink, closeDestination: true);
+    } finally {
+      await sftp.close();
+      await client.close();
+    }
   }
 
   // ─── Utilities ─────────────────────────────────────────────────────────────
