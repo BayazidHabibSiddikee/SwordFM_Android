@@ -43,5 +43,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- Foreground service for Bluetooth file receiving -->
+        <service
+            android:name=".BluetoothShareService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|shortService" />
     </application>
 </manifest>
