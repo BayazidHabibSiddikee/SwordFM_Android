@@ -6,6 +6,10 @@ import 'widgets/preview_panel.dart';
 import 'screens/folder_graph_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/trash_screen.dart';
+import 'screens/bluetooth_screen.dart';
+import 'screens/lan_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/storage_analysis_screen.dart';
 
 void main() {
   runApp(const SwordFM());
@@ -49,10 +53,14 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Row(
+      body: IndexedStack(
+        index: _selectedIndex,
         children: [
-          // ── Sidebar ──────────────────────────────────────────────
-          if (_sidebarVisible)
+          // Tab 0: Files
+          Row(
+            children: [
+              // ── Sidebar ──────────────────────────────────────────────
+              if (_sidebarVisible)
             SizedBox(
               width: 200,
               child: Card(
@@ -220,18 +228,28 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
 
-          // ── Preview panel (collapsible) ──────────────────────────
-          if (_previewVisible)
-            PreviewPanel(
-              item: _selectedItem,
-              width: 280,
-              isVisible: _previewVisible,
-            ),
+              // ── Preview panel (collapsible) ──────────────────────────
+              if (_previewVisible)
+                PreviewPanel(
+                  item: _selectedItem,
+                  width: 280,
+                  isVisible: _previewVisible,
+                ),
+            ],
+          ),
+          // Tab 1-4: Full-screen screens
+          const BluetoothScreen(),
+          const LANSharingScreen(),
+          const SettingsScreen(),
+          const StorageAnalysisScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) => setState(() => _selectedIndex = index),
+        onDestinationSelected: (index) => setState(() {
+            _selectedIndex = index;
+            if (index == 0) _previewVisible = true;
+          }),
         backgroundColor: OneDarkColors.bgDark,
         indicatorColor: OneDarkColors.select,
         destinations: const [
@@ -239,6 +257,7 @@ class _MainScreenState extends State<MainScreen> {
           NavigationDestination(icon: Icon(Icons.bluetooth), label: 'Bluetooth'),
           NavigationDestination(icon: Icon(Icons.wifi), label: 'LAN'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
+          NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Storage'),
         ],
       ),
     );
