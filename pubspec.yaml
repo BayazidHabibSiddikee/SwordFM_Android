@@ -39,7 +39,7 @@ dependencies:
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.0.0
   path_provider: ^2.1.6
-  intl: ^0.20.3
+  intl: ^0.20.2
   permission_handler: ^13.0.1
   open_file: ^4.0.0
   mime: ^2.0.0
@@ -58,12 +58,16 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  easy_localization: ^3.0.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
 flutter:
+  generate: true
+  assets:
+    - lib/l10n/arb/
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

@@ -19,7 +19,7 @@ A cross-platform file manager built with Flutter, recreating the C++/Qt6 **Sword
 
 ### Wireless Sharing
 - **LAN Web Sharing** — Pure Dart HTTP server with QR code generation, PIN-gated session auth (cookie-based), path-traversal-safe uploads/downloads, streaming I/O, configurable share root, and client IP access log
-- **Bluetooth File Sharing** — RFCOMM socket connection to paired devices; binary protocol: `[8-byte length][4-byte filename length][filename][raw bytes]`
+- **Bluetooth File Sharing** — RFCOMM socket connection to paired devices; frame protocol: [4B len][JSON {filename,size}][raw bytes] (see Protocol section below)
 
 ### UI
 - **One Dark Theme** — Exact color match with the Linux version (cyan `#61AFEF`, green `#98C379`, amber `#E5C07B`, red `#E06C75`, purple `#C678DD`)
