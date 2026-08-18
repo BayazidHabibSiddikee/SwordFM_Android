@@ -1,45 +1,51 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
-
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins-dependencies
+# Flutter/Dart
+flutter/
+.packages
 .pub-cache/
-.pub/
+.build/
+/.dart_tool/
 /build/
-/coverage/
+*.iml
+.idea/
+*.sublime-project
+*.sublime-workspace
 
-# Symbolication related
-app.*.symbols
+# Android
+android/local.properties
+android/gradle/wrapper/gradle-wrapper.jar
+android/.gradle/
+android/build/
 
-# Obfuscation related
-app.*.map.json
+# iOS
+ios/.Flutter
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Podfile.lock
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# Mac
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Kotlin
+android/app/src/main/kotlin/com/swordfm/swordfm/BuildConfig.kt
+
+# Keystore files - NEVER COMMIT THESE
+*.keystore
+*.jks
+*.p12
+key.properties
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local

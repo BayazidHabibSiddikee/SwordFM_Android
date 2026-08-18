@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/theme.dart';
+import 'privacy_policy_screen.dart';
 import 'duplicates_screen.dart';
 
 /// Settings screen for configuring the app.
@@ -97,6 +98,15 @@ class SettingsScreen extends StatelessWidget {
             icon: Icons.info_outline,
             title: 'Version',
             subtitle: '1.0.0',
+          ),
+          _settingTile(
+            icon: Icons.privacy_tip,
+            title: 'Privacy Policy',
+            subtitle: 'How we handle your data',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()),
+            ),
           ),
           _settingTile(
             icon: Icons.code,

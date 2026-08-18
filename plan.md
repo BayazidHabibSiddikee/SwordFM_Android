@@ -71,7 +71,7 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 - [x] i18n scaffolding (easy_localization with en.arb base).
 - [x] Material You dynamic color support (dynamic_color package with fallback to One Dark)
 
-- [ ] Play Store readiness (SAF dual-mode, signing, privacy policy).
+- [x] Play Store readiness: SAF dual-mode (saf package), release signing config template (key.properties + build.gradle), privacy policy screen, .gitignore keystore exclusion
 
 ---
 

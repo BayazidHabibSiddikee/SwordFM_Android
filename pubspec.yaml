@@ -58,6 +58,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  saf: ^2.1.0
   easy_localization: ^3.0.0
   dynamic_color: ^1.7.0
 
