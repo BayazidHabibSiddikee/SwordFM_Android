@@ -30,7 +30,7 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 - [x] NetworkProfile model with JSON serialization
 - [x] NetworkScreen UI — profile management + remote file browser
 - [x] Connection log (ring buffer, broadcast stream)
-- [ ] SFTP via dartssh2 (stubbed, not yet integrated)
+- [x] SFTP via dartssh2 — SSHClient + SFTP list/upload/download
 - [ ] Connection profiles persistence (SharedPreferences)
 - [ ] Background transfer engine (queue, chunked, pause/resume)
 - [ ] Cloud SDK adapters (Drive/Dropbox/OneDrive)
