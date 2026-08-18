@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'theme/theme.dart';
+import 'package:dynamic_color/dynamic_color.dart';
 import 'utils/file_utils.dart';
 import 'widgets/file_browser.dart';
 import 'widgets/preview_panel.dart';
@@ -21,11 +22,23 @@ class SwordFM extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'SwordFM',
-      debugShowCheckedModeBanner: false,
-      theme: buildOneDarkTheme(),
-      home: const MainScreen(),
+    return DynamicColorBuilder(
+      builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
+        final baseTheme = buildOneDarkTheme();
+        final theme = darkDynamic != null
+            ? baseTheme.copyWith(colorScheme: baseTheme.colorScheme.copyWith(
+                  primary: darkDynamic.primary,
+                  secondary: darkDynamic.secondary,
+                  error: darkDynamic.error,
+                ))
+            : baseTheme;
+        return MaterialApp(
+          title: 'SwordFM',
+          debugShowCheckedModeBanner: false,
+          theme: theme,
+          home: const MainScreen(),
+        );
+      },
     );
   }
 }

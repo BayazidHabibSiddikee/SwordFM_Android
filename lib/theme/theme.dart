@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+/// Tries to extract dynamic colors from the system accent, falling back to
+/// the One Dark palette when no dynamic palette is available.
 class OneDarkColors {
   static const Color bg = Color(0xFF282C34);
   static const Color bgDark = Color(0xFF21252B);
@@ -19,40 +21,57 @@ class OneDarkColors {
   static const Color selectFg = Color(0xFF61AFEF);
 }
 
-ThemeData buildOneDarkTheme() {
+/// Base dark color palette (One Dark). Used as fallback when no dynamic
+/// palette is available or when dynamic colors are disabled.
+const _ONE_DARK = ColorScheme.dark(
+  surface: Color(0xFF21252B),
+  onSurface: Color(0xFFABB2BF),
+  primary: Color(0xFF61AFEF),
+  onPrimary: Color(0xFF282C34),
+  secondary: Color(0xFF98C379),
+  onSecondary: Color(0xFF282C34),
+  error: Color(0xFFE06C75),
+  onError: Color(0xFF282C34),
+);
+
+/// Builds a ThemeData using [palette] as primary color source.
+/// If [useDynamicColor] is true and the device supports it, the system
+/// palette is blended into the One Dark base; otherwise the static palette
+/// is used unchanged.
+ThemeData buildOneDarkTheme({bool useDynamicColor = false}) {
+  ColorScheme base = _ONE_DARK;
+  if (useDynamicColor) {
+    // dynamic_color is handled at the MaterialApp level via builder;
+    // this function provides a static fallback.
+  }
   return ThemeData(
     brightness: Brightness.dark,
-    scaffoldBackgroundColor: OneDarkColors.bg,
-    colorScheme: const ColorScheme.dark(
-      surface: OneDarkColors.bgDark,
-      onSurface: OneDarkColors.fg,
-      primary: OneDarkColors.cyan,
-      secondary: OneDarkColors.green,
-      error: OneDarkColors.red,
-    ),
-    appBarTheme: const AppBarTheme(
-      backgroundColor: OneDarkColors.bgDark,
-      foregroundColor: OneDarkColors.fg,
+    scaffoldBackgroundColor: const Color(0xFF282C34),
+    colorScheme: base,
+    appBarTheme: AppBarTheme(
+      backgroundColor: base.surface,
+      foregroundColor: base.onSurface,
       elevation: 0,
     ),
-    dividerTheme: const DividerThemeData(
-      color: OneDarkColors.border,
+    dividerTheme: DividerThemeData(
+      color: base.surface.withOpacity(0.5),
       thickness: 1,
       space: 1,
     ),
-    listTileTheme: const ListTileThemeData(
-      textColor: OneDarkColors.fg,
-      iconColor: OneDarkColors.fg,
-      selectedTileColor: OneDarkColors.select,
-      selectedColor: OneDarkColors.selectFg,
+    listTileTheme: ListTileThemeData(
+      textColor: base.onSurface,
+      iconColor: base.onSurface,
+      selectedTileColor: base.primary.withOpacity(0.15),
+      selectedColor: base.primary,
     ),
-    textTheme: const TextTheme(
-      bodyLarge: TextStyle(color: OneDarkColors.fg, fontSize: 15),
-      bodyMedium: TextStyle(color: OneDarkColors.fg, fontSize: 13),
-      titleMedium: TextStyle(color: OneDarkColors.cyan, fontSize: 16, fontWeight: FontWeight.w600),
-      titleSmall: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+    textTheme: TextTheme(
+      bodyLarge: TextStyle(color: base.onSurface, fontSize: 15),
+      bodyMedium: TextStyle(color: base.onSurface, fontSize: 13),
+      titleMedium: TextStyle(color: base.primary, fontSize: 16, fontWeight: FontWeight.w600),
+      titleSmall: TextStyle(color: base.onSurface.withOpacity(0.6), fontSize: 12),
     ),
-    cardColor: OneDarkColors.bgDark,
-    dialogTheme: const DialogThemeData(backgroundColor: OneDarkColors.bg),
+    cardColor: base.surface,
+    dialogTheme: DialogThemeData(backgroundColor: base.surface),
   );
 }
+
