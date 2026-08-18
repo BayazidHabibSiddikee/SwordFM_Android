@@ -44,6 +44,10 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
         The RFCOMM frame format matches swordblue (see frame-format comments in
         `MainActivity.kt` and `bluetooth_share_service.dart`).
 
+### Phase 2 (Deferred — post v1): Document Conversion & Background Search
+- ~~Document conversion~~ → Deferred: PDF/DOCX/TXT/HTML exports require native helpers (pandoc/LibreOffice) or cloud API. v1 ships markdown-only preview. Revisit after Bluetooth + LAN sharing are production-stable.
+- Background search via Dart isolates — deferred until Phase 5 tooling is established.
+
 ### Phase 5: Folder Graph & Tools
 - [ ] Interactive folder graph visualizer built natively in Flutter.
 - [x] Document conversion integration (Markdown <-> HTML <-> Text, and optional PDF/Word handlers).
