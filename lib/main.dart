@@ -3,6 +3,7 @@ import 'theme/theme.dart';
 import 'utils/file_utils.dart';
 import 'widgets/file_browser.dart';
 import 'widgets/preview_panel.dart';
+import 'screens/folder_graph_screen.dart';
 
 void main() {
   runApp(const SwordFM());
@@ -143,6 +144,17 @@ class _MainScreenState extends State<MainScreen> {
                         icon: const Icon(Icons.search, color: OneDarkColors.fgDim),
                         onPressed: () {},
                         tooltip: 'Search',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.account_tree, color: OneDarkColors.fgDim),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => FolderGraphScreen(startPath: _currentPath),
+                            ),
+                          );
+                        },
+                        tooltip: 'Folder Graph',
                       ),
                       IconButton(
                         icon: Icon(_previewVisible ? Icons.unfold_less : Icons.unfold_more,

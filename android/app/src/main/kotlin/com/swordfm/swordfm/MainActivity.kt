@@ -1,5 +1,12 @@
 package com.swordfm.swordfm
 
+// ============================================================================
+// SHARED BLUETOOTH FRAME PROTOCOL (see lib/services/bluetooth_share_service.dart)
+// Frame: [8-byte file-length LE uint64][4-byte filename-length LE int32]
+//        [N-byte UTF-8 filename][raw file bytes of length `file-length`]
+// Reference impl: /home/sword/SwordFM/tools/swordblue
+// ============================================================================
+
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothServerSocket

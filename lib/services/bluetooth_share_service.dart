@@ -1,3 +1,17 @@
+/// Bluetooth file transfer shared protocol frame format:
+///
+/// [Header: 12 bytes]
+///   Bytes 0-7:   File length as uint64 (little-endian)
+///   Bytes 8-11:  Filename length as int32 (little-endian)
+/// [Filename: N bytes] UTF-8 encoded
+/// [Payload: L bytes] Raw file content (L = file length from header)
+///
+/// This frame format is implemented identically in:
+///   - lib/services/bluetooth_share_service.dart (Dart/Flutter side)
+///   - android/app/src/main/kotlin/com/swordfm/swordfm/MainActivity.kt (Kotlin native side)
+///   - /home/sword/SwordFM/tools/swordblue (Python reference implementation)
+///
+/// Keep these three implementations in sync — any change here must be mirrored there.
 import 'dart:async';
 import 'package:flutter/services.dart';
 

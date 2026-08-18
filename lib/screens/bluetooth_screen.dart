@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/bluetooth_share_service.dart';
+import '../services/bt_permissions.dart';
 import '../theme/theme.dart';
 
 /// Full Bluetooth sharing screen with device list, connection state, and file transfer progress.
@@ -14,25 +15,46 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
   final _service = BluetoothShareService();
   final List<BluetoothDeviceItem> _devices = [];
   String? _statusMessage;
+  bool _permissionsReady = false;
+  bool _checkingPermissions = true;
 
   @override
   void initState() {
     super.initState();
-    _checkBluetooth();
+    _checkPermissions();
     _listenStreams();
   }
 
-  Future<void> _checkBluetooth() async {
+  /// Requests runtime BT permissions BEFORE any socket operations.
+  Future<void> _checkPermissions() async {
     final supported = await _service.isSupported();
     if (!supported) {
-      setState(() => _statusMessage = 'Bluetooth not supported on this device.');
+      setState(() {
+        _checkingPermissions = false;
+        _statusMessage = 'Bluetooth not supported on this device.';
+      });
       return;
     }
-    final enabled = await _service.isEnabled();
-    if (!enabled) {
-      await _service.requestEnable();
+    final granted = await BtPermissions.ensurePermissions();
+    if (granted) {
+      final enabled = await _service.isEnabled();
+      if (!enabled) {
+        await _service.requestEnable();
+      }
+      await _refreshDevices();
     }
-    await _refreshDevices();
+    setState(() {
+      _permissionsReady = granted;
+      _checkingPermissions = false;
+      if (!granted) {
+        _statusMessage = 'Bluetooth permissions required. Tap "Request Permissions" below.';
+      }
+    });
+  }
+
+  Future<void> _requestPermissionsAgain() async {
+    setState(() => _checkingPermissions = true);
+    await _checkPermissions();
   }
 
   void _listenStreams() {
@@ -91,9 +113,16 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                 Icon(_stateIcon(state), color: Colors.white, size: 24),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    _stateLabel(state),
-                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _stateLabel(state),
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                      if (_statusMessage != null && state != BluetoothState.disconnected)
+                        Text(_statusMessage!, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                    ],
                   ),
                 ),
                 if (state == BluetoothState.listening || state == BluetoothState.connected)
@@ -111,15 +140,19 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
           Wrap(
             spacing: 8,
             children: [
-              FilledButton.icon(
-                onPressed: state == BluetoothState.disconnected ? _startServer : null,
-                icon: const Icon(Icons.bluetooth_connected),
-                label: const Text('Start Listening'),
-              ),
-              if (_statusMessage != null)
-                Expanded(
-                  child: Text(_statusMessage!,
-                      style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
+              if (_checkingPermissions)
+                const CircularProgressIndicator()
+              else if (!_permissionsReady)
+                FilledButton.icon(
+                  onPressed: _requestPermissionsAgain,
+                  icon: const Icon(Icons.privacy_tip),
+                  label: const Text('Request Permissions'),
+                )
+              else
+                FilledButton.icon(
+                  onPressed: state == BluetoothState.disconnected ? _startServer : null,
+                  icon: const Icon(Icons.bluetooth_connected),
+                  label: const Text('Start Listening'),
                 ),
             ],
           ),
