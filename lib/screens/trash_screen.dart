@@ -39,9 +39,11 @@ class _TrashScreenState extends State<TrashScreen> {
     try {
       await FileUtils.restoreFromTrash(item.path, originalPath);
       if (mounted) _loadTrash();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Restored: ${item.name}'), backgroundColor: OneDarkColors.green),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Restored: ${item.name}'), backgroundColor: OneDarkColors.green),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
