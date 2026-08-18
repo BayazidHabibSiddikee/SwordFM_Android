@@ -85,7 +85,6 @@ void main() {
       expect(result, zipPath);
       expect(File(result).existsSync(), isTrue);
 
-      // Verify we can extract it back
       final outDir = '$tmpDir/unpacked';
       final extracted = await ArchiveService.extract(result, outDir);
       expect(extracted.length, 1);
@@ -106,6 +105,62 @@ void main() {
       final outDir = '$tmpDir/unpacked';
       final extracted = await ArchiveService.extract(result, outDir);
       expect(extracted.length, 2);
+    });
+  });
+
+  group('ArchiveService.sha256', () {
+    late String tmpDir;
+
+    setUp(() {
+      tmpDir = Directory.systemTemp.createTempSync('sha_test_').path;
+    });
+
+    tearDown(() {
+      Directory(tmpDir).deleteSync(recursive: true);
+    });
+
+    test('sha256OfFile returns hex digest for a file', () async {
+      final f = File('$tmpDir/hello.txt');
+      await f.writeAsString('hello world');
+      final hash = await ArchiveService.sha256OfFile(f.path);
+      expect(hash, isNotNull);
+      expect(hash!.length, 64);
+    });
+
+    test('sha256OfFile returns null for missing file', () async {
+      final hash = await ArchiveService.sha256OfFile('/nonexistent/path.txt');
+      expect(hash, isNull);
+    });
+  });
+
+  group('ArchiveService.findDuplicates', () {
+    late String tmpDir;
+
+    setUp(() {
+      tmpDir = Directory.systemTemp.createTempSync('dup_test_').path;
+    });
+
+    tearDown(() {
+      Directory(tmpDir).deleteSync(recursive: true);
+    });
+
+    test('finds duplicate files with same content', () async {
+      final f1 = File('$tmpDir/a.txt');
+      final f2 = File('$tmpDir/b.txt');
+      await f1.writeAsString('same content');
+      await f2.writeAsString('same content');
+      final dupes = await ArchiveService.findDuplicates([f1.path, f2.path]);
+      expect(dupes.length, 1);
+      expect(dupes.values.first.length, 2);
+    });
+
+    test('returns empty for unique files', () async {
+      final f1 = File('$tmpDir/a.txt');
+      final f2 = File('$tmpDir/b.txt');
+      await f1.writeAsString('content a');
+      await f2.writeAsString('content b');
+      final dupes = await ArchiveService.findDuplicates([f1.path, f2.path]);
+      expect(dupes, isEmpty);
     });
   });
 }

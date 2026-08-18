@@ -10,6 +10,7 @@ import 'screens/bluetooth_screen.dart';
 import 'screens/lan_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
+import 'screens/duplicates_screen.dart';
 
 void main() {
   runApp(const SwordFM());

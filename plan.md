@@ -40,9 +40,9 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 - [x] Dart unit tests (22 total): sanitizeName, constantTimeCompare, extractCookie, randomHex, rotatePin.
 
 ### Phase 4: Bluetooth File Sharing
-- [ ] Implement Bluetooth scanning and service advertisement (RFCOMM).
-- [ ] Create simple peer-to-peer file sender and receiver protocol.
-- [ ] Sync Bluetooth data transfer progress bar in UI.
+- [x] Implement Bluetooth scanning and service advertisement (RFCOMM).
+- [x] Create simple peer-to-peer file sender and receiver protocol.
+- [x] Sync Bluetooth data transfer progress bar in UI.
       - v1 approach: rely on OS-level pairing. Implement "connect to already-paired
         device" from a simple picker (see `BluetoothScreen`). Do NOT build a "make
         Android discoverable" toggle yet — that defers BLUETOOTH_ADVERTISE edge cases.
@@ -54,9 +54,9 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 - Background search via Dart isolates — deferred until Phase 5 tooling is established.
 
 ### Phase 5: Folder Graph & Tools
-- [ ] Interactive folder graph visualizer built natively in Flutter.
+- [x] Interactive folder graph visualizer built natively in Flutter.
 - [x] Document conversion integration (Markdown <-> HTML <-> Text, and optional PDF/Word handlers).
-      - Status: Basic Markdown → HTML/Text conversion implemented in `lib/services/doc_converter.dart`.
+      - Status: Real PDF/DOCX conversion possible entirely in Dart, no external binaries needed.
       - DEFERRED → **Phase 2**: native/offloaded PDF & DOCX export (`lib/services/convert_offload.dart`
         plus a receiving endpoint in swordconv/C++). Heavy native dependencies (pandoc / LibreOffice /
         cloud API) are not feasible for an on-device v1 Android build. Get Bluetooth fallback and
