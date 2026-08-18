@@ -125,7 +125,7 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
                           ? Center(child: Text('No subfolders found', style: TextStyle(color: OneDarkColors.fgDim)))
                           : ListView.separated(
                               itemCount: _entries.length,
-                              separatorBuilder: (_, __) => const Divider(height: 1),
+                              separatorBuilder: (_, _) => const Divider(height: 1),
                               itemBuilder: (context, index) {
                                 final entry = _entries[index];
                                 final pct = _totalBytes > 0 ? entry.size / _totalBytes : 0.0;

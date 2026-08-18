@@ -17,10 +17,10 @@ class DuplicatesScreen extends StatefulWidget {
   const DuplicatesScreen({super.key, this.scanPaths = const ['/home', '/home/user/Downloads']});
 
   @override
-  State<DuplicatesScreen> createState() => _DuplicatesScreen___State();
+  State<DuplicatesScreen> createState() => _DupsState();
 }
 
-class _DuplicatesScreen___State extends State<DuplicatesScreen> {
+class _DupsState extends State<DuplicatesScreen> {
   Map<String, List<String>> _duplicates = {};
   bool _loading = false;
   String? _error;
