@@ -48,7 +48,7 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 - [x] Send UI: native file picker, multi-file queue, progress bar + cancel.
 - [x] SerialPort UUID interop with swordblue Linux side.
 - [x] Connect timeout (30s) with auto-retry; collision suffix on receive.
-- [ ] Foreground service for background BT transfers (deferred — needs Android manifest `<service>` declaration).
+- - [x] Foreground service for background BT transfers (BluetoothShareService.kt + manifest registration)
 - [ ] Discoverability toggle (deferred — relies on OS pairing for v1).
 
 ### Phase 5: Network & Cloud
@@ -70,7 +70,7 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 - [x] GitHub Actions CI (analyze + test on push/PR).
 - [x] i18n scaffolding (easy_localization with en.arb base).
 - [ ] Material You dynamic color support.
-- [ ] Foreground service for BT transfers (see Phase 4).
+
 - [ ] Play Store readiness (SAF dual-mode, signing, privacy policy).
 
 ---
