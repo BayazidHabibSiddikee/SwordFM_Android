@@ -16,13 +16,14 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 ## 📅 Roadmap & Milestones
 
 ### Phase 1: Foundation & UI Layout (Linux / Windows / Android)
-- [ ] Initialize cross-platform Flutter project targeting `android`, `windows`, and `linux`.
-- [ ] Implement One Dark theme color scheme.
-- [ ] Build responsive dual-pane layout:
-    - Sidebar (bookmarks, shortcuts, drives).
-    - Main view (Grid & Details lists).
-    - Status bar & Toolbar.
-    - Collapsible Live Preview Panel (supports code syntax highlighting, image scaling, markdown rendering).
+- [x] Initialize cross-platform Flutter project targeting `android`, `windows`, and `linux`.
+- [x] Implement One Dark theme color scheme.
+- [x] Build responsive dual-pane layout (sidebar + main + preview panel).
+- [x] Bottom nav tabs: Files | Bluetooth | LAN | Settings | Storage
+- [x] Archive support: ZIP/TAR/GZIP extract + create via ArchiveService
+- [x] Batch rename dialog (prefix/suffix/regex modes)
+- [x] Duplicate file finder (SHA-256 based)
+- [x] Storage analysis screen (folder size breakdown by depth)
 
 ### Phase 2: Native File System Integration
 - [ ] List directory contents, display metadata, filter by extension or date.
