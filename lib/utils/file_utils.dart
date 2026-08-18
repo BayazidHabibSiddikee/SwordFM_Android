@@ -39,6 +39,17 @@ class FileItem {
   /// For directories, returns 0 — use [getTotalSize] for actual size.
   int get sizeBytes => size;
 
+  /// Recursively computes total size of a directory (bytes).
+  static Future<int> getTotalSize(FileItem item) async {
+    if (!item.isDirectory) return item.size;
+    final items = await listDirectory(item.path, includeHidden: false);
+    int total = item.size;
+    for (final child in items) {
+      total += await getTotalSize(child);
+    }
+    return total;
+  }
+
   String get formattedDate {
     return DateFormat('yyyy-MM-dd HH:mm').format(lastModified);
   }
