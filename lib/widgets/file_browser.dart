@@ -105,36 +105,22 @@ class _FileBrowserState extends State<FileBrowser> {
             )
           : null,
       items: [
-        _menuItem('Open', Icons.open_in_new, () {
-          Navigator.pop(context);
-          _openItem(item);
-        }),
-        _menuItem('Rename', Icons.edit, () {
-          Navigator.pop(context);
-          _showRenameDialog(item);
-        }),
+        _menuItem('Open', Icons.open_in_new, () => _openItem(item)),
+        _menuItem('Rename', Icons.edit, () => _showRenameDialog(item)),
         _menuItem('Copy', Icons.copy, () {
           FileUtils.setClipboard(item.path, 'copy');
-          Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Copied: ${item.name}'), backgroundColor: OneDarkColors.cyan),
           );
         }),
         _menuItem('Cut', Icons.content_paste, () {
           FileUtils.setClipboard(item.path, 'cut');
-          Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Cut: ${item.name}'), backgroundColor: OneDarkColors.amber),
           );
         }),
-        _menuItem('Delete', Icons.delete, () {
-          Navigator.pop(context);
-          _confirmDelete(item);
-        }),
-        _menuItem('Properties', Icons.info_outline, () {
-          Navigator.pop(context);
-          _showProperties(item);
-        }),
+        _menuItem('Delete', Icons.delete, () => _confirmDelete(item)),
+        _menuItem('Properties', Icons.info_outline, () => _showProperties(item)),
       ],
     );
   }
@@ -209,11 +195,27 @@ class _FileBrowserState extends State<FileBrowser> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _propRow('Type', item.isDirectory ? 'Folder' : item.extension.toUpperCase().replaceAll('.', '')),
+              _propRow('Name', item.name),
+              _propRow('Type', item.isDirectory ? 'Folder' : (item.extension.isNotEmpty ? item.extension.toUpperCase().replaceAll('.', '') : 'File')),
               _propRow('Size', item.formattedSize),
               _propRow('Modified', item.formattedDate),
-              const SizedBox(height: 8),
               _propRow('Path', item.path),
+              if (item.isDirectory)
+                FutureBuilder<List<FileItem>>(
+                  future: FileUtils.listDirectory(item.path, includeHidden: false),
+                  builder: (context, snapshot) {
+                    final count = snapshot.hasData ? snapshot.data!.length : '?';
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 80, child: Text('Items', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12))),
+                          Expanded(child: Text('$count item${count != 1 ? 's' : ''}', style: const TextStyle(color: OneDarkColors.fg, fontSize: 12))),
+                        ],
+                      ),
+                    );
+                  },
+                ),
             ],
           ),
         ),
@@ -226,8 +228,9 @@ class _FileBrowserState extends State<FileBrowser> {
 
   Widget _propRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.only(bottom: 6),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(width: 80, child: Text(label, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12))),
           Expanded(child: Text(value, style: const TextStyle(color: OneDarkColors.fg, fontSize: 12))),
@@ -355,6 +358,7 @@ class _FileBrowserState extends State<FileBrowser> {
         final isSelected = _selectedPaths.contains(item.path);
         return GestureDetector(
           onLongPress: () => _showContextMenu(item),
+          onSecondaryTapDown: (_) => _showContextMenu(item),
           onTap: () {
             if (isSelected) {
               _openItem(item);
@@ -401,8 +405,9 @@ class _FileBrowserState extends State<FileBrowser> {
         }
         final item = _items[index - 1];
         final isSelected = _selectedPaths.contains(item.path);
-        return InkWell(
+        return GestureDetector(
           onLongPress: () => _showContextMenu(item),
+          onSecondaryTapDown: (_) => _showContextMenu(item),
           onTap: () {
             if (isSelected) {
               _openItem(item);

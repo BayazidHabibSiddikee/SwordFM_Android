@@ -3,9 +3,6 @@ import 'theme/theme.dart';
 import 'utils/file_utils.dart';
 import 'widgets/file_browser.dart';
 import 'widgets/preview_panel.dart';
-import 'screens/bluetooth_screen.dart';
-import 'screens/lan_screen.dart';
-import 'screens/settings_screen.dart';
 
 void main() {
   runApp(const SwordFM());
@@ -46,172 +43,171 @@ class _MainScreenState extends State<MainScreen> {
   // ignore: prefer_final_fields — mutated via setState
   List<String> _bookmarks = []; // populated from prefs in real app
 
-  // The 4 bottom-nav pages
-  late final List<Widget> _pages;
-
   @override
-  void initState() {
-    super.initState();
-    _pages = [
-      _buildExplorerPage(),
-      const BluetoothScreen(),
-      const LANSharingScreen(),
-      const SettingsScreen(),
-    ];
-  }
-
-  Widget _buildExplorerPage() {
-    return Row(
-      children: [
-        // ── Sidebar ──────────────────────────────────────────────
-        if (_sidebarVisible)
-          SizedBox(
-            width: 200,
-            child: Card(
-              color: OneDarkColors.bgDark,
-              elevation: 0,
-              margin: const EdgeInsets.only(right: 0),
-              child: Column(
-                children: [
-                  // Sidebar header
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      children: [
-                        Icon(Icons.folder_special, color: OneDarkColors.cyan, size: 20),
-                        const SizedBox(width: 8),
-                        const Text('Places', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1),
-
-                  // Places list
-                  Expanded(
-                    child: ListView(
-                      children: [
-                        // Current path breadcrumb quick-links
-                        _sidebarTile(Icons.home, 'Home', AppPaths.home),
-                        _sidebarTile(Icons.desktop_windows, 'Desktop', AppPaths.desktop),
-                        _sidebarTile(Icons.document_scanner, 'Documents', AppPaths.documents),
-                        _sidebarTile(Icons.download, 'Downloads', AppPaths.downloads),
-                        _sidebarTile(Icons.image, 'Pictures', AppPaths.pictures),
-                        _sidebarTile(Icons.music_note, 'Music', AppPaths.music),
-                        _sidebarTile(Icons.movie, 'Videos', AppPaths.videos),
-                        const Divider(),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          child: Text('Bookmarks',
-                              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
-                        ),
-                        // Add bookmark button
-                        ListTile(
-                          leading: Icon(Icons.bookmark_add, size: 18, color: OneDarkColors.fgDim),
-                          title: const Text('Add Bookmark', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
-                          onTap: () => _addBookmark(),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Bottom spacer + status
-                  const Spacer(),
-                  Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Row(
-                      children: [
-                        Icon(Icons.info_outline, size: 14, color: OneDarkColors.fgDim),
-                        const SizedBox(width: 4),
-                        Text('$_itemsCount items', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 10)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-        // ── Main file browser area ───────────────────────────────
-        Expanded(
-          child: Column(
-            children: [
-              // Top bar
-              _buildTopBar(),
-              // File browser
-              Expanded(child: FileBrowser(
-                initialPath: _currentPath,
-                onItemSelected: (item) => setState(() => _selectedItem = item),
-              )),
-              // Status bar
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Row(
+        children: [
+          // ── Sidebar ──────────────────────────────────────────────
+          if (_sidebarVisible)
+            SizedBox(
+              width: 200,
+              child: Card(
                 color: OneDarkColors.bgDark,
-                child: Row(
+                elevation: 0,
+                margin: const EdgeInsets.only(right: 0),
+                child: Column(
                   children: [
-                    Icon(Icons.folder_open, size: 14, color: OneDarkColors.fgDim),
-                    const SizedBox(width: 6),
-                    Text(_currentPath,
-                        style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                    // Sidebar header
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Icon(Icons.folder_special, color: OneDarkColors.cyan, size: 20),
+                          const SizedBox(width: 8),
+                          const Text('Places', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+
+                    // Places list
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          _sidebarTile(Icons.home, 'Home', AppPaths.home),
+                          _sidebarTile(Icons.desktop_windows, 'Desktop', AppPaths.desktop),
+                          _sidebarTile(Icons.document_scanner, 'Documents', AppPaths.documents),
+                          _sidebarTile(Icons.download, 'Downloads', AppPaths.downloads),
+                          _sidebarTile(Icons.image, 'Pictures', AppPaths.pictures),
+                          _sidebarTile(Icons.music_note, 'Music', AppPaths.music),
+                          _sidebarTile(Icons.movie, 'Videos', AppPaths.videos),
+                          const Divider(),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            child: Text('Bookmarks',
+                                style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                          ),
+                          // Add bookmark button
+                          ListTile(
+                            leading: Icon(Icons.bookmark_add, size: 18, color: OneDarkColors.fgDim),
+                            title: const Text('Add Bookmark', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
+                            onTap: _addBookmark,
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Bottom spacer + status
                     const Spacer(),
-                    if (_selectedItem != null) ...[
-                      const SizedBox(width: 12),
-                      Icon(_selectedItem!.icon, size: 14, color: _selectedItem!.iconColor),
-                      const SizedBox(width: 4),
-                      Text(_selectedItem!.name,
-                          style: const TextStyle(color: OneDarkColors.fg, fontSize: 11)),
-                      const SizedBox(width: 12),
-                      Text(_selectedItem!.formattedSize,
-                          style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
-                    ],
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, size: 14, color: OneDarkColors.fgDim),
+                          const SizedBox(width: 4),
+                          Text('$itemsCount items', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 10)),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
-            ],
-          ),
-        ),
+            ),
 
-        // ── Preview panel (collapsible) ──────────────────────────
-        if (_previewVisible)
-          PreviewPanel(
-            item: _selectedItem,
-            width: 280,
-            isVisible: _previewVisible,
-          ),
-      ],
-    );
-  }
-
-  Widget _buildTopBar() {
-    return Container(
-      color: OneDarkColors.bgDark,
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.menu, color: OneDarkColors.fg),
-            onPressed: () => setState(() => _sidebarVisible = !_sidebarVisible),
-            tooltip: 'Toggle Sidebar',
-          ),
-          // Breadcrumb navigation
+          // ── Main file browser area ───────────────────────────────
           Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: _buildBreadcrumbs(),
-              ),
+            child: Column(
+              children: [
+                // Top bar
+                Container(
+                  color: OneDarkColors.bgDark,
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.menu, color: OneDarkColors.fg),
+                        onPressed: () => setState(() => _sidebarVisible = !_sidebarVisible),
+                        tooltip: 'Toggle Sidebar',
+                      ),
+                      // Breadcrumb navigation
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: _buildBreadcrumbs(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        icon: const Icon(Icons.search, color: OneDarkColors.fgDim),
+                        onPressed: () {},
+                        tooltip: 'Search',
+                      ),
+                      IconButton(
+                        icon: Icon(_previewVisible ? Icons.unfold_less : Icons.unfold_more,
+                            color: _previewVisible ? OneDarkColors.cyan : OneDarkColors.fgDim),
+                        onPressed: () => setState(() => _previewVisible = !_previewVisible),
+                        tooltip: 'Toggle Preview',
+                      ),
+                    ],
+                  ),
+                ),
+                // File browser — rebuilds with new _currentPath via key
+                Expanded(
+                  child: FileBrowser(
+                    key: ValueKey(_currentPath),
+                    initialPath: _currentPath,
+                    onItemSelected: (item) => setState(() => _selectedItem = item),
+                  ),
+                ),
+                // Status bar
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  color: OneDarkColors.bgDark,
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder_open, size: 14, color: OneDarkColors.fgDim),
+                      const SizedBox(width: 6),
+                      Text(_currentPath,
+                          style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                      const Spacer(),
+                      if (_selectedItem != null) ...[
+                        const SizedBox(width: 12),
+                        Icon(_selectedItem!.icon, size: 14, color: _selectedItem!.iconColor),
+                        const SizedBox(width: 4),
+                        Text(_selectedItem!.name,
+                            style: const TextStyle(color: OneDarkColors.fg, fontSize: 11)),
+                        const SizedBox(width: 12),
+                        Text(_selectedItem!.formattedSize,
+                            style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 4),
-          IconButton(
-            icon: const Icon(Icons.search, color: OneDarkColors.fgDim),
-            onPressed: () {},
-            tooltip: 'Search',
-          ),
-          IconButton(
-            icon: Icon(_previewVisible ? Icons.unfold_less : Icons.unfold_more,
-                color: _previewVisible ? OneDarkColors.cyan : OneDarkColors.fgDim),
-            onPressed: () => setState(() => _previewVisible = !_previewVisible),
-            tooltip: 'Toggle Preview',
-          ),
+
+          // ── Preview panel (collapsible) ──────────────────────────
+          if (_previewVisible)
+            PreviewPanel(
+              item: _selectedItem,
+              width: 280,
+              isVisible: _previewVisible,
+            ),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) => setState(() => _selectedIndex = index),
+        backgroundColor: OneDarkColors.bgDark,
+        indicatorColor: OneDarkColors.select,
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.folder), label: 'Files'),
+          NavigationDestination(icon: Icon(Icons.bluetooth), label: 'Bluetooth'),
+          NavigationDestination(icon: Icon(Icons.wifi), label: 'LAN'),
+          NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     );
@@ -294,24 +290,5 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // Count items placeholder — in production this would be a state manager
-  int get _itemsCount => 0;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: _pages[_selectedIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) => setState(() => _selectedIndex = index),
-        backgroundColor: OneDarkColors.bgDark,
-        indicatorColor: OneDarkColors.select,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.folder), label: 'Files'),
-          NavigationDestination(icon: Icon(Icons.bluetooth), label: 'Bluetooth'),
-          NavigationDestination(icon: Icon(Icons.wifi), label: 'LAN'),
-          NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
-        ],
-      ),
-    );
-  }
+  int get itemsCount => 0;
 }

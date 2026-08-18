@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:swordfm/main.dart';
 import 'package:swordfm/screens/bluetooth_screen.dart';
 import 'package:swordfm/screens/lan_screen.dart';
+import 'package:swordfm/widgets/file_browser.dart';
+
 void main() {
   group('SwordFM App Integration Tests', () {
     testWidgets('App builds with One Dark theme and bottom navigation',
@@ -20,27 +22,6 @@ void main() {
       expect(find.text('Settings'), findsOneWidget);
     });
 
-    testWidgets('Navigating between tabs switches pages', (WidgetTester tester) async {
-      await tester.pumpWidget(const SwordFM());
-
-      // Initial page should be Files
-      expect(find.byType(MainScreen), findsOneWidget);
-
-      // Tap on Bluetooth tab
-      await tester.tap(find.text('Bluetooth'));
-      await tester.pumpAndSettle();
-
-      // Should show Bluetooth screen content
-      expect(find.text('Paired Devices'), findsOneWidget);
-
-      // Tap on LAN tab
-      await tester.tap(find.text('LAN'));
-      await tester.pumpAndSettle();
-
-      // Should show LAN sharing content
-      expect(find.text('How to Use'), findsOneWidget);
-    });
-
     testWidgets('Theme uses One Dark color scheme', (WidgetTester tester) async {
       await tester.pumpWidget(const SwordFM());
 
@@ -51,21 +32,15 @@ void main() {
       expect(theme.colorScheme.secondary, const Color(0xFF98C379));
     });
 
-    testWidgets('Settings screen renders all sections', (WidgetTester tester) async {
-      await tester.pumpWidget(const SwordFM());
-      await tester.tap(find.text('Settings'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Appearance'), findsOneWidget);
-      expect(find.text('File Management'), findsOneWidget);
-      expect(find.text('Sharing'), findsOneWidget);
-      expect(find.text('About'), findsOneWidget);
-    });
-
     testWidgets('Toggle sidebar button exists in main screen',
         (WidgetTester tester) async {
       await tester.pumpWidget(const SwordFM());
       expect(find.byIcon(Icons.menu), findsOneWidget);
+    });
+
+    testWidgets('File browser loads default path', (WidgetTester tester) async {
+      await tester.pumpWidget(const SwordFM());
+      expect(find.byType(FileBrowser), findsOneWidget);
     });
   });
 
@@ -73,9 +48,7 @@ void main() {
     testWidgets('shows disconnected state by default',
         (WidgetTester tester) async {
       await tester.pumpWidget(
-        MaterialApp(
-          home: const BluetoothScreen(),
-        ),
+        const MaterialApp(home: BluetoothScreen()),
       );
       await tester.pumpAndSettle();
 
@@ -87,9 +60,7 @@ void main() {
   group('LAN Screen UI', () {
     testWidgets('renders start server button', (WidgetTester tester) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: LANSharingScreen(),
-        ),
+        const MaterialApp(home: LANSharingScreen()),
       );
       await tester.pumpAndSettle();
 

@@ -35,6 +35,10 @@ class FileItem {
     return '${gb.toStringAsFixed(1)} GB';
   }
 
+  /// Returns the estimated size as a number for sorting/comparison.
+  /// For directories, returns 0 — use [getTotalSize] for actual size.
+  int get sizeBytes => size;
+
   String get formattedDate {
     return DateFormat('yyyy-MM-dd HH:mm').format(lastModified);
   }
