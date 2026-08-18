@@ -35,10 +35,10 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 - [ ] Background transfer engine (queue, chunked, pause/resume)
 - [ ] Cloud SDK adapters (Drive/Dropbox/OneDrive)
 
-### Phase 2b: Native File System Integration (renamed from original Phase 2)
-- [ ] List directory contents, display metadata, filter by extension or date.
-- [ ] Implement CRUD operations: Copy, Cut, Paste, Rename, Delete (send to trash).
-- [ ] Implement background search (recursive and local) using Dart isolates.
+### Phase 2b: Native File System Integration
+- [x] List directory contents, display metadata, filter by extension or date.
+- [x] Implement CRUD operations: Copy, Cut, Paste, Rename, Delete (send to trash).
+- [x] Implement background search (recursive and local) using Dart isolates.
 
 ### Phase 3: LAN Web Sharing (Re-implementing swordshare)
 - [x] Build pure Dart local server.
