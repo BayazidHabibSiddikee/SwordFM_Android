@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
+import '../services/archive_service.dart';
 import 'package:path/path.dart' as p;
 
 enum ViewMode { details, grid }
@@ -178,6 +179,23 @@ class _FileBrowserState extends State<FileBrowser> {
     ).then((_) { if (mounted) _loadDirectory(); });
   }
 
+  Future<void> _extractArchive(String path) async {
+    final destDir = p.join(p.dirname(path), p.basenameWithoutExtension(path));
+    try {
+      await ArchiveService.extract(path, destDir);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Extracted to ${p.basename(destDir)}'), backgroundColor: OneDarkColors.green),
+        );
+        _loadDirectory();
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Extract failed: $e'), backgroundColor: OneDarkColors.red),
+      );
+    }
+  }
+
   void _showProperties(FileItem item) {
     showDialog(
       context: context,
@@ -265,6 +283,8 @@ class _FileBrowserState extends State<FileBrowser> {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Cut: ${item.name}'), backgroundColor: OneDarkColors.amber));
         }),
         _menuItem('Delete', Icons.delete, () => _confirmDelete(item)),
+        if (ArchiveService.isArchive(item.path))
+          _menuItem('Extract', Icons.folder_open, () => _extractArchive(item.path)),
         _menuItem('Properties', Icons.info_outline, () => _showProperties(item)),
       ],
     );
