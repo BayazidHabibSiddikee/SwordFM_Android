@@ -91,4 +91,44 @@ void main() {
       expect(() => service.downloadFile('nonexistent', '/remote.txt', '/tmp'), throwsException);
     });
   });
+
+  group('NetworkService TransferQueue', () {
+    late NetworkService service;
+
+    setUp(() {
+      service = NetworkService();
+    });
+
+    test('enqueue adds job to queue', () {
+      final id = service.enqueueTransfer(
+        profileId: 'p1',
+        localPath: '/tmp/a.txt',
+        remotePath: '/remote/a.txt',
+        isUpload: true,
+      );
+      expect(id.isNotEmpty, isTrue);
+      expect(service.transferQueue.length, 1);
+      expect(service.transferQueue.first.isUpload, isTrue);
+    });
+
+    test('isTransferring starts false', () {
+      expect(service.isTransferring, isFalse);
+    });
+
+    test('cancel updates job status', () async {
+      final id = service.enqueueTransfer(
+        profileId: 'p1',
+        localPath: '/tmp/x',
+        remotePath: '/x',
+        isUpload: true,
+      );
+      await service.cancelTransfer(id);
+      final job = service.transferQueue.firstWhere(
+        (j) => j.id == id,
+        orElse: () => throw Exception('not found'),
+      );
+      expect(job.status, TransferStatus.failed);
+      expect(job.error, 'Cancelled');
+    });
+  });
 }

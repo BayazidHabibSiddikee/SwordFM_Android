@@ -102,9 +102,40 @@ class _CryptoHelper {
   }
 }
 
+/// Status of a transfer job.
+enum TransferStatus { pending, running, completed, failed }
+
+/// A single file transfer job in the queue.
+class TransferJob {
+  final String id;
+  final String profileId;
+  final String localPath;
+  final String remotePath;
+  final bool isUpload;
+  TransferStatus status;
+  double progress; // 0.0 to 1.0
+  String? error;
+  final DateTime createdAt;
+
+  TransferJob({
+    required this.id,
+    required this.profileId,
+    required this.localPath,
+    required this.remotePath,
+    required this.isUpload,
+    this.status = TransferStatus.pending,
+    this.progress = 0.0,
+    this.error,
+    DateTime? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now();
+}
+
 class NetworkService {
   final Map<String, NetworkProfile> _profiles = {};
   final List<ConnLog> _logs = [];
+  final List<TransferJob> _transferQueue = [];
+  final StreamController<List<TransferJob>> _transferStream = StreamController.broadcast();
+  bool _transferring = false;
 
   Stream<List<ConnLog>> get logStream => _logController.stream;
   final StreamController<List<ConnLog>> _logController =
@@ -375,6 +406,62 @@ class NetworkService {
     final f = File(path);
     return f.readAsBytes();
   }
+
+  /// Queue a file transfer (upload or download). Returns the job ID.
+  String enqueueTransfer({
+    required String profileId,
+    required String localPath,
+    required String remotePath,
+    required bool isUpload,
+  }) {
+    final job = TransferJob(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      profileId: profileId,
+      localPath: localPath,
+      remotePath: remotePath,
+      isUpload: isUpload,
+    );
+    _transferQueue.add(job);
+    _transferStream.add(List.from(_transferQueue));
+    return job.id;
+  }
+
+  /// Cancel a transfer by job ID.
+  Future<void> cancelTransfer(String jobId) async {
+    final job = _transferQueue.firstWhere((j) => j.id == jobId, orElse: () => throw Exception('Not found'));
+    job.status = TransferStatus.failed;
+    job.error = 'Cancelled';
+    _transferStream.add(List.from(_transferQueue));
+  }
+
+  /// Process the next job in the queue.
+  Future<void> processNext() async {
+    if (_transferring || _transferQueue.isEmpty) return;
+    final job = _transferQueue.removeAt(0);
+    job.status = TransferStatus.running;
+    _transferStream.add(List.from(_transferQueue));
+    _transferring = true;
+    try {
+      if (job.isUpload) {
+        await uploadFile(job.profileId, job.localPath, remotePath: job.remotePath);
+      } else {
+        await downloadFile(job.profileId, job.remotePath, job.localPath);
+      }
+      job.status = TransferStatus.completed;
+    } catch (e) {
+      job.status = TransferStatus.failed;
+      job.error = e.toString();
+    } finally {
+      _transferring = false;
+      _transferStream.add(List.from(_transferQueue));
+      // Process next if any
+      if (_transferQueue.isNotEmpty) await processNext();
+    }
+  }
+
+  Stream<List<TransferJob>> get transferStream => _transferStream.stream;
+  List<TransferJob> get transferQueue => List.unmodifiable(_transferQueue);
+  bool get isTransferring => _transferring;
 
   void addLog(String profileId, String message) {
     _logs.add(ConnLog(profileId: profileId, message: message, ts: DateTime.now()));
