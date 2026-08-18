@@ -55,19 +55,22 @@ class BluetoothShareService {
   static const MethodChannel _channel = MethodChannel('com.swordfm/bluetooth');
 
   // Singleton
-  static final BluetoothShareService _instance = BluetoothShareService._internal();
+  static final BluetoothShareService _instance =
+      BluetoothShareService._internal();
   factory BluetoothShareService() => _instance;
   BluetoothShareService._internal() {
     _channel.setMethodCallHandler(_handleMethodCall);
   }
 
   final _stateController = StreamController<BluetoothState>.broadcast();
-  final _progressController = StreamController<BluetoothTransferProgress>.broadcast();
+  final _progressController =
+      StreamController<BluetoothTransferProgress>.broadcast();
   final _deviceConnectedController = StreamController<String>.broadcast();
   final _messageController = StreamController<String>.broadcast();
 
   Stream<BluetoothState> get stateStream => _stateController.stream;
-  Stream<BluetoothTransferProgress> get progressStream => _progressController.stream;
+  Stream<BluetoothTransferProgress> get progressStream =>
+      _progressController.stream;
   Stream<String> get deviceConnectedStream => _deviceConnectedController.stream;
   Stream<String> get messageStream => _messageController.stream;
 
@@ -108,7 +111,9 @@ class BluetoothShareService {
 
   Future<List<BluetoothDeviceItem>> getPairedDevices() async {
     try {
-      final List<dynamic>? devices = await _channel.invokeMethod<List<dynamic>>('getPairedDevices');
+      final List<dynamic>? devices = await _channel.invokeMethod<List<dynamic>>(
+        'getPairedDevices',
+      );
       if (devices == null) return [];
       return devices.map((d) => BluetoothDeviceItem.fromMap(d as Map)).toList();
     } on PlatformException catch (e) {
@@ -139,7 +144,11 @@ class BluetoothShareService {
   Future<void> connectToDevice(String address) async {
     try {
       _updateState(BluetoothState.connecting);
-      final success = await _channel.invokeMethod<bool>('connectToDevice', {'address': address}) ?? false;
+      final success =
+          await _channel.invokeMethod<bool>('connectToDevice', {
+            'address': address,
+          }) ??
+          false;
       if (!success) {
         _updateState(BluetoothState.disconnected);
       }
@@ -189,7 +198,9 @@ class BluetoothShareService {
       case 'onTransferStarted':
         final args = call.arguments as Map<dynamic, dynamic>? ?? {};
         final isSending = args['isSending'] as bool? ?? false;
-        _updateState(isSending ? BluetoothState.sending : BluetoothState.receiving);
+        _updateState(
+          isSending ? BluetoothState.sending : BluetoothState.receiving,
+        );
         break;
       case 'onTransferProgress':
         final args = call.arguments as Map<dynamic, dynamic>? ?? {};
@@ -197,12 +208,14 @@ class BluetoothShareService {
         final bytes = args['bytesTransferred'] as int? ?? 0;
         final total = args['totalBytes'] as int? ?? 0;
         final isSending = args['isSending'] as bool? ?? false;
-        _progressController.add(BluetoothTransferProgress(
-          filename: filename,
-          bytesTransferred: bytes,
-          totalBytes: total,
-          isSending: isSending,
-        ));
+        _progressController.add(
+          BluetoothTransferProgress(
+            filename: filename,
+            bytesTransferred: bytes,
+            totalBytes: total,
+            isSending: isSending,
+          ),
+        );
         break;
       case 'onTransferComplete':
         final savedPath = call.arguments['savedPath'] as String? ?? '';

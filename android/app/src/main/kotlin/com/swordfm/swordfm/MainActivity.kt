@@ -2,8 +2,10 @@ package com.swordfm.swordfm
 
 // ============================================================================
 // SHARED BLUETOOTH FRAME PROTOCOL (see lib/services/bluetooth_share_service.dart)
-// Frame: [8-byte file-length LE uint64][4-byte filename-length LE int32]
-//        [N-byte UTF-8 filename][raw file bytes of length `file-length`]
+// Frame:
+//   [ 4-byte uint32 metadataLength ]  (big-endian)
+//   [ metadataLength bytes of JSON  ]  { "filename": "example.pdf", "size": 12345 }
+//   [ raw file bytes of length `size` ]]
 // Reference impl: /home/sword/SwordFM/tools/swordblue
 // ============================================================================
 

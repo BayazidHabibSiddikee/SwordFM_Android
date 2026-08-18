@@ -30,7 +30,8 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
     });
     _service.progressStream.listen((progress) {
       setState(() {
-        _statusMessage = '${progress.filename}: ${(progress.percentage * 100).toStringAsFixed(0)}%';
+        _statusMessage =
+            '${progress.filename}: ${(progress.percentage * 100).toStringAsFixed(0)}%';
       });
     });
     _service.messageStream.listen((msg) {
@@ -41,7 +42,9 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
   Future<void> _requestPermissions() async {
     final supported = await _service.isSupported();
     if (!supported) {
-      setState(() => _statusMessage = 'Bluetooth not supported on this device.');
+      setState(
+        () => _statusMessage = 'Bluetooth not supported on this device.',
+      );
       return;
     }
     final granted = await BtPermissions.ensurePermissions();
@@ -64,7 +67,10 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
 
   Future<void> _refreshDevices() async {
     final devices = await _service.getPairedDevices();
-    setState(() { _devices.clear(); _devices.addAll(devices); });
+    setState(() {
+      _devices.clear();
+      _devices.addAll(devices);
+    });
   }
 
   Future<void> _startServer() async {
@@ -109,17 +115,31 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                     children: [
                       Text(
                         _stateLabel(state),
-                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                      if (_statusMessage != null && state != BluetoothState.disconnected)
-                        Text(_statusMessage!, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                      if (_statusMessage != null &&
+                          state != BluetoothState.disconnected)
+                        Text(
+                          _statusMessage!,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                          ),
+                        ),
                     ],
                   ),
                 ),
-                if (state == BluetoothState.listening || state == BluetoothState.connected)
+                if (state == BluetoothState.listening ||
+                    state == BluetoothState.connected)
                   FilledButton(
                     onPressed: _stopServer,
-                    style: FilledButton.styleFrom(backgroundColor: OneDarkColors.red),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: OneDarkColors.red,
+                    ),
                     child: const Text('Stop'),
                   ),
               ],
@@ -137,7 +157,10 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                 label: const Text('Request Permissions'),
               ),
               FilledButton.icon(
-                onPressed: _permissionsReady && state == BluetoothState.disconnected ? _startServer : null,
+                onPressed:
+                    _permissionsReady && state == BluetoothState.disconnected
+                    ? _startServer
+                    : null,
                 icon: const Icon(Icons.bluetooth_connected),
                 label: const Text('Start Listening'),
               ),
@@ -146,11 +169,23 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
           const SizedBox(height: 16),
 
           // Device list
-          const Text('Paired Devices', style: TextStyle(color: OneDarkColors.cyan, fontSize: 14, fontWeight: FontWeight.w600)),
+          const Text(
+            'Paired Devices',
+            style: TextStyle(
+              color: OneDarkColors.cyan,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 8),
           Expanded(
             child: _devices.isEmpty
-                ? Center(child: Text('No paired devices', style: TextStyle(color: OneDarkColors.fgDim)))
+                ? Center(
+                    child: Text(
+                      'No paired devices',
+                      style: TextStyle(color: OneDarkColors.fgDim),
+                    ),
+                  )
                 : ListView.separated(
                     itemCount: _devices.length,
                     separatorBuilder: (_, _) => const Divider(),
@@ -159,14 +194,28 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                       return ListTile(
                         leading: CircleAvatar(
                           backgroundColor: OneDarkColors.dim,
-                          child: const Icon(Icons.bluetooth, color: OneDarkColors.cyan),
+                          child: const Icon(
+                            Icons.bluetooth,
+                            color: OneDarkColors.cyan,
+                          ),
                         ),
-                        title: Text(device.name, style: const TextStyle(color: OneDarkColors.fg)),
-                        subtitle: Text(device.address, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                        title: Text(
+                          device.name,
+                          style: const TextStyle(color: OneDarkColors.fg),
+                        ),
+                        subtitle: Text(
+                          device.address,
+                          style: const TextStyle(
+                            color: OneDarkColors.fgDim,
+                            fontSize: 11,
+                          ),
+                        ),
                         trailing: state == BluetoothState.listening
                             ? ElevatedButton(
                                 onPressed: () => _connectToDevice(device),
-                                style: ElevatedButton.styleFrom(backgroundColor: OneDarkColors.green),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: OneDarkColors.green,
+                                ),
                                 child: const Text('Connect'),
                               )
                             : null,
@@ -181,34 +230,52 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
 
   Color _stateColor(BluetoothState s) {
     switch (s) {
-      case BluetoothState.disconnected: return OneDarkColors.dim;
-      case BluetoothState.listening: return OneDarkColors.green;
-      case BluetoothState.connecting: return OneDarkColors.amber;
-      case BluetoothState.connected: return OneDarkColors.cyan;
-      case BluetoothState.sending: return OneDarkColors.purple;
-      case BluetoothState.receiving: return OneDarkColors.cyan;
+      case BluetoothState.disconnected:
+        return OneDarkColors.dim;
+      case BluetoothState.listening:
+        return OneDarkColors.green;
+      case BluetoothState.connecting:
+        return OneDarkColors.amber;
+      case BluetoothState.connected:
+        return OneDarkColors.cyan;
+      case BluetoothState.sending:
+        return OneDarkColors.purple;
+      case BluetoothState.receiving:
+        return OneDarkColors.cyan;
     }
   }
 
   IconData _stateIcon(BluetoothState s) {
     switch (s) {
-      case BluetoothState.disconnected: return Icons.bluetooth_disabled;
-      case BluetoothState.listening: return Icons.bluetooth_searching;
-      case BluetoothState.connecting: return Icons.sync;
-      case BluetoothState.connected: return Icons.bluetooth_connected;
-      case BluetoothState.sending: return Icons.upload_file;
-      case BluetoothState.receiving: return Icons.file_download;
+      case BluetoothState.disconnected:
+        return Icons.bluetooth_disabled;
+      case BluetoothState.listening:
+        return Icons.bluetooth_searching;
+      case BluetoothState.connecting:
+        return Icons.sync;
+      case BluetoothState.connected:
+        return Icons.bluetooth_connected;
+      case BluetoothState.sending:
+        return Icons.upload_file;
+      case BluetoothState.receiving:
+        return Icons.file_download;
     }
   }
 
   String _stateLabel(BluetoothState s) {
     switch (s) {
-      case BluetoothState.disconnected: return 'Disconnected';
-      case BluetoothState.listening: return 'Listening for connections...';
-      case BluetoothState.connecting: return 'Connecting...';
-      case BluetoothState.connected: return 'Connected';
-      case BluetoothState.sending: return 'Sending file...';
-      case BluetoothState.receiving: return 'Receiving file...';
+      case BluetoothState.disconnected:
+        return 'Disconnected';
+      case BluetoothState.listening:
+        return 'Listening for connections...';
+      case BluetoothState.connecting:
+        return 'Connecting...';
+      case BluetoothState.connected:
+        return 'Connected';
+      case BluetoothState.sending:
+        return 'Sending file...';
+      case BluetoothState.receiving:
+        return 'Receiving file...';
     }
   }
 }

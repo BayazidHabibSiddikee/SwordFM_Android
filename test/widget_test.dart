@@ -7,8 +7,9 @@ import 'package:swordfm/widgets/file_browser.dart';
 
 void main() {
   group('SwordFM App Integration Tests', () {
-    testWidgets('App builds with One Dark theme and bottom navigation',
-        (WidgetTester tester) async {
+    testWidgets('App builds with One Dark theme and bottom navigation', (
+      WidgetTester tester,
+    ) async {
       await tester.pumpWidget(const SwordFM());
 
       // Verify app builds and Scaffold is present
@@ -22,7 +23,9 @@ void main() {
       expect(find.text('Settings'), findsOneWidget);
     });
 
-    testWidgets('Theme uses One Dark color scheme', (WidgetTester tester) async {
+    testWidgets('Theme uses One Dark color scheme', (
+      WidgetTester tester,
+    ) async {
       await tester.pumpWidget(const SwordFM());
 
       final ThemeData theme = Theme.of(tester.element(find.byType(Scaffold)));
@@ -32,8 +35,9 @@ void main() {
       expect(theme.colorScheme.secondary, const Color(0xFF98C379));
     });
 
-    testWidgets('Toggle sidebar button exists in main screen',
-        (WidgetTester tester) async {
+    testWidgets('Toggle sidebar button exists in main screen', (
+      WidgetTester tester,
+    ) async {
       await tester.pumpWidget(const SwordFM());
       expect(find.byIcon(Icons.menu), findsOneWidget);
     });
@@ -45,18 +49,13 @@ void main() {
   });
 
   group('Bluetooth Screen UI', () {
-    testWidgets('shows disconnected state by default',
-        (WidgetTester tester) async {
-      await tester.pumpWidget(
-        const MaterialApp(home: BluetoothScreen()),
-      );
-            // First pump renders loading indicator; pumpAndSettle runs the post-frame
-      // permission-check callback to completion (resolving the platform channel
-      // call which fails in tests → isSupported() returns false → shows the
-      // "need permissions" UI).
-      await tester.pumpWidget(
-        const MaterialApp(home: BluetoothScreen()),
-      );
+    testWidgets('shows disconnected state by default', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(const MaterialApp(home: BluetoothScreen()));
+      // pumpAndSettle runs the post-frame permission-check callback to
+      // completion. The platform channel call fails in tests → isSupported()
+      // returns false → the screen shows the "need permissions" UI.
       await tester.pumpAndSettle();
 
       expect(find.text('Disconnected'), findsOneWidget);
@@ -67,9 +66,7 @@ void main() {
 
   group('LAN Screen UI', () {
     testWidgets('renders start server button', (WidgetTester tester) async {
-      await tester.pumpWidget(
-        const MaterialApp(home: LANSharingScreen()),
-      );
+      await tester.pumpWidget(const MaterialApp(home: LANSharingScreen()));
       await tester.pumpAndSettle();
 
       expect(find.text('Start Server'), findsOneWidget);
