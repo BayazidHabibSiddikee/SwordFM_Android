@@ -3,7 +3,8 @@ import '../services/bluetooth_share_service.dart';
 import '../services/bt_permissions.dart';
 import '../theme/theme.dart';
 
-/// Full Bluetooth sharing screen with device list, connection state, and file transfer progress.
+/// Full Bluetooth sharing screen with device list, connection state, send/receive
+/// progress bar, and file transfer controls.
 class BluetoothScreen extends StatefulWidget {
   const BluetoothScreen({super.key});
 
@@ -17,6 +18,8 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
   String? _statusMessage;
   // ignore: prefer_final_fields — mutated via setState
   bool _permissionsReady = false;
+  // Tracks filenames currently queued for sending so we can show a queue indicator.
+  final List<String> _sendingFiles = [];
 
   @override
   void initState() {
@@ -89,6 +92,40 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
     setState(() => _statusMessage = 'Connected to ${device.name}');
   }
 
+  /// Open the native Android file picker and send selected files.
+  /// Bridges to MainActivity.kt's "pickFile" handler which launches
+  /// ACTION_OPEN_DOCUMENT and returns results via onActivityResult.
+  Future<void> _pickAndSendFiles() async {
+    if (_service.state != BluetoothState.connected) {
+      _showSnackBar('Connect to a device first.');
+      return;
+    }
+    if (_service.isSending) {
+      _showSnackBar('Transfer in progress — please wait or cancel.');
+      return;
+    }
+
+    // Invoke native file picker; results arrive via onFilePicked stream.
+    try {
+      await _service.pickFile();
+    } catch (e) {
+      _showSnackBar('Could not open file picker: $e');
+    }
+  }
+
+  void _cancelTransfer() {
+    _service.cancelTransfer();
+  }
+
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 3)),
+    );
+  }
+
+  // Progress bar value (0.0–1.0), driven by progressStream updates via setState.
+  BluetoothTransferProgress? _lastProgress;
+
   @override
   Widget build(BuildContext context) {
     final state = _service.state;
@@ -130,6 +167,14 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                             fontSize: 11,
                           ),
                         ),
+                      if (_sendingFiles.isNotEmpty)
+                        Text(
+                          'Queue: ${_sendingFiles.join(", ")}',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 10,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -145,11 +190,58 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
-          // Action buttons — always visible
+          // Progress bar during transfer
+          if (state == BluetoothState.sending || state == BluetoothState.receiving)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                LinearProgressIndicator(
+                  value: _lastProgress?.percentage ?? 0.0,
+                  minHeight: 8,
+                  borderRadius: BorderRadius.circular(4),
+                  backgroundColor: OneDarkColors.dim,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    state == BluetoothState.sending ? OneDarkColors.purple : OneDarkColors.cyan,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                if (_lastProgress != null)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _lastProgress!.filename,
+                        style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '${(_lastProgress!.percentage * 100).toStringAsFixed(0)}%',
+                        style: const TextStyle(color: OneDarkColors.fg, fontSize: 11, fontWeight: FontWeight.w500),
+                      ),
+                    ],
+                  ),
+                const SizedBox(height: 8),
+                if (state == BluetoothState.sending)
+                  FilledButton.icon(
+                    onPressed: _cancelTransfer,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: OneDarkColors.red,
+                      minimumSize: const Size.fromHeight(40),
+                    ),
+                    icon: const Icon(Icons.close, size: 18),
+                    label: const Text('Cancel'),
+                  ),
+              ],
+            ),
+          const SizedBox(height: 12),
+
+          // Action buttons
           Wrap(
             spacing: 8,
+            runSpacing: 8,
             children: [
               FilledButton.icon(
                 onPressed: _requestPermissions,
@@ -163,6 +255,15 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                     : null,
                 icon: const Icon(Icons.bluetooth_connected),
                 label: const Text('Start Listening'),
+              ),
+              // Send button: only visible when connected and not already sending
+              FilledButton.icon(
+                onPressed:
+                    state == BluetoothState.connected && !_service.isSending
+                    ? _pickAndSendFiles
+                    : null,
+                icon: const Icon(Icons.upload_file),
+                label: const Text('Send Files'),
               ),
             ],
           ),

@@ -76,6 +76,7 @@ class BluetoothShareService {
 
   BluetoothState _state = BluetoothState.disconnected;
   BluetoothState get state => _state;
+  bool get isSending => _state == BluetoothState.sending;
 
   String? _connectedDeviceName;
   String? get connectedDeviceName => _connectedDeviceName;
@@ -160,13 +161,48 @@ class BluetoothShareService {
 
   /// Initiates file send by path. The native side handles the swordblue frame:
   /// [4B len][JSON {filename,size}][raw bytes].
-  Future<void> sendFile(String filePath) async {
+  /// Returns true if the channel call succeeded; false on exception.
+  Future<bool> sendFile(String filePath) async {
     try {
       _updateState(BluetoothState.sending);
       await _channel.invokeMethod('sendFile', {'path': filePath});
+      return true;
     } on PlatformException catch (e) {
       _updateState(BluetoothState.connected);
       _messageController.add('Failed to send file: ${e.message}');
+      return false;
+    }
+  }
+
+  /// Invokes the native file-picker dialog (Android ACTION_OPEN_DOCUMENT).
+  /// Selected file paths are delivered to [onFilePickedController] as a list
+  /// of absolute paths.
+  Future<void> pickFile() async {
+    try {
+      await _channel.invokeMethod('pickFile');
+    } on PlatformException catch (e) {
+      throw Exception('Could not open file picker: ${e.message}');
+    }
+  }
+
+  /// Stream that emits lists of selected file paths from the native file picker.
+  Stream<List<String>> get filePickedStream => _filePickedController.stream;
+  final _filePickedController = StreamController<List<String>>.broadcast();
+
+  void _handleFilePicked(List<String> paths) {
+    _filePickedController.add(paths);
+  }
+
+  /// Cancels an in-progress transfer. Notifies the native side which closes
+  /// the socket and resets the transfer thread.
+  Future<void> cancelTransfer() async {
+    try {
+      await _channel.invokeMethod('cancelTransfer');
+      _updateState(BluetoothState.connected);
+      _messageController.add('Transfer cancelled.');
+    } on PlatformException catch (e) {
+      _updateState(BluetoothState.connected);
+      _messageController.add('Cancel failed: ${e.message}');
     }
   }
 
@@ -219,13 +255,23 @@ class BluetoothShareService {
         break;
       case 'onTransferComplete':
         final savedPath = call.arguments['savedPath'] as String? ?? '';
-        _messageController.add('Transfer Complete! Saved to $savedPath');
+        _messageController.add(savedPath.isEmpty
+            ? 'Transfer Complete!'
+            : 'Transfer Complete! Saved to $savedPath');
         _updateState(BluetoothState.connected);
         break;
       case 'onTransferError':
         final msg = call.arguments['message'] as String? ?? '';
-        _messageController.add('Transfer Error: $msg');
+        _messageController.add(msg.isEmpty ? 'Transfer Error.' : 'Transfer Error: $msg');
         _updateState(BluetoothState.connected);
+        break;
+      case 'onFilePicked':
+        final args = call.arguments as Map<dynamic, dynamic>? ?? {};
+        final rawPaths = args['paths'] as List<dynamic>? ?? [];
+        final paths = rawPaths.whereType<String>().toList();
+        if (paths.isNotEmpty) {
+          _handleFilePicked(paths);
+        }
         break;
     }
   }

@@ -49,6 +49,32 @@ import org.json.JSONObject
  */
 
 class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
+    companion object {
+        private const val REQUEST_PICK_FILE = 1001
+        private var lastResultPaths: List<String>? = null
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_PICK_FILE && resultCode == RESULT_OK && data != null) {
+            val paths = mutableListOf<String>()
+            // Handle multi-select
+            val clipData = data.clipData
+            if (clipData != null) {
+                for (i in 0 until clipData.itemCount) {
+                    val uri = clipData.getItemAt(i).uri
+                    paths.add(uri.path ?: "")
+                }
+            } else {
+                val uri = data.data
+                if (uri != null) paths.add(uri.path ?: "")
+            }
+            if (paths.isNotEmpty()) {
+                lastResultPaths = paths
+                methodChannel?.invokeMethod("onFilePicked", mapOf("paths" to paths))
+            }
+        }
+    }
     private val CHANNEL = "com.swordfm/bluetooth"
     private var methodChannel: MethodChannel? = null
 
@@ -145,6 +171,15 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             }
             "disconnect" -> {
                 stopAllThreads()
+                result.success(null)
+            }
+            "pickFile" -> {
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                }
+                activity.startActivityForResult(intent, 1001)
                 result.success(null)
             }
             "cancelTransfer" -> {
