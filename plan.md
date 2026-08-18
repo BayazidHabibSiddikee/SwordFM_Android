@@ -69,7 +69,7 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 ### Phase 7: Polish & Distribution
 - [x] GitHub Actions CI (analyze + test on push/PR).
 - [x] i18n scaffolding (easy_localization with en.arb base).
-- [ ] Material You dynamic color support.
+- [x] Material You dynamic color support (dynamic_color package with fallback to One Dark)
 
 - [ ] Play Store readiness (SAF dual-mode, signing, privacy policy).
 
