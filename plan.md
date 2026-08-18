@@ -6,72 +6,82 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 
 ## 🛠️ Technology Stack
 *   **Frontend**: Flutter (Dart)
-*   **UI Design**: One Dark Theme (harmonious slate/dark background, high-contrast cyan/green accents, custom animations)
-*   **Local Sharing**: Pure Dart `HttpServer` (LAN web server) with QR code & pairing dialog
+*   **UI Design**: One Dark Theme (harmonious slate/dark background, high-contrast cyan/green accents)
+*   **Local Sharing**: Pure Dart `HttpServer` (LAN web server) with QR code & PIN auth
 *   **Bluetooth Sharing**: Classic Bluetooth RFCOMM / socket connection (Android + Windows)
+*   **Network Sharing**: WebDAV (webdav_client) + SFTP (dartssh2)
 *   **File APIs**: `dart:io` native file APIs
 
 ---
 
 ## 📅 Roadmap & Milestones
 
-### Phase 1: Foundation & UI Layout (Linux / Windows / Android)
+### Phase 1: Foundation & UI Layout
 - [x] Initialize cross-platform Flutter project targeting `android`, `windows`, and `linux`.
 - [x] Implement One Dark theme color scheme.
 - [x] Build responsive dual-pane layout (sidebar + main + preview panel).
-- [x] Bottom nav tabs: Files | Bluetooth | LAN | Settings | Storage
-- [x] Archive support: ZIP/TAR/GZIP extract + create via ArchiveService
-- [x] Batch rename dialog (prefix/suffix/regex modes)
-- [x] Duplicate file finder (SHA-256 based)
-- [x] Storage analysis screen (folder size breakdown by depth)
+- [x] Bottom nav tabs: Files | Bluetooth | LAN | Settings | Storage | Network.
+- [x] Archive support: ZIP/TAR/GZIP extract + create via ArchiveService.
+- [x] Batch rename dialog (prefix/suffix/regex modes).
+- [x] Duplicate file finder (SHA-256 based).
+- [x] Storage analysis screen (folder size breakdown by depth).
 
-### Phase 2: Network & Cloud
-- [x] WebDAV client (webdav_client + dio) — list/upload/download
-- [x] NetworkProfile model with JSON serialization
-- [x] NetworkScreen UI — profile management + remote file browser
-- [x] Connection log (ring buffer, broadcast stream)
-- [x] SFTP via dartssh2 — SSHClient + SFTP list/upload/download
-- [x] Connection profiles persistence (SharedPreferences + encrypted storage via flutter_secure_storage)
-- [x] Transfer queue (enqueue/cancel/processNext); chunked/pause/resume deferred to Phase 4
-- [ ] Cloud SDK adapters (Drive/Dropbox/OneDrive) — deferred; WebDAV covers Nextcloud/Synology use case
-
-### Phase 2b: Native File System Integration
+### Phase 2: Native File System Integration
 - [x] List directory contents, display metadata, filter by extension or date.
-- [x] Implement CRUD operations: Copy, Cut, Paste, Rename, Delete (send to trash).
-- [x] Implement background search (recursive and local) using Dart isolates.
+- [x] CRUD operations: Copy, Cut, Paste, Rename, Delete (send to trash).
+- [x] Background search via Dart Isolate (non-blocking).
 
-### Phase 3: LAN Web Sharing (Re-implementing swordshare)
-- [x] Build pure Dart local server.
+### Phase 3: LAN Web Sharing
+- [x] Build pure Dart local HTTP server.
 - [x] Create web UI for download and file upload.
-- [x] Add PIN-gated session auth (cookie-based, constant-time comparison).
+- [x] PIN-gated session auth (cookie-based, constant-time comparison).
 - [x] Path-traversal-safe uploads/downloads (`sanitizeName` + realpath check).
-- [x] Streaming I/O: uploads write chunk-by-chunk to disk; downloads pipe `file.openRead()` to response.
-- [x] Configurable share root + subdirectory browsing via `?subdir=` query param.
+- [x] Streaming I/O: uploads write chunk-by-chunk; downloads pipe `file.openRead()`.
+- [x] Configurable share root + subdirectory browsing via `?subdir=`.
 - [x] Client IP access log + PIN rotation button in LAN screen.
-- [x] Dart unit tests (22 total): sanitizeName, constantTimeCompare, extractCookie, randomHex, rotatePin.
+- [x] Unit tests (22 total).
 
 ### Phase 4: Bluetooth File Sharing
-- [x] Implement Bluetooth scanning and service advertisement (RFCOMM).
-- [x] Create simple peer-to-peer file sender and receiver protocol.
-- [x] Sync Bluetooth data transfer progress bar in UI.
-      - v1 approach: rely on OS-level pairing. Implement "connect to already-paired
-        device" from a simple picker (see `BluetoothScreen`). Do NOT build a "make
-        Android discoverable" toggle yet — that defers BLUETOOTH_ADVERTISE edge cases.
-        The RFCOMM frame format matches swordblue (see frame-format comments in
-        `MainActivity.kt` and `bluetooth_share_service.dart`).
+- [x] RFCOMM scanning and service advertisement.
+- [x] Peer-to-peer file sender/receiver protocol.
+- [x] Sync progress bar in UI.
+- [x] Send UI: native file picker, multi-file queue, progress bar + cancel.
+- [x] SerialPort UUID interop with swordblue Linux side.
+- [x] Connect timeout (30s) with auto-retry; collision suffix on receive.
+- [ ] Foreground service for background BT transfers (deferred — needs Android manifest `<service>` declaration).
+- [ ] Discoverability toggle (deferred — relies on OS pairing for v1).
 
-### Phase 2 (Deferred — post v1): Document Conversion & Background Search
-- ~~Document conversion~~ → Deferred: PDF/DOCX/TXT/HTML exports require native helpers (pandoc/LibreOffice) or cloud API. v1 ships markdown-only preview. Revisit after Bluetooth + LAN sharing are production-stable.
-- Background search via Dart isolates — **TODO**: move _searchInDir to Isolate spawn for non-blocking UI
+### Phase 5: Network & Cloud
+- [x] WebDAV client (webdav_client + dio) — list/upload/download.
+- [x] SFTP client (dartssh2) — SSHClient + SFTP list/upload/download.
+- [x] NetworkProfile model with JSON serialization.
+- [x] NetworkScreen UI — profile management + remote file browser.
+- [x] Connection log (ring buffer, broadcast stream).
+- [x] Transfer queue (enqueue/cancel/processNext).
+- [x] Connection profiles persistence (SharedPreferences + encrypted storage via flutter_secure_storage).
+- [ ] Chunked/pause/resume transfers (deferred).
+- [ ] Cloud SDK adapters (Drive/Dropbox/OneDrive) — deferred; WebDAV covers Nextcloud/Synology.
 
-
+### Phase 6: Folder Graph & Tools
 - [x] Interactive folder graph visualizer built natively in Flutter.
-- [x] Document conversion integration (Markdown <-> HTML <-> Text, and optional PDF/Word handlers).
-      - Status: Real PDF/DOCX conversion possible entirely in Dart, no external binaries needed.
-      - DEFERRED → **Phase 2**: native/offloaded PDF & DOCX export (`lib/services/convert_offload.dart`
-        plus a receiving endpoint in swordconv/C++). Heavy native dependencies (pandoc / LibreOffice /
-        cloud API) are not feasible for an on-device v1 Android build. Get Bluetooth fallback and
-        QR/HTTP sharing solid first — that is the actual pain point. Revisit once those are stable.
+- [x] Document conversion integration (Markdown <-> HTML <-> Text + PDF/DOCX export via pure-Dart).
+
+### Phase 7: Polish & Distribution
+- [x] GitHub Actions CI (analyze + test on push/PR).
+- [x] i18n scaffolding (easy_localization with en.arb base).
+- [ ] Material You dynamic color support.
+- [ ] Foreground service for BT transfers (see Phase 4).
+- [ ] Play Store readiness (SAF dual-mode, signing, privacy policy).
+
+---
+
+## 📊 Current Status
+
+| Metric | Value |
+|--------|-------|
+| Tests passing | 114 |
+| Analysis errors | 0 |
+| Last push | master |
 
 ---
 
