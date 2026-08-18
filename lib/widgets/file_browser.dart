@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
+import 'package:path/path.dart' as p;
 
 enum ViewMode { details, grid }
 enum SortOption { name, size, date, type }
@@ -169,6 +170,14 @@ class _FileBrowserState extends State<FileBrowser> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${_selectedPaths.length} item(s) cut'), backgroundColor: OneDarkColors.amber));
   }
 
+  void _batchRename() {
+    if (_selectedPaths.isEmpty) return;
+    showDialog(
+      context: context,
+      builder: (_) => _BatchRenameDialog(selectedPaths: _selectedPaths.toList()),
+    ).then((_) { if (mounted) _loadDirectory(); });
+  }
+
   void _showProperties(FileItem item) {
     showDialog(
       context: context,
@@ -286,7 +295,10 @@ class _FileBrowserState extends State<FileBrowser> {
                 await FileUtils.rename(item.path, controller.text);
                 if (mounted) _loadDirectory();
               }
-              if (mounted) Navigator.pop(context);
+              final ctx = context;
+              if (mounted) {
+                Navigator.pop(ctx);
+              }
             },
             child: const Text('Rename'),
           ),
@@ -350,6 +362,8 @@ class _FileBrowserState extends State<FileBrowser> {
             IconButton(icon: const Icon(Icons.copy, color: OneDarkColors.cyan), onPressed: _copySelected, tooltip: 'Copy selected'),
           if (inSelectMode)
             IconButton(icon: const Icon(Icons.content_paste, color: OneDarkColors.amber), onPressed: _cutSelected, tooltip: 'Cut selected'),
+          if (inSelectMode)
+            IconButton(icon: const Icon(Icons.edit_note, color: OneDarkColors.cyan), onPressed: _batchRename, tooltip: 'Batch rename'),
           if (inSelectMode)
             PopupMenuButton<bool>(
               icon: const Icon(Icons.tune, color: OneDarkColors.fgDim),
@@ -535,5 +549,136 @@ class _FileBrowserState extends State<FileBrowser> {
       if (_isLoading) const Expanded(child: Center(child: CircularProgressIndicator()))
       else Expanded(child: _viewMode == ViewMode.details ? _buildDetailsView() : _buildGridView()),
     ]);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Batch rename dialog
+// ---------------------------------------------------------------------------
+
+class _BatchRenameDialog extends StatefulWidget {
+  final List<String> selectedPaths;
+  const _BatchRenameDialog({required this.selectedPaths});
+  @override
+  State<_BatchRenameDialog> createState() => _BatchRenameDialogState();
+}
+
+class _BatchRenameDialogState extends State<_BatchRenameDialog> {
+  final _prefixController = TextEditingController();
+  final _suffixController = TextEditingController();
+  String _mode = 'prefix'; // 'prefix', 'suffix', or 'regex'
+  final _regexController = TextEditingController();
+  final _replacementController = TextEditingController();
+
+  List<MapEntry<String, String>> get _previewEntries {
+    return widget.selectedPaths.map((path) {
+      final name = p.basename(path);
+      String newName;
+      if (_mode == 'prefix') {
+        newName = '${_prefixController.text}$name';
+      } else if (_mode == 'suffix') {
+        newName = '$name${_suffixController.text}';
+      } else {
+        try {
+          newName = name.replaceAll(RegExp(_regexController.text), _replacementController.text);
+        } catch (_) {
+          newName = name;
+        }
+      }
+      return MapEntry(name, newName);
+    }).toList();
+  }
+
+  @override
+  void dispose() {
+    _prefixController.dispose();
+    _suffixController.dispose();
+    _regexController.dispose();
+    _replacementController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: OneDarkColors.bg,
+      title: Text('Batch Rename (${widget.selectedPaths.length})', style: const TextStyle(color: OneDarkColors.fg)),
+      content: SizedBox(
+        width: 400,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SegmentedButton<String>(
+                segments: [
+                  ButtonSegment(value: 'prefix', label: Text('Prefix'), icon: Icon(Icons.text_fields, size: 16)),
+                  ButtonSegment(value: 'suffix', label: Text('Suffix'), icon: Icon(Icons.text_format, size: 16)),
+                  ButtonSegment(value: 'regex', label: Text('Regex'), icon: Icon(Icons.functions, size: 16)),
+                ],
+                selected: {_mode},
+                onSelectionChanged: (v) => setState(() => _mode = v.first),
+              ),
+              const SizedBox(height: 12),
+              if (_mode == 'prefix') ...[
+                TextField(
+                  controller: _prefixController,
+                  decoration: const InputDecoration(labelText: 'Prefix', border: OutlineInputBorder()),
+                  style: const TextStyle(color: OneDarkColors.fg),
+                ),
+              ] else if (_mode == 'suffix') ...[
+                TextField(
+                  controller: _suffixController,
+                  decoration: const InputDecoration(labelText: 'Suffix', border: OutlineInputBorder()),
+                  style: const TextStyle(color: OneDarkColors.fg),
+                ),
+              ] else ...[
+                TextField(
+                  controller: _regexController,
+                  decoration: const InputDecoration(labelText: 'Regex pattern', border: OutlineInputBorder()),
+                  style: const TextStyle(color: OneDarkColors.fg),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _replacementController,
+                  decoration: const InputDecoration(labelText: 'Replacement', border: OutlineInputBorder()),
+                  style: const TextStyle(color: OneDarkColors.fg),
+                ),
+              ],
+              const SizedBox(height: 12),
+              const Text('Preview:', style: TextStyle(color: OneDarkColors.cyan, fontSize: 12)),
+              const Divider(height: 1),
+              ..._previewEntries.map((e) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Expanded(child: Text(e.key, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11))),
+                    const Icon(Icons.arrow_forward, size: 14, color: OneDarkColors.fgDim),
+                    Expanded(child: Text(e.value, style: const TextStyle(color: OneDarkColors.green, fontSize: 11))),
+                  ],
+                ),
+              )),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () async {
+            for (final entry in _previewEntries) {
+              if (entry.key != entry.value) {
+                try { await FileUtils.rename(entry.key, entry.value); } catch (_) {}
+              }
+            }
+            final ctx = context;
+              if (mounted) {
+                Navigator.pop(ctx);
+              }
+          },
+          child: const Text('Apply'),
+        ),
+      ],
+    );
   }
 }

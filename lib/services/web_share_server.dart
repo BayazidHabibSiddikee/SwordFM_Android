@@ -450,7 +450,7 @@ class WebShareServer {
       Uri uri = request.uri.replace(query: rawQuery);
       String subDir = uri.queryParameters['subdir'] ?? '';
       // Validate subdir doesn't escape root (belt-and-suspenders).
-      if (subDir.contains('..') || subDir.contains('\0')) {
+      if (subDir.contains('..') || subDir.contains(String.fromCharCode(0))) {
         _sendJsonResponse(request, {'error': 'Invalid path'}, statusCode: 400);
         return;
       }
@@ -490,7 +490,7 @@ class WebShareServer {
     }
     Uri uri = request.uri.replace(query: request.uri.query);
     String subDir = uri.queryParameters['subdir'] ?? '';
-    if (subDir.contains('..') || subDir.contains('\0')) {
+    if (subDir.contains('..') || subDir.contains(String.fromCharCode(0))) {
       _sendResponse(request, 400, 'Bad request');
       return;
     }
@@ -538,7 +538,7 @@ class WebShareServer {
     }
     Uri uri = request.uri.replace(query: request.uri.query);
     String subDir = uri.queryParameters['subdir'] ?? '';
-    if (subDir.contains('..') || subDir.contains('\0')) {
+    if (subDir.contains('..') || subDir.contains(String.fromCharCode(0))) {
       _sendJsonResponse(request, {'error': 'Bad request'}, statusCode: 400);
       return;
     }

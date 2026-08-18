@@ -7,8 +7,10 @@ A recreation of the C++/Qt6 file manager **SwordFM** built using Flutter. This v
 *   **Details + Icon Views**: Toggleable grid/list views for files and folders.
 *   **Unified Sidebar**: Quick access to Home, Desktop, Downloads, Trash, and customizable Bookmarks.
 *   **Collapsible Preview Panel**: Live preview for code (with syntax highlighting), markdown (formatted rendering), images (scalable), and text files.
+*   **Search & Trash**: Recursive search (case-insensitive, hidden-file control, limit), app-local trash with Restore / Empty Trash / Permanent Delete.
 *   **LAN Web Sharing**: An in-app server that generates a QR code and password. Scanners on the LAN can browse, download, and upload files via a clean web UI (no Python or external server setup required!).
 *   **Bluetooth File Sharing**: Connect your Windows and Android devices directly over Bluetooth for seamless, offline peer-to-peer file transfers.
+*   **PDF Previews**: Real PDF rendering (multi-page) via pdfx; PDF export from Markdown with headings/paragraphs/code blocks.
 *   **Interactive Folder Graph**: A native interactive graph visualization of folder hierarchies.
 
 ---
