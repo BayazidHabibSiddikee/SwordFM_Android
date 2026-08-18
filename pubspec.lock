@@ -17,6 +17,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.7.0"
+  asn1lib:
+    dependency: transitive
+    description:
+      name: asn1lib
+      sha256: "9a8f69025044eb466b9b60ef3bc3ac99b4dc6c158ae9c56d25eeccf5bc56d024"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.6.5"
   async:
     dependency: transitive
     description:
@@ -81,6 +89,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.19.1"
+  convert:
+    dependency: transitive
+    description:
+      name: convert
+      sha256: b30acd5944035672bc15c6b7a8b47d773e41e2f17de064350988c5d02adb1c68
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.2"
   crypto:
     dependency: "direct main"
     description:
@@ -97,6 +113,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.9"
+  dartssh2:
+    dependency: "direct main"
+    description:
+      name: dartssh2
+      sha256: "8e464a4952bcf36b9e844521b4d05b6e30ed0491d00df98276b3cd5deec324c9"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.3.0"
   dbus:
     dependency: transitive
     description:
@@ -105,6 +129,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.14"
+  dio:
+    dependency: "direct main"
+    description:
+      name: dio
+      sha256: "0df44ebba85e503958eb75d07eedd3c86275a58c1d3eda2f2ce8f0a2c3abbb3c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.11.0"
+  dio_web_adapter:
+    dependency: transitive
+    description:
+      name: dio_web_adapter
+      sha256: "0786d0b7295a373de356fc0af4f6f1d0ab2844ed31b19dfc5e7556b70e24212c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.1"
   extension:
     dependency: transitive
     description:
@@ -184,6 +224,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.2"
+  http_parser:
+    dependency: transitive
+    description:
+      name: http_parser
+      sha256: "178d74305e7866013777bab2c3d8726205dc5a4dd935297175b19a23a2e66571"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.1.2"
   image:
     dependency: transitive
     description:
@@ -560,6 +608,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.15.0"
+  pinenacl:
+    dependency: transitive
+    description:
+      name: pinenacl
+      sha256: "57e907beaacbc3c024a098910b6240758e899674de07d6949a67b52fd984cbdf"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.6.0"
   platform:
     dependency: transitive
     description:
@@ -576,6 +632,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.8"
+  pointycastle:
+    dependency: transitive
+    description:
+      name: pointycastle
+      sha256: "92aa3841d083cc4b0f4709b5c74fd6409a3e6ba833ffc7dc6a8fee096366acf5"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.0"
   posix:
     dependency: transitive
     description:
@@ -725,6 +789,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.1"
+  webdav_client:
+    dependency: "direct main"
+    description:
+      name: webdav_client
+      sha256: "682fffc50b61dc0e8f46717171db03bf9caaa17347be41c0c91e297553bf86b2"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.2"
   win32:
     dependency: transitive
     description:
