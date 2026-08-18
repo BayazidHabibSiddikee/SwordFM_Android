@@ -23,6 +23,8 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.*
 import java.util.*
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import org.json.JSONObject
 
@@ -54,12 +56,13 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
         BluetoothAdapter.getDefaultAdapter()
     }
 
-    private val MY_UUID: UUID = UUID.fromString("809a2503-bc81-4235-8669-026857147b1e")
+    private val MY_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
     private const val NAME = "SwordFM_Bluetooth"
 
     private var serverThread: ServerThread? = null
     private var connectThread: ConnectThread? = null
     private var transferThread: TransferThread? = null
+    private var isSending = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -144,6 +147,15 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                 stopAllThreads()
                 result.success(null)
             }
+            "cancelTransfer" -> {
+                if (transferThread != null && isSending) {
+                    transferThread?.cancel()
+                    runOnMain {
+                        methodChannel?.invokeMethod("onTransferError", mapOf("message" to "Transfer cancelled by user"))
+                    }
+                }
+                result.success(null)
+            }
             else -> {
                 result.notImplemented()
             }
@@ -197,6 +209,11 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
         }
     }
 
+    companion object {
+        private const val CONNECT_TIMEOUT_MS = 30000L
+        private const val MAX_CONNECT_RETRIES = 1
+    }
+
     // Thread for connecting to a remote device
     private inner class ConnectThread(val device: BluetoothDevice) : Thread() {
         private val mmSocket: BluetoothSocket? by lazy(LazyThreadSafetyMode.NONE) {
@@ -205,21 +222,59 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
 
         override fun run() {
             bluetoothAdapter?.cancelDiscovery()
+            var lastException: IOException? = null
 
-            try {
-                mmSocket?.let { socket ->
-                    socket.connect()
-                    runOnMain { startTransfer(socket) }
+            // Try initial connect with timeout, then one auto-retry
+            for (attempt in 0..MAX_CONNECT_RETRIES) {
+                if (attempt > 0) {
+                    runOnMain {
+                        methodChannel?.invokeMethod("onTransferProgress", mapOf(
+                            "filename" to (device.name ?: "Device"),
+                            "bytesTransferred" to 0,
+                            "totalBytes" to 0,
+                            "isSending" to false,
+                            "message" to "Reconnecting..."
+                        ))
+                    }
+                    try { Thread.sleep(2000) } catch (_: InterruptedException) { break }
                 }
-            } catch (e: IOException) {
-                runOnMain {
-                    methodChannel?.invokeMethod("onDisconnected", null)
-                    methodChannel?.invokeMethod("onTransferError", mapOf("message" to "Connection failed: ${e.message}"))
+                val socket = try {
+                    val latch = CountDownLatch(1)
+                    var sock: BluetoothSocket? = null
+                    var connException: Exception? = null
+                    thread {
+                        try {
+                            sock = mmSocket
+                            sock?.connect()
+                            latch.countDown()
+                        } catch (e: Exception) {
+                            connException = e
+                            latch.countDown()
+                        }
+                    }
+                    if (latch.await(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                        if (connException != null) throw IOException("Connect failed: ${connException.message}", connException)
+                        sock
+                    } else {
+                        throw IOException("Connection timed out after ${CONNECT_TIMEOUT_MS}ms")
+                    }
+                } catch (e: IOException) {
+                    lastException = e
+                    try { mmSocket?.close() } catch (_: IOException) {}
+                    if (attempt < MAX_CONNECT_RETRIES) continue
+                    throw e
                 }
-                try {
-                    mmSocket?.close()
-                } catch (closeException: IOException) {
+
+                socket?.let {
+                    runOnMain { startTransfer(it) }
+                    return
                 }
+            }
+
+            // All retries exhausted
+            runOnMain {
+                methodChannel?.invokeMethod("onDisconnected", null)
+                methodChannel?.invokeMethod("onTransferError", mapOf("message" to "Connection failed: ${lastException?.message}"))
             }
         }
 
@@ -275,7 +330,16 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     if (!downloadFolder.exists()) {
                         downloadFolder.mkdirs()
                     }
-                    val outputFile = File(downloadFolder, filename)
+                    // Handle filename collision: append (1), (2), etc.
+                    var outputFile = File(downloadFolder, filename)
+                    var collisionCounter = 1
+                    while (outputFile.exists()) {
+                        val baseName = filename.substringBeforeLast('.')
+                        val ext = filename.substringAfterLast('.', "")
+                        val newFilename = if (ext.isEmpty) "$filename ($collisionCounter)" else "$baseName ($collisionCounter).$ext"
+                        outputFile = File(downloadFolder, newFilename)
+                        collisionCounter++
+                    }
                     val fileOutputStream = FileOutputStream(outputFile)
 
                     var totalBytesReceived = 0L
@@ -332,6 +396,7 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                 try {
                     val fileLength = file.length()
 
+                    isSending = true
                     runOnMain {
                         methodChannel?.invokeMethod("onTransferStarted", mapOf("filename" to file.name, "isSending" to true))
                     }
@@ -376,13 +441,15 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
 
                     if (!isCancelled) {
                         runOnMain {
-                            methodChannel?.invokeMethod("onTransferComplete", mapOf("savedPath" to file.absolutePath))
+                            methodChannel?.invokeMethod("onTransferComplete", mapOf("savedPath" to ""))
                         }
                     }
                 } catch (e: Exception) {
                     runOnMain {
                         methodChannel?.invokeMethod("onTransferError", mapOf("message" to "Send failed: ${e.message}"))
                     }
+                } finally {
+                    isSending = false
                 }
             }
         }
