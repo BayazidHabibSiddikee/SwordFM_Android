@@ -5,6 +5,7 @@ import 'widgets/file_browser.dart';
 import 'widgets/preview_panel.dart';
 import 'screens/folder_graph_screen.dart';
 import 'screens/search_screen.dart';
+import 'screens/trash_screen.dart';
 
 void main() {
   runApp(const SwordFM());
