@@ -9,7 +9,32 @@ import 'package:path/path.dart' as p;
 ///   - Creating ZIP/TAR archives from files or directories (recursive)
 ///
 /// Unsupported formats: 7z, RAR, and bzip2 require native/FFI bindings.
+import 'package:crypto/crypto.dart';
+
 class ArchiveService {
+  /// Compute SHA-256 hex digest of a file. Returns null on error.
+  static Future<String?> sha256OfFile(String path) async {
+    try {
+      final bytes = await File(path).readAsBytes();
+      return sha256.convert(bytes).toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Find potential duplicates in [paths] by SHA-256 hash.
+  /// Returns map: hash -> list of paths with that hash.
+  static Future<Map<String, List<String>>> findDuplicates(List<String> paths) async {
+    final Map<String, List<String>> groups = {};
+    for (final p in paths) {
+      final h = await sha256OfFile(p);
+      if (h != null) {
+        groups.putIfAbsent(h, () => []).add(p);
+      }
+    }
+    // Only keep groups with more than one entry
+    return {for (final e in groups.entries) if (e.value.length > 1) e.key: e.value};
+  }
   /// Supported extensions mapped to their operation type.
   static const Set<String> supportedExts = {
     '.zip', '.tar', '.gz', '.tgz', '.tar.gz',

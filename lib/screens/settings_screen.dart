@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/theme.dart';
+import 'duplicates_screen.dart';
 
 /// Settings screen for configuring the app.
 class SettingsScreen extends StatelessWidget {
@@ -76,6 +77,20 @@ class SettingsScreen extends StatelessWidget {
 
           const SizedBox(height: 16),
 
+          // Tools
+          _sectionTitle('Tools'),
+          _settingTile(
+            icon: Icons.all_inclusive,
+            title: 'Find Duplicates',
+            subtitle: 'Scan for duplicate files by hash',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const DuplicatesScreen()),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // About
           _sectionTitle('About'),
           _settingTile(
@@ -106,13 +121,14 @@ class SettingsScreen extends StatelessWidget {
     required String title,
     String? subtitle,
     Widget? trailing,
+    VoidCallback? onTap,
   }) {
     return ListTile(
       leading: Icon(icon, color: OneDarkColors.cyan),
       title: Text(title, style: const TextStyle(color: OneDarkColors.fg)),
       subtitle: subtitle != null ? Text(subtitle, style: const TextStyle(color: OneDarkColors.fgDim)) : null,
       trailing: trailing,
-      onTap: trailing is Switch ? null : () {},
+      onTap: onTap ?? (trailing is Switch ? null : () {}),
     );
   }
 }
