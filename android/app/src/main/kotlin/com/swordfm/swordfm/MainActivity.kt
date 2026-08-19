@@ -52,6 +52,9 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
     companion object {
         private const val REQUEST_PICK_FILE = 1001
         private var lastResultPaths: List<String>? = null
+        private const val CONNECT_TIMEOUT_MS = 30000L
+        private const val MAX_CONNECT_RETRIES = 1
+        private const val NAME = "SwordFM_Bluetooth"
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -83,7 +86,6 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
     }
 
     private val MY_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-    private const val NAME = "SwordFM_Bluetooth"
 
     private var serverThread: ServerThread? = null
     private var connectThread: ConnectThread? = null
@@ -244,10 +246,6 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
         }
     }
 
-    companion object {
-        private const val CONNECT_TIMEOUT_MS = 30000L
-        private const val MAX_CONNECT_RETRIES = 1
-    }
 
     // Thread for connecting to a remote device
     private inner class ConnectThread(val device: BluetoothDevice) : Thread() {
@@ -371,7 +369,7 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     while (outputFile.exists()) {
                         val baseName = filename.substringBeforeLast('.')
                         val ext = filename.substringAfterLast('.', "")
-                        val newFilename = if (ext.isEmpty) "$filename ($collisionCounter)" else "$baseName ($collisionCounter).$ext"
+                        val newFilename = if (ext.isEmpty()) "$filename ($collisionCounter)" else "$baseName ($collisionCounter).$ext"
                         outputFile = File(downloadFolder, newFilename)
                         collisionCounter++
                     }

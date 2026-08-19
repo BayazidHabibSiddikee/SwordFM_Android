@@ -13,6 +13,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import io.flutter.plugin.common.MethodChannel
 import java.io.*
+import java.nio.ByteBuffer
 import java.util.*
 import kotlin.concurrent.thread
 import org.json.JSONObject
@@ -154,7 +155,7 @@ class TransferWorker(private val socket: BluetoothSocket, private val service: B
             val fileSize = metaJson.getLong("size")
 
             mainHandler.post {
-                service.methodChannel?.invokeMethod("onTransferStarted", mapOf("filename" to filename, "isSending" to false))
+                BluetoothShareService.methodChannel?.invokeMethod("onTransferStarted", mapOf("filename" to filename, "isSending" to false))
             }
 
             val downloadDir = File(
@@ -167,7 +168,7 @@ class TransferWorker(private val socket: BluetoothSocket, private val service: B
             while (outFile.exists()) {
                 val base = filename.substringBeforeLast('.')
                 val ext = filename.substringAfterLast('.', "")
-                val newFilename = if (ext.isEmpty) "$filename ($counter)" else "$base ($counter).$ext"
+                val newFilename = if (ext.isEmpty()) "$filename ($counter)" else "$base ($counter).$ext"
                 outFile = File(downloadDir, newFilename)
                 counter++
             }
@@ -185,7 +186,7 @@ class TransferWorker(private val socket: BluetoothSocket, private val service: B
                 if (now - lastUpdate > 100) {
                     lastUpdate = now
                     mainHandler.post {
-                        service.methodChannel?.invokeMethod("onTransferProgress", mapOf(
+                        BluetoothShareService.methodChannel?.invokeMethod("onTransferProgress", mapOf(
                             "filename" to filename, "bytesTransferred" to totalRead,
                             "totalBytes" to fileSize, "isSending" to false
                         ))
@@ -195,14 +196,14 @@ class TransferWorker(private val socket: BluetoothSocket, private val service: B
             fos.close()
             if (!cancelled) {
                 mainHandler.post {
-                    service.methodChannel?.invokeMethod("onTransferComplete", mapOf("savedPath" to outFile.absolutePath))
+                    BluetoothShareService.methodChannel?.invokeMethod("onTransferComplete", mapOf("savedPath" to outFile.absolutePath))
                 }
             }
         } catch (e: Exception) {
             if (!cancelled) {
                 mainHandler.post {
-                    service.methodChannel?.invokeMethod("onTransferError", mapOf("message" to "Receive failed: ${e.message}"))
-                    service.methodChannel?.invokeMethod("onDisconnected", null)
+                    BluetoothShareService.methodChannel?.invokeMethod("onTransferError", mapOf("message" to "Receive failed: ${e.message}"))
+                    BluetoothShareService.methodChannel?.invokeMethod("onDisconnected", null)
                 }
             }
         }
