@@ -80,11 +80,21 @@ class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   bool _sidebarVisible = true;
   bool _previewVisible = true;
-  String _currentPath = '/home';
+  String _currentPath = ''; // resolved in initState for Android
   FileItem? _selectedItem;
 
   // ignore: prefer_final_fields — mutated via setState
   List<String> _bookmarks = []; // populated from prefs in real app
+  final Set<int> _hoveredIndex = {}; // tracks which sidebar item is hovered
+
+  @override
+  void initState() {
+    super.initState();
+    // On Android, resolve the actual storage root synchronously after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _currentPath = AppPaths.home);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -124,13 +134,13 @@ class _MainScreenState extends State<MainScreen> {
                           Expanded(
                             child: ListView(
                               children: [
-                                _sidebarTile(Icons.home, 'Home', AppPaths.home),
-                                _sidebarTile(Icons.desktop_windows, 'Desktop', AppPaths.desktop),
-                                _sidebarTile(Icons.document_scanner, 'Documents', AppPaths.documents),
-                                _sidebarTile(Icons.download, 'Downloads', AppPaths.downloads),
-                                _sidebarTile(Icons.image, 'Pictures', AppPaths.pictures),
-                                _sidebarTile(Icons.music_note, 'Music', AppPaths.music),
-                                _sidebarTile(Icons.movie, 'Videos', AppPaths.videos),
+                                _sidebarTile(0, Icons.home, 'Home', AppPaths.home),
+                                _sidebarTile(1, Icons.desktop_windows, 'Desktop', AppPaths.desktop),
+                                _sidebarTile(2, Icons.document_scanner, 'Documents', AppPaths.documents),
+                                _sidebarTile(3, Icons.download, 'Downloads', AppPaths.downloads),
+                                _sidebarTile(4, Icons.image, 'Pictures', AppPaths.pictures),
+                                _sidebarTile(5, Icons.music_note, 'Music', AppPaths.music),
+                                _sidebarTile(6, Icons.movie, 'Videos', AppPaths.videos),
                                 ListTile(
                                   leading: Icon(Icons.delete_outline, size: 18, color: OneDarkColors.fgDim),
                                   title: const Text('Trash', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13)),
@@ -283,7 +293,7 @@ class _MainScreenState extends State<MainScreen> {
             const BluetoothScreen(),
             const LANSharingScreen(),
             const SettingsScreen(),
-            const StorageAnalysisScreen(),
+            StorageAnalysisScreen(rootPath: AppPaths.home),
             const NetworkScreen(),
           ],
         ),
@@ -337,29 +347,34 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _sidebarTile(IconData icon, String label, String path) {
+  Widget _sidebarTile(int index, IconData icon, String label, String path) {
     final isActive = _currentPath.startsWith(path) &&
         (_currentPath == path || _currentPath.startsWith('$path/'));
-    return ListTile(
-      leading: Icon(icon, size: 18, color: isActive ? OneDarkColors.cyan : OneDarkColors.fg),
-      title: Row(
-        children: [
-          Flexible(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: isActive ? OneDarkColors.selectFg : OneDarkColors.fg,
-                fontSize: 13,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hoveredIndex.add(index)),
+      onExit: (_) => setState(() => _hoveredIndex.remove(index)),
+      child: ListTile(
+        leading: Icon(icon, size: 18, color: isActive ? OneDarkColors.cyan : OneDarkColors.fg),
+        tileColor: _hoveredIndex.contains(index) ? OneDarkColors.dim.withValues(alpha: 0.3) : null,
+        title: Row(
+          children: [
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: isActive ? OneDarkColors.selectFg : OneDarkColors.fg,
+                  fontSize: 13,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
             ),
-          ),
-        ],
+          ],
+        ),
+        selected: isActive,
+        selectedTileColor: OneDarkColors.select,
+        onTap: () => setState(() => _currentPath = path),
       ),
-      selected: isActive,
-      selectedTileColor: OneDarkColors.select,
-      onTap: () => setState(() => _currentPath = path),
     );
   }
 
