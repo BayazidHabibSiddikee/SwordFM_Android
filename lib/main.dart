@@ -3,8 +3,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'theme/theme.dart';
 import 'package:dynamic_color/dynamic_color.dart';
-import 'utils/file_utils.dart';
+import 'utils/app_paths.dart' show StoragePermissions;
 import 'widgets/file_browser.dart';
+import 'utils/file_utils.dart' show FileItem;
 import 'widgets/preview_panel.dart';
 import 'screens/folder_graph_screen.dart';
 import 'screens/search_screen.dart';
@@ -15,14 +16,20 @@ import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
 import 'screens/network_screen.dart';
 import 'services/entitlement_service.dart';
+import 'utils/constants.dart' show AppPaths;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
     await Firebase.initializeApp();
   } catch (e) {
-    // Firebase may not be configured yet (google-services.json template)
-    debugPrint('Firebase init skipped: \$e');
+    debugPrint('Firebase init skipped: $e');
+  }
+  // Request storage/media permissions before app starts
+  try {
+    await StoragePermissions.ensurePermissions();
+  } catch (e) {
+    debugPrint('Permission request failed: $e');
   }
   runApp(const SwordFM());
 }
