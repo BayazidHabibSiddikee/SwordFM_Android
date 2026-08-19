@@ -107,14 +107,16 @@ class _MainScreenState extends State<MainScreen> {
             // Tab 0: Files
             Row(
               children: [
-                // ── Sidebar ──────────────────────────────────────────────
-                if (_sidebarVisible && !isMobile)
-                  SizedBox(
-                    width: 200,
+                // ── Sidebar (always in tree, animated via width) ─────────
+                IgnorePointer(
+                  ignoring: !_sidebarVisible,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: _sidebarVisible ? 200 : 0,
                     child: Card(
                       color: OneDarkColors.bgDark,
                       elevation: 0,
-                      margin: const EdgeInsets.only(right: 0),
+                      margin: EdgeInsets.zero,
                       child: Column(
                         children: [
                           // Sidebar header
@@ -133,6 +135,8 @@ class _MainScreenState extends State<MainScreen> {
                           // Places list
                           Expanded(
                             child: ListView(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
                               children: [
                                 _sidebarTile(0, Icons.home, 'Home', AppPaths.home),
                                 _sidebarTile(1, Icons.desktop_windows, 'Desktop', AppPaths.desktop),
@@ -180,6 +184,7 @@ class _MainScreenState extends State<MainScreen> {
                       ),
                     ),
                   ),
+                ),
 
                 // ── Main file browser area ───────────────────────────────
                 Expanded(
