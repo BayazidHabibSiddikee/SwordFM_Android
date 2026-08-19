@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "80267762311",
+    "project_id": "swordfm-412e3",
+    "storage_bucket": "swordfm-412e3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:80267762311:android:bdcb69d85aaa7ebea87622",
+        "android_client_info": {
+          "package_name": "com.swordfm.swordfm"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyChW2PHVikd9u0qAcBkj5WFtBmeEZBQ7Ms"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

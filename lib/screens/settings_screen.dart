@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 import '../theme/theme.dart';
 import 'privacy_policy_screen.dart';
+import 'auth_screen.dart';
 import 'duplicates_screen.dart';
 
 /// Settings screen for configuring the app.
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
@@ -15,6 +22,25 @@ class SettingsScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('Settings', style: TextStyle(color: OneDarkColors.cyan, fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+
+          // Account
+          _settingTile(
+            icon: Icons.person_outline,
+            title: 'Account',
+            subtitle: 'Sign in with email/password',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              final result = await Navigator.push<bool>(
+                context,
+                MaterialPageRoute(builder: (_) => const AuthScreen()),
+              );
+              if (result == true && mounted) {
+                setState(() {}); // refresh
+              }
+            },
+          ),
+
           const SizedBox(height: 16),
 
           // Appearance

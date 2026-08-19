@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'theme/theme.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'utils/file_utils.dart';
@@ -13,7 +14,14 @@ import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
 import 'screens/network_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    // Firebase may not be configured yet (google-services.json template)
+    debugPrint('Firebase init skipped: \$e');
+  }
   runApp(const SwordFM());
 }
 

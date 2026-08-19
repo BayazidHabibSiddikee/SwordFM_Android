@@ -59,6 +59,9 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   saf: ^2.1.0
+  firebase_core: ^4.0.0
+  firebase_auth: ^6.0.0
+  shared_preferences: ^2.2.0
   easy_localization: ^3.0.0
   dynamic_color: ^1.7.0
 
