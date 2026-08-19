@@ -1,7 +1,6 @@
 name: swordfm
 description: "A new Flutter project."
 publish_to: 'none'
-
 version: 1.0.0+1
 
 environment:
@@ -33,9 +32,13 @@ dependencies:
   file_picker: ^12.0.0
   firebase_core: ^4.0.0
   firebase_auth: ^6.0.0
+  cloud_firestore: ^6.0.0
+  firebase_remote_config: ^6.0.0
   dynamic_color: ^1.7.0
   easy_localization: ^3.0.0
   shared_preferences: ^2.2.0
+  url_launcher: ^6.3.0
+  google_mobile_ads: ^6.0.0
 
 dev_dependencies:
   flutter_test:
