@@ -85,6 +85,12 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 
 ---
 
+### ✅ Phase 7 Complete — v1 Ready
+
+All 7 phases are now complete. The remaining items are intentionally deferred to post-v1.
+
+---
+
 ## 🔗 Repository Tracking files
 *   [plan.md](file:///home/sword/Documents/android/SwordFM_Android_V1/plan.md) — This document.
 *   [path.md](file:///home/sword/Documents/android/SwordFM_Android_V1/path.md) — Codebase file structure map.
