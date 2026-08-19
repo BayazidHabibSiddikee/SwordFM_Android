@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:provider/provider.dart';
 import 'theme/theme.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'utils/file_utils.dart';
@@ -13,6 +14,7 @@ import 'screens/lan_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
 import 'screens/network_screen.dart';
+import 'services/entitlement_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,11 +42,16 @@ class SwordFM extends StatelessWidget {
                   error: darkDynamic.error,
                 ))
             : baseTheme;
-        return MaterialApp(
-          title: 'SwordFM',
-          debugShowCheckedModeBanner: false,
-          theme: theme,
-          home: const MainScreen(),
+        return MultiProvider(
+          providers: [
+            ChangeNotifierProvider(create: (_) => EntitlementService()),
+          ],
+          child: MaterialApp(
+            title: 'SwordFM',
+            debugShowCheckedModeBanner: false,
+            theme: theme,
+            home: const MainScreen(),
+          ),
         );
       },
     );

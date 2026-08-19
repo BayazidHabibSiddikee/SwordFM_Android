@@ -41,8 +41,6 @@ class _Donatedialog extends StatefulWidget {
 }
 
 class _DonatedialogState extends State<_Donatedialog> {
-  String? _copiedField;
-
   void _copyToClipboard(String text, String field) {
     // In a real app, use Clipboard.setData
     ScaffoldMessenger.of(context).showSnackBar(
@@ -52,7 +50,6 @@ class _DonatedialogState extends State<_Donatedialog> {
         duration: const Duration(seconds: 2),
       ),
     );
-    setState(() => _copiedField = field);
   }
 
   @override

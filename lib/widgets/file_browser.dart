@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 import '../services/archive_service.dart';
+import 'convert_dialog.dart';
 import 'package:path/path.dart' as p;
 
 enum ViewMode { details, grid }
@@ -286,6 +287,13 @@ class _FileBrowserState extends State<FileBrowser> {
         if (ArchiveService.isArchive(item.path))
           _menuItem('Extract', Icons.folder_open, () => _extractArchive(item.path)),
         _menuItem('Properties', Icons.info_outline, () => _showProperties(item)),
+        if (item.isMarkdown)
+          _menuItem('Convert…', Icons.transform, () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => ConvertDialog(filePath: item.path)),
+            );
+          }),
       ],
     );
   }

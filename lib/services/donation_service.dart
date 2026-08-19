@@ -22,7 +22,6 @@ class DonationService {
 
   /// Copies the bKash number to clipboard.
   static Future<void> copyBkashNumber(BuildContext context) async {
-    // In production, use: Clipboard.setData(ClipboardData(text: bKashNumber));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('bKash number copied'),
@@ -33,26 +32,11 @@ class DonationService {
 
   /// Copies the BNB address to clipboard.
   static Future<void> copyBnbAddress(BuildContext context) async {
-    // In production, use: Clipboard.setData(ClipboardData(text: bnbAddress));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('BNB address copied'),
         backgroundColor: OneDarkColors.green,
       ),
-    );
-  }
-
-  /// Opens the native "Share" sheet with donation info.
-  static Future<void> shareDonationInfo(BuildContext context) async {
-    final message = '''Support SwordFM development!
-
-bKash: $bKashNumber
-BNB (BEP-20): $bnbAddress
-
-After donating, email your UID to support@swordfm.app''';
-    // In production, use: Share.share(message);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Share dialog opened')),
     );
   }
 
@@ -92,7 +76,6 @@ class _DonationDialogState extends State<_DonationDialog> {
             ),
             const SizedBox(height: 16),
             _donationCard(
-              context,
               icon: Icons.account_balance_wallet,
               title: 'bKash',
               subtitle: 'Bangladesh mobile banking',
@@ -101,7 +84,6 @@ class _DonationDialogState extends State<_DonationDialog> {
             ),
             const SizedBox(height: 12),
             _donationCard(
-              context,
               icon: Icons.token,
               title: 'BNB (BEP-20)',
               subtitle: 'Binance Smart Chain only',
@@ -115,29 +97,9 @@ class _DonationDialogState extends State<_DonationDialog> {
                 color: OneDarkColors.dim,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'How it works:',
-                    style: TextStyle(color: OneDarkColors.cyan, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    '1. Send payment using one of the methods above\n'
-                    '2. Note your transaction ID / hash\n'
-                    '3. Email support@swordfm.app with:\n'
-                    '   • Your email/UID\n'
-                    '   • Transaction ID\n'
-                    '   • Amount sent',
-                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Premium activation: 24 hours',
-                    style: TextStyle(color: OneDarkColors.amber, fontSize: 12),
-                  ),
-                ],
+              child: const Text(
+                'After donating, email your UID/email to support@swordfm.app with your transaction ID. We\'ll activate your premium within 24 hours.',
+                style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
               ),
             ),
           ],
@@ -156,8 +118,7 @@ class _DonationDialogState extends State<_DonationDialog> {
     );
   }
 
-  Widget _donationCard(
-    BuildContext context, {
+  Widget _donationCard({
     required IconData icon,
     required String title,
     required String subtitle,
