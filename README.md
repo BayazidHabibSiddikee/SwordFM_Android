@@ -7,23 +7,34 @@ A cross-platform file manager built with Flutter, recreating the C++/Qt6 **Sword
 ## 🚀 Features (Completed)
 
 ### File Management
-- **Details + Icon Views** — Toggle between list and grid layouts (`Ctrl+1` / `Ctrl+2` equivalent)
+- **Details + Icon Views** — Toggle between list and grid layouts
 - **Unified Sidebar** — Quick access to Home, Desktop, Documents, Downloads, Trash, Pictures, Music, Videos
-- **Bookmarks** — Add and manage custom bookmarks (persisted in-memory; SharedPreferences integration ready)
-- **Collapsible Preview Panel** — Live preview for code (syntax-aware), markdown (formatted rendering), images (scalable), and text files
-- **File Operations** — Copy, Cut, Paste, Rename, Delete (with confirmation dialog), Properties
-- **Multi-select** — Long-press to select multiple files
+- **Bookmarks** — Add and manage custom bookmarks (SharedPreferences persistence)
+- **Collapsible Preview Panel** — Live preview for code (syntax-aware), markdown (formatted rendering), PDFs (multi-page), images (scalable), and text files
+- **Document Conversion** — Convert markdown/text files to real PDF or DOCX via right-click "Convert…" menu item
+- **Storage Analysis** — Recursive folder-size scanner with depth-capped traversal
+- **Duplicate Finder** — SHA-256 hash-based duplicate detection across directories
+- **Network Drives** — WebDAV and SFTP profile management with transfer queue
+- **File Operations** — Copy, Cut, Paste, Rename, Delete (with confirmation dialog), Extract archives, Properties
+- **Multi-select** — Long-press to select multiple files; batch rename, copy, cut, delete
 - **Hidden Files Toggle** — Show/hide dotfiles
 - **Sort Options** — Sort by Name, Size, Date, Type (ascending/descending)
 - **Breadcrumb Navigation** — Tap any path segment to jump directly
 
 ### Wireless Sharing
-- **LAN Web Sharing** — Pure Dart HTTP server with QR code generation, PIN-gated session auth (cookie-based), path-traversal-safe uploads/downloads, streaming I/O, configurable share root, and client IP access log
-- **Bluetooth File Sharing** — RFCOMM socket connection to paired devices; frame protocol: [4B len][JSON {filename,size}][raw bytes] (see Protocol section below)
+- **LAN Web Sharing** — Pure Dart HTTP server with QR code generation, PIN-gated session auth (constant-time compare), path-traversal-safe uploads/downloads, streaming I/O, configurable share root, and client IP access log
+- **Bluetooth File Sharing** — RFCOMM socket connection to paired devices (SerialPort UUID interop with Linux swordblue); foreground service for background transfers; send/receive with progress bar, cancel, and filename-collision handling
+
+### Auth & Monetization
+- **Firebase Email/Password Auth** — Sign up, sign in, password reset, email verification
+- **Premium Entitlement** — Firestore-backed `users/{uid}` document; free vs premium toggle
+- **Donation Channels** — bKash (+8801723977791) with deep-link app opener; BNB BEP-20 address with one-tap copy
+- **Manual Activation Flow** — Donor emails UID → admin flips Firestore document to premium
 
 ### UI
 - **One Dark Theme** — Exact color match with the Linux version (cyan `#61AFEF`, green `#98C379`, amber `#E5C07B`, red `#E06C75`, purple `#C678DD`)
-- **Bottom Navigation** — Files | Bluetooth | LAN | Settings tabs
+- **Material You Dynamic Colors** — Falls back to One Dark when system dynamic colors unavailable
+- **Bottom Navigation** — Files | Bluetooth | LAN | Settings | Storage | Network tabs
 
 ---
 
@@ -118,8 +129,9 @@ for Bluetooth RFCOMM interop with `swordblue` on Linux.
 | FileUtils (CRUD ops) | 11 | ✅ |
 | WebShareServer (unit) | 22 | ✅ |
 | DocConverter | 22 | ✅ |
+| AuthService (error mapping) | 5 | ✅ |
 | App integration | 6 | ✅ |
-| **Total** | **73** | **100% pass** |
+| **Total** | **123** | **100% pass** |
 
 Run tests:
 ```bash
@@ -136,7 +148,10 @@ flutter test
 | Phase 2 | Native File System CRUD | ✅ Complete |
 | Phase 3 | LAN Web Sharing | ✅ Complete |
 | Phase 4 | Bluetooth File Sharing | ✅ Complete |
-| Phase 5 | Folder Graph & Document Conversion | 🔄 Planned |
+| Phase 5 | Folder Graph & Document Conversion | ✅ Complete |
+| Phase 6 | Storage Analysis + Duplicates | ✅ Complete |
+| Phase 7 | Polish & Distribution (CI, i18n, dynamic color, SAF) | ✅ Complete |
+| Phase 8 | Monetization & Premium (auth, donations, conversion gate) | ✅ Complete |
 
 ---
 
@@ -151,9 +166,9 @@ This Flutter project is a direct recreation of **[SwordFM](https://github.com/Ba
 | LAN sharing (swordshare) | Python server | Pure Dart HttpServer |
 | Bluetooth sharing (swordblue) | BlueZ/RFCOMM Python | Kotlin RFCOMM sockets |
 | One Dark theme | ✅ | ✅ |
-| Folder graph (swordgraph) | ✅ (Graphviz) | 🔄 Phase 5 |
-| Doc conversion (swordconv) | ✅ (pymupdf/mammoth) | 🔄 Phase 5 |
-| Keyboard shortcuts | ✅ (F2/F4/Ctrl+C etc.) | 🔄 Touch-first UI |
+| Folder graph (swordgraph) | ✅ (Graphviz) | ✅ Native Flutter graph |
+| Doc conversion (swordconv) | ✅ (pymupdf/mammoth) | ✅ Pure-Dart PDF + DOCX |
+| Keyboard shortcuts | ✅ (F2/F4/Ctrl+C etc.) | ✅ Context menus + long-press |
 
 ---
 

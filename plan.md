@@ -79,7 +79,7 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 
 | Metric | Value |
 |--------|-------|
-| Tests passing | 119 |
+| Tests passing | 123 |
 | Analysis errors | 0 |
 | Last push | master |
 

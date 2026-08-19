@@ -36,8 +36,8 @@
             android:configChanges="orientation|keyboardHidden|keyboardScreenSize|screenSize|smallestScreenSize|screenLayout"
             android:windowSoftInputMode="adjustResize">
             <meta-data
-                android:name="io.flutter.embedding.android.plugins.flutter_view_action"
-                android:value="true" />
+                android:name="flutterEmbedding"
+                android:value="2" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
