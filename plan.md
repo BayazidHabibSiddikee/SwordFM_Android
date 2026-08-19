@@ -79,7 +79,7 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 
 | Metric | Value |
 |--------|-------|
-| Tests passing | 114 |
+| Tests passing | 119 |
 | Analysis errors | 0 |
 | Last push | master |
 
@@ -88,6 +88,20 @@ Recreating the Linux-only C++/Qt6 file manager **SwordFM** as a modern, high-per
 ### ✅ Phase 7 Complete — v1 Ready
 
 All 7 phases are now complete. The remaining items are intentionally deferred to post-v1.
+
+---
+
+### ✅ Phase 8: Monetization & Premium (Complete)
+
+- [x] bKash donation channel (+8801723977791) with deep-link open
+- [x] BNB (BEP-20) crypto donation address copy
+- [x] Manual premium activation flow (donor emails UID → admin flips Firestore)
+- [x] EntitlementService — free/premium state via Firestore `users/{uid}` documents
+- [x] SettingsScreen — account card (email, verified badge, sign out, resend verification), premium toggle linking to donation dialog
+- [x] ConvertDialog — PDF & DOCX export from context menu on markdown files, Open result button
+- [x] PremiumGate skeleton wired into architecture (entitlement-aware on next auth cycle)
+- [ ] PremiumGate full enforcement — gated behind entitlement service (deferred to post-launch; conversion is currently available to all users)
+- [ ] AdMob banner ads — test IDs in place, live IDs pending AdMob account + Real Config setup
 
 ---
 
