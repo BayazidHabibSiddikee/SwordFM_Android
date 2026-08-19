@@ -107,80 +107,87 @@ class _MainScreenState extends State<MainScreen> {
             // Tab 0: Files
             Row(
               children: [
-                // ── Sidebar (always in tree, animated via width) ─────────
-                IgnorePointer(
-                  ignoring: !_sidebarVisible,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: _sidebarVisible ? 200 : 0,
-                    child: Card(
-                      color: OneDarkColors.bgDark,
-                      elevation: 0,
-                      margin: EdgeInsets.zero,
-                      child: Column(
-                        children: [
-                          // Sidebar header
-                          Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Row(
-                              children: [
-                                Icon(Icons.folder_special, color: OneDarkColors.cyan, size: 20),
-                                const SizedBox(width: 8),
-                                const Text('Places', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
-                              ],
-                            ),
-                          ),
-                          const Divider(height: 1),
+                // ── Sidebar (slides in/out via clipping, always present) ──
+                AnimatedSlide(
+                  offset: _sidebarVisible ? Offset.zero : const Offset(-1, 0),
+                  duration: const Duration(milliseconds: 220),
+                  child: AnimatedOpacity(
+                    opacity: _sidebarVisible ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 220),
+                    child: IgnorePointer(
+                      ignoring: !_sidebarVisible,
+                      child: SizedBox(
+                        width: 200,
+                        child: Card(
+                          color: OneDarkColors.bgDark,
+                          elevation: 0,
+                          margin: EdgeInsets.zero,
+                          child: Column(
+                            children: [
+                              // Sidebar header
+                              Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.folder_special, color: OneDarkColors.cyan, size: 20),
+                                    const SizedBox(width: 8),
+                                    const Text('Places', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                                  ],
+                                ),
+                              ),
+                              const Divider(height: 1),
 
-                          // Places list
-                          Expanded(
-                            child: ListView(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              children: [
-                                _sidebarTile(0, Icons.home, 'Home', AppPaths.home),
-                                _sidebarTile(1, Icons.desktop_windows, 'Desktop', AppPaths.desktop),
-                                _sidebarTile(2, Icons.document_scanner, 'Documents', AppPaths.documents),
-                                _sidebarTile(3, Icons.download, 'Downloads', AppPaths.downloads),
-                                _sidebarTile(4, Icons.image, 'Pictures', AppPaths.pictures),
-                                _sidebarTile(5, Icons.music_note, 'Music', AppPaths.music),
-                                _sidebarTile(6, Icons.movie, 'Videos', AppPaths.videos),
-                                ListTile(
-                                  leading: Icon(Icons.delete_outline, size: 18, color: OneDarkColors.fgDim),
-                                  title: const Text('Trash', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13)),
-                                  onTap: () => Navigator.of(context).push(
-                                    MaterialPageRoute(builder: (_) => const TrashScreen()),
-                                  ),
+                              // Places list
+                              Expanded(
+                                child: ListView(
+                                  shrinkWrap: true,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  children: [
+                                    _sidebarTile(0, Icons.home, 'Home', AppPaths.home),
+                                    _sidebarTile(1, Icons.desktop_windows, 'Desktop', AppPaths.desktop),
+                                    _sidebarTile(2, Icons.document_scanner, 'Documents', AppPaths.documents),
+                                    _sidebarTile(3, Icons.download, 'Downloads', AppPaths.downloads),
+                                    _sidebarTile(4, Icons.image, 'Pictures', AppPaths.pictures),
+                                    _sidebarTile(5, Icons.music_note, 'Music', AppPaths.music),
+                                    _sidebarTile(6, Icons.movie, 'Videos', AppPaths.videos),
+                                    ListTile(
+                                      leading: Icon(Icons.delete_outline, size: 18, color: OneDarkColors.fgDim),
+                                      title: const Text('Trash', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13)),
+                                      onTap: () => Navigator.of(context).push(
+                                        MaterialPageRoute(builder: (_) => const TrashScreen()),
+                                      ),
+                                    ),
+                                    const Divider(),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      child: Text('Bookmarks',
+                                          style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                                    ),
+                                    // Add bookmark button
+                                    ListTile(
+                                      leading: Icon(Icons.bookmark_add, size: 18, color: OneDarkColors.fgDim),
+                                      title: const Text('Add Bookmark', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
+                                      onTap: _addBookmark,
+                                    ),
+                                  ],
                                 ),
-                                const Divider(),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  child: Text('Bookmarks',
-                                      style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
-                                ),
-                                // Add bookmark button
-                                ListTile(
-                                  leading: Icon(Icons.bookmark_add, size: 18, color: OneDarkColors.fgDim),
-                                  title: const Text('Add Bookmark', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
-                                  onTap: _addBookmark,
-                                ),
-                              ],
-                            ),
-                          ),
+                              ),
 
-                          // Bottom spacer + status
-                          const Spacer(),
-                          Padding(
-                            padding: const EdgeInsets.all(8),
-                            child: Row(
-                              children: [
-                                Icon(Icons.info_outline, size: 14, color: OneDarkColors.fgDim),
-                                const SizedBox(width: 4),
-                                Text('$itemsCount items', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 10)),
-                              ],
-                            ),
+                              // Bottom spacer + status
+                              const Spacer(),
+                              Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.info_outline, size: 14, color: OneDarkColors.fgDim),
+                                    const SizedBox(width: 4),
+                                    Text('$itemsCount items', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 10)),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
