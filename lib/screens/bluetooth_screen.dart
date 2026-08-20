@@ -238,34 +238,68 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
             ),
           const SizedBox(height: 12),
 
-          // Action buttons
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton.icon(
-                onPressed: _requestPermissions,
-                icon: const Icon(Icons.privacy_tip),
-                label: const Text('Request Permissions'),
-              ),
-              FilledButton.icon(
-                onPressed:
-                    _permissionsReady && state == BluetoothState.disconnected
-                    ? _startServer
-                    : null,
-                icon: const Icon(Icons.bluetooth_connected),
-                label: const Text('Start Listening'),
-              ),
-              // Send button: only visible when connected and not already sending
-              FilledButton.icon(
-                onPressed:
-                    state == BluetoothState.connected && !_service.isSending
-                    ? _pickAndSendFiles
-                    : null,
-                icon: const Icon(Icons.upload_file),
-                label: const Text('Send Files'),
-              ),
-            ],
+          // Action buttons — responsive layout for all screen sizes
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 400;
+              return Column(
+                children: [
+                  if (isNarrow) ...[
+                    // Stack vertically on narrow screens
+                    FilledButton.icon(
+                      onPressed: _requestPermissions,
+                      icon: const Icon(Icons.privacy_tip),
+                      label: const Text('Request Permissions'),
+                      style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton.icon(
+                      onPressed: _permissionsReady && state == BluetoothState.disconnected ? _startServer : null,
+                      icon: const Icon(Icons.bluetooth_connected),
+                      label: const Text('Start Listening'),
+                      style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton.icon(
+                      onPressed: state == BluetoothState.connected && !_service.isSending ? _pickAndSendFiles : null,
+                      icon: const Icon(Icons.upload_file),
+                      label: const Text('Send Files'),
+                      style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                    ),
+                  ] else ...[
+                    // Side-by-side on wider screens
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _requestPermissions,
+                            icon: const Icon(Icons.privacy_tip),
+                            label: const Text('Request Permissions'),
+                            style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _permissionsReady && state == BluetoothState.disconnected ? _startServer : null,
+                            icon: const Icon(Icons.bluetooth_connected),
+                            label: const Text('Start Listening'),
+                            style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton.icon(
+                      onPressed: state == BluetoothState.connected && !_service.isSending ? _pickAndSendFiles : null,
+                      icon: const Icon(Icons.upload_file),
+                      label: const Text('Send Files'),
+                      style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                    ),
+                  ],
+                ],
+              );
+            },
           ),
           const SizedBox(height: 16),
 

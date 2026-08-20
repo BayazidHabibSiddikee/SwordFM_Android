@@ -531,7 +531,7 @@ class _FileBrowserState extends State<FileBrowser> {
                 const SizedBox(width: 10),
                 Expanded(child: Text(item.name, style: const TextStyle(color: OneDarkColors.fg, fontSize: 13))),
                 if (item.isDirectory)
-                  SizedBox(width: 60, child: Row(
+                  Flexible(flex: 2, child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.folder, size: 11, color: OneDarkColors.fgDim),
@@ -547,9 +547,9 @@ class _FileBrowserState extends State<FileBrowser> {
                     ],
                   ))
                 else
-                  SizedBox(width: 60, child: Text(item.formattedSize, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12))),
-                SizedBox(width: 120, child: Text(item.formattedDate, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12))),
-                SizedBox(width: 80, child: Text(item.extension.isEmpty ? 'Folder' : item.extension, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12))),
+                  Flexible(flex: 2, child: Text(item.formattedSize, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12), overflow: TextOverflow.ellipsis)),
+                Flexible(flex: 3, child: Text(item.formattedDate, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12), overflow: TextOverflow.ellipsis)),
+                Flexible(flex: 1, child: Text(item.extension.isEmpty ? 'Folder' : item.extension, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12), overflow: TextOverflow.ellipsis)),
               ],
             ),
           ),
@@ -563,9 +563,9 @@ class _FileBrowserState extends State<FileBrowser> {
       children: [
         SizedBox(width: _selectionMode == SelectionMode.multi ? 42 : 28),
         Expanded(child: Text('Name', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11))),
-        SizedBox(width: 60, child: Text('Size', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11))),
-        SizedBox(width: 120, child: Text('Date Modified', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11))),
-        SizedBox(width: 80, child: Text('Type', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11))),
+        Flexible(flex: 2, child: Text('Size', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11))),
+        Flexible(flex: 3, child: Text('Date Modified', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11))),
+        Flexible(flex: 1, child: Text('Type', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11))),
       ],
     );
   }
