@@ -218,6 +218,9 @@ class FileBrowser extends StatefulWidget {
   /// Called when the browser navigates to a new path (for breadcrumb/sidebar sync).
   final ValueChanged<String>? onPathChanged;
 
+  /// Called when the mark count changes (for status bar indicator).
+  final ValueChanged<int>? onMarksChanged;
+
   const FileBrowser({
     super.key,
     required this.initialPath,
@@ -225,6 +228,7 @@ class FileBrowser extends StatefulWidget {
     this.onSelectionChanged,
     this.onClipboardChanged,
     this.onPathChanged,
+    this.onMarksChanged,
   });
 
   @override
@@ -242,6 +246,7 @@ class _FileBrowserState extends State<FileBrowser> {
   SelectionMode _selectionMode = SelectionMode.none;
   // ignore: prefer_final_fields — mutated via setState
   Set<String> _selectedPaths = {};
+  final Set<String> _markedPaths = {}; // persistent mark state across directory changes
   final Map<String, int> _folderSizes = {};
   final Set<String> _loadingFolders = {};
 
@@ -487,6 +492,41 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   // ---------------------------------------------------------------------------
+  // Marks (persistent across directory changes, Space to toggle)
+  // ---------------------------------------------------------------------------
+
+  /// Returns the paths to act on: marked items override selection.
+  List<String> get _actionPaths =>
+      _markedPaths.isNotEmpty ? _markedPaths.toList() : _selectedPaths.toList();
+
+  void _toggleMarkSelection() {
+    if (_selectedPaths.isEmpty) return;
+    // If any selected item is unmarked, mark all; only unmark all if every
+    // selected item is already marked (matching Linux SwordFM behaviour).
+    final anyUnmarked = _selectedPaths.any((p) => !_markedPaths.contains(p));
+    setState(() {
+      for (final p in _selectedPaths) {
+        if (anyUnmarked) {
+          _markedPaths.add(p);
+        } else {
+          _markedPaths.remove(p);
+        }
+      }
+    });
+    _notifyMarksChanged();
+  }
+
+  void _clearMarks() {
+    if (_markedPaths.isEmpty) return;
+    setState(() => _markedPaths.clear());
+    _notifyMarksChanged();
+  }
+
+  void _notifyMarksChanged() {
+    widget.onMarksChanged?.call(_markedPaths.length);
+  }
+
+  // ---------------------------------------------------------------------------
   // Selection / clipboard reporting to the parent (status bar)
   // ---------------------------------------------------------------------------
 
@@ -582,8 +622,15 @@ class _FileBrowserState extends State<FileBrowser> {
   bool _handleKeyboardShortcut(KeyEvent event) {
     final key = event.logicalKey;
     final ctrl = HardwareKeyboard.instance.isControlPressed;
+    final shift = HardwareKeyboard.instance.isShiftPressed;
     final alt = HardwareKeyboard.instance.isAltPressed;
     final ch = event.character;
+
+    // Ctrl+Shift+Space: clear all marks
+    if (ctrl && shift && key == LogicalKeyboardKey.space) {
+      _clearMarks();
+      return true;
+    }
 
     if (ctrl && ch != null) return _handleCtrlCharShortcuts(ch);
     if (ctrl) return _handleCtrlKeyShortcuts(key);
@@ -662,6 +709,9 @@ class _FileBrowserState extends State<FileBrowser> {
 
   bool _handlePlainKeyShortcuts(LogicalKeyboardKey key) {
     switch (key) {
+      case LogicalKeyboardKey.space:
+        _toggleMarkSelection();
+        return true;
       case LogicalKeyboardKey.f2:
         _startInPlaceRename();
         return true;
@@ -732,6 +782,7 @@ class _FileBrowserState extends State<FileBrowser> {
               )
             : const ClipboardInfo.empty(),
       );
+      _clearMarks(); // auto-clear marks after paste (matching Linux SwordFM)
       _loadDirectory();
     });
   }
@@ -836,13 +887,14 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   Future<void> _deleteSelected() async {
-    if (_selectedPaths.isEmpty) return;
+    final paths = _actionPaths;
+    if (paths.isEmpty) return;
     final choice = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
         title: Text(
-          'Delete ${_selectedPaths.length} items?',
+          'Delete ${paths.length} items?',
           style: const TextStyle(color: OneDarkColors.fg),
         ),
         actions: [
@@ -865,13 +917,15 @@ class _FileBrowserState extends State<FileBrowser> {
       ),
     );
     if (choice == 'trash' && mounted) {
-      for (final path in _selectedPaths.toList()) {
+      for (final path in paths) {
         try {
           await FileUtils.moveToTrash(path);
         } catch (_) {}
       }
       _selectedPaths.clear();
+      _markedPaths.removeAll(paths);
       _notifySelectionChanged();
+      _notifyMarksChanged();
       if (mounted) _loadDirectory();
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
@@ -881,50 +935,54 @@ class _FileBrowserState extends State<FileBrowser> {
           ),
         );
     } else if (choice == 'delete' && mounted) {
-      for (final path in _selectedPaths.toList()) {
+      for (final path in paths) {
         try {
           await FileUtils.delete(path);
         } catch (_) {}
       }
       _selectedPaths.clear();
+      _markedPaths.removeAll(paths);
       _notifySelectionChanged();
+      _notifyMarksChanged();
       if (mounted) _loadDirectory();
     }
   }
 
   void _copySelected() {
-    for (final path in _selectedPaths) {
+    final paths = _actionPaths;
+    for (final path in paths) {
       FileUtils.setClipboard(path, 'copy');
     }
     _setClipboardInfo(
       ClipboardInfo(
         hasClipboard: true,
         operation: 'copy',
-        count: _selectedPaths.length,
+        count: paths.length,
       ),
     );
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${_selectedPaths.length} item(s) copied'),
+        content: Text('${paths.length} item(s) copied'),
         backgroundColor: OneDarkColors.cyan,
       ),
     );
   }
 
   void _cutSelected() {
-    for (final path in _selectedPaths) {
+    final paths = _actionPaths;
+    for (final path in paths) {
       FileUtils.setClipboard(path, 'cut');
     }
     _setClipboardInfo(
       ClipboardInfo(
         hasClipboard: true,
         operation: 'cut',
-        count: _selectedPaths.length,
+        count: paths.length,
       ),
     );
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${_selectedPaths.length} item(s) cut'),
+        content: Text('${paths.length} item(s) cut'),
         backgroundColor: OneDarkColors.amber,
       ),
     );
@@ -1350,6 +1408,21 @@ class _FileBrowserState extends State<FileBrowser> {
             await FileUtils.paste(destDir);
             if (mounted) _loadDirectory();
           }),
+        const PopupMenuDivider(),
+        _menuItem(
+          _markedPaths.contains(item.path) ? 'Unmark (Space)' : 'Mark (Space)',
+          _markedPaths.contains(item.path) ? Icons.check_circle_outline : Icons.check_circle,
+          () {
+            _selectedPaths.add(item.path);
+            _toggleMarkSelection();
+          },
+        ),
+        if (_markedPaths.isNotEmpty)
+          _menuItem(
+            'Clear ${_markedPaths.length} marks',
+            Icons.clear_all,
+            _clearMarks,
+          ),
         const PopupMenuDivider(),
         _menuItem('Rename', Icons.edit, () => _showRenameDialog(item)),
         _menuItem('Delete', Icons.delete, () => _confirmDelete(item)),
@@ -1867,7 +1940,7 @@ class _FileBrowserState extends State<FileBrowser> {
             if (inSelectMode)
               IconButton(
                 icon: const Icon(Icons.archive, color: OneDarkColors.green),
-                onPressed: () => _compressSelection(_selectedPaths.toList()),
+                onPressed: () => _compressSelection(_actionPaths),
                 tooltip: 'Compress…',
               ),
             if (inSelectMode)
@@ -2096,6 +2169,7 @@ class _FileBrowserState extends State<FileBrowser> {
       itemBuilder: (context, index) {
         final item = _filteredItems[index];
         final isSelected = _selectedPaths.contains(item.path);
+        final isMarked = _markedPaths.contains(item.path);
         return GestureDetector(
           onLongPressStart: (details) =>
               _showContextMenu(item, details.globalPosition),
@@ -2129,8 +2203,8 @@ class _FileBrowserState extends State<FileBrowser> {
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: Text(
                         item.name,
-                        style: const TextStyle(
-                          color: OneDarkColors.fg,
+                        style: TextStyle(
+                          color: isMarked ? OneDarkColors.amber : OneDarkColors.fg,
                           fontSize: 11,
                         ),
                         textAlign: TextAlign.center,
@@ -2141,6 +2215,16 @@ class _FileBrowserState extends State<FileBrowser> {
                   ],
                 ),
               ),
+              if (isMarked)
+                Positioned(
+                  top: 2,
+                  left: 2,
+                  child: Icon(
+                    Icons.check_circle,
+                    size: 16,
+                    color: OneDarkColors.amber,
+                  ),
+                ),
               if (_selectionMode == SelectionMode.multi)
                 Positioned(
                   top: 2,
@@ -2183,6 +2267,7 @@ class _FileBrowserState extends State<FileBrowser> {
           return _buildRenameRow(item, index - 1);
         }
         final isSelected = _selectedPaths.contains(item.path);
+        final isMarked = _markedPaths.contains(item.path);
         return GestureDetector(
           onLongPressStart: (details) =>
               _showContextMenu(item, details.globalPosition),
@@ -2227,13 +2312,16 @@ class _FileBrowserState extends State<FileBrowser> {
                   )
                 else
                   const SizedBox(width: 20),
+                if (isMarked)
+                  Icon(Icons.check_circle, size: 14, color: OneDarkColors.amber),
+                if (isMarked) const SizedBox(width: 4),
                 Icon(item.icon, size: 18, color: item.iconColor),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     item.name,
-                    style: const TextStyle(
-                      color: OneDarkColors.fg,
+                    style: TextStyle(
+                      color: isMarked ? OneDarkColors.amber : OneDarkColors.fg,
                       fontSize: 13,
                     ),
                   ),

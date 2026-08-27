@@ -88,6 +88,7 @@ class _MainScreenState extends State<MainScreen> {
   FileItem? _selectedItem;
   SelectionInfo? _selectionInfo; // aggregate multi-select info from FileBrowser
   ClipboardInfo? _clipboardInfo; // clipboard state from FileBrowser
+  int _markCount = 0; // mark count from FileBrowser
 
   // ignore: prefer_final_fields — mutated via setState
   List<String> _bookmarks = []; // loaded/persisted via BookmarksService (bookmarks.json)
@@ -318,6 +319,7 @@ class _MainScreenState extends State<MainScreen> {
                           onSelectionChanged: (info) => setState(() => _selectionInfo = info),
                           onClipboardChanged: (info) => setState(() => _clipboardInfo = info),
                           onPathChanged: (path) => setState(() => _currentPath = path),
+                          onMarksChanged: (count) => setState(() => _markCount = count),
                         ),
                       ),
                       // Status bar
@@ -346,6 +348,20 @@ class _MainScreenState extends State<MainScreen> {
                                 style: TextStyle(
                                   color: _clipboardInfo!.operation == 'cut' ? OneDarkColors.amber : OneDarkColors.cyan,
                                   fontSize: 11,
+                                ),
+                              ),
+                            ],
+                            // Mark count indicator
+                            if (_markCount > 0) ...[
+                              const SizedBox(width: 8),
+                              Icon(Icons.check_circle, size: 14, color: OneDarkColors.amber),
+                              const SizedBox(width: 4),
+                              Text(
+                                '$_markCount marked',
+                                style: const TextStyle(
+                                  color: OneDarkColors.amber,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ],
