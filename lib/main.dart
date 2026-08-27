@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
@@ -16,6 +17,8 @@ import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
 import 'screens/network_screen.dart';
 import 'services/entitlement_service.dart';
+import 'services/device_service.dart';
+import 'services/bookmarks_service.dart';
 import 'utils/constants.dart' show AppPaths;
 
 Future<void> main() async {
@@ -82,10 +85,15 @@ class _MainScreenState extends State<MainScreen> {
   bool _previewVisible = true;
   String _currentPath = ''; // resolved in initState for Android
   FileItem? _selectedItem;
+  SelectionInfo? _selectionInfo; // aggregate multi-select info from FileBrowser
+  ClipboardInfo? _clipboardInfo; // clipboard state from FileBrowser
 
   // ignore: prefer_final_fields — mutated via setState
-  List<String> _bookmarks = []; // populated from prefs in real app
+  List<String> _bookmarks = []; // loaded/persisted via BookmarksService (bookmarks.json)
   final Set<int> _hoveredIndex = {}; // tracks which sidebar item is hovered
+
+  // Storage volumes from Android device service (null until loaded)
+  List<StorageVolume>? _volumes;
 
   @override
   void initState() {
@@ -93,7 +101,19 @@ class _MainScreenState extends State<MainScreen> {
     // On Android, resolve the actual storage root synchronously after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _currentPath = AppPaths.home);
+      _loadVolumes();
+      _loadBookmarks();
     });
+  }
+
+  Future<void> _loadBookmarks() async {
+    final bookmarks = await BookmarksService.load();
+    if (mounted) setState(() => _bookmarks = bookmarks);
+  }
+
+  Future<void> _loadVolumes() async {
+    final volumes = await getStorageVolumes();
+    if (mounted) setState(() => _volumes = volumes);
   }
 
   @override
@@ -158,6 +178,32 @@ class _MainScreenState extends State<MainScreen> {
                                       ),
                                     ),
                                     const Divider(),
+                                    // ── Devices section ──────────────────────
+                                    if (_volumes != null && _volumes!.isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        child: Text('Devices', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                                      ),
+                                    if (_volumes == null)
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                        child: SizedBox(height: 16, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
+                                      )
+                                    else
+                                      ..._volumes!.map((vol) => ListTile(
+                                        dense: true,
+                                        horizontalTitleGap: 4,
+                                        minLeadingWidth: 0,
+                                        leading: Icon(vol.isRemovable ? Icons.sd_storage : Icons.storage, size: 18, color: OneDarkColors.cyan),
+                                        title: Text(vol.label.isNotEmpty ? vol.label : 'Storage',
+                                            style: const TextStyle(color: OneDarkColors.fg, fontSize: 13)),
+                                        subtitle: Text(_shortPath(vol.path),
+                                            style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 10)),
+                                        onTap: () {
+                                          setState(() => _currentPath = vol.path);
+                                        },
+                                      )),
+                                    const Divider(),
                                     Padding(
                                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                       child: Text('Bookmarks',
@@ -169,6 +215,15 @@ class _MainScreenState extends State<MainScreen> {
                                       title: const Text('Add Bookmark', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
                                       onTap: _addBookmark,
                                     ),
+                                    // Saved bookmarks — tap to navigate, long-press to remove
+                                    ..._bookmarks.map((path) => ListTile(
+                                      dense: true,
+                                      leading: Icon(Icons.bookmark, size: 18, color: OneDarkColors.amber),
+                                      title: Text(_shortPath(path),
+                                          style: const TextStyle(color: OneDarkColors.fg, fontSize: 13)),
+                                      onTap: () => setState(() => _currentPath = path),
+                                      onLongPress: () => _confirmRemoveBookmark(path),
+                                    )),
                                   ],
                                 ),
                               ),
@@ -252,12 +307,16 @@ class _MainScreenState extends State<MainScreen> {
                           ],
                         ),
                       ),
-                      // File browser — rebuilds with new _currentPath via key
+                      // File browser — persists across path changes (no key).
+                      // Sidebar/breadcrumb navigation pushes path via initialPath;
+                      // internal navigation fires onPathChanged to sync breadcrumbs.
                       Expanded(
                         child: FileBrowser(
-                          key: ValueKey(_currentPath),
                           initialPath: _currentPath,
                           onItemSelected: (item) => setState(() => _selectedItem = item),
+                          onSelectionChanged: (info) => setState(() => _selectionInfo = info),
+                          onClipboardChanged: (info) => setState(() => _clipboardInfo = info),
+                          onPathChanged: (path) => setState(() => _currentPath = path),
                         ),
                       ),
                       // Status bar
@@ -272,6 +331,34 @@ class _MainScreenState extends State<MainScreen> {
                               child: Text(_currentPath,
                                   style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
                             ),
+                            // Clipboard indicator (copy = cyan, cut = amber)
+                            if (_clipboardInfo != null && _clipboardInfo!.hasClipboard) ...[
+                              const SizedBox(width: 8),
+                              Icon(
+                                _clipboardInfo!.operation == 'cut' ? Icons.content_cut : Icons.content_copy,
+                                size: 14,
+                                color: _clipboardInfo!.operation == 'cut' ? OneDarkColors.amber : OneDarkColors.cyan,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${_clipboardInfo!.operation == 'cut' ? 'Cut' : 'Copied'}: ${_clipboardInfo!.count}',
+                                style: TextStyle(
+                                  color: _clipboardInfo!.operation == 'cut' ? OneDarkColors.amber : OneDarkColors.cyan,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                            // Multi-select aggregate summary
+                            if (_selectionInfo != null && _selectionInfo!.count > 1) ...[
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  '${_selectionInfo!.count} selected (${_formatBytes(_selectionInfo!.totalSizeBytes)})',
+                                  style: const TextStyle(color: OneDarkColors.fg, fontSize: 11),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
                             const Spacer(),
                             if (_selectedItem != null) ...[
                               const SizedBox(width: 12),
@@ -411,6 +498,7 @@ class _MainScreenState extends State<MainScreen> {
             onPressed: () {
               if (controller.text.isNotEmpty) {
                 setState(() => _bookmarks.add(controller.text));
+                BookmarksService.save(_bookmarks);
               }
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
@@ -424,6 +512,46 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  /// Long-press on a bookmark tile: confirm before removing it.
+  void _confirmRemoveBookmark(String path) {
+    showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: const Text('Remove bookmark?', style: TextStyle(color: OneDarkColors.fg)),
+        content: Text(_shortPath(path), style: const TextStyle(color: OneDarkColors.fgDim)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove', style: TextStyle(color: OneDarkColors.red)),
+          ),
+        ],
+      ),
+    ).then((remove) {
+      if (remove == true) {
+        setState(() => _bookmarks.remove(path));
+        BookmarksService.save(_bookmarks);
+      }
+    });
+  }
+
+  /// Formats a byte count for the status bar (B / KB / MB / GB).
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
   // Count items placeholder — in production this would be a state manager
   int get itemsCount => 0;
+
+  /// Strips the primary emulated storage prefix for display.
+  String _shortPath(String path) {
+    final home = AppPaths.home;
+    if (path.startsWith('$home/')) return path.substring(home.length + 1);
+    if (path == home) return 'SD Card';
+    return path.split('/').where((p) => p.isNotEmpty).last;
+  }
 }

@@ -43,7 +43,10 @@ class FileItem {
   /// Recursively computes total size of a directory (bytes).
   static Future<int> getTotalSize(FileItem item) async {
     if (!item.isDirectory) return item.size;
-    final items = await FileUtils.listDirectory(item.path, includeHidden: false);
+    final items = await FileUtils.listDirectory(
+      item.path,
+      includeHidden: false,
+    );
     int total = item.size;
     for (final child in items) {
       total += await getTotalSize(child);
@@ -58,20 +61,64 @@ class FileItem {
   IconData get icon {
     if (isDirectory) return Icons.folder;
     final ext = extension;
-    if (const ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.heic'].contains(ext)) {
+    if (const [
+      '.png',
+      '.jpg',
+      '.jpeg',
+      '.gif',
+      '.webp',
+      '.bmp',
+      '.svg',
+      '.heic',
+    ].contains(ext)) {
       return Icons.image;
     }
     if (const ['.mp4', '.mkv', '.mov', '.avi', '.webm'].contains(ext)) {
       return Icons.movie;
     }
-    if (const ['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.opus'].contains(ext)) {
+    if (const [
+      '.mp3',
+      '.flac',
+      '.wav',
+      '.ogg',
+      '.m4a',
+      '.opus',
+    ].contains(ext)) {
       return Icons.music_note;
     }
     if (ext == '.pdf') return Icons.picture_as_pdf;
-    if (const ['.zip', '.tar', '.gz', '.xz', '.7z', '.rar', '.zst', '.bz2'].contains(ext)) {
+    if (const [
+      '.zip',
+      '.tar',
+      '.gz',
+      '.xz',
+      '.7z',
+      '.rar',
+      '.zst',
+      '.bz2',
+    ].contains(ext)) {
       return Icons.archive;
     }
-    if (const ['.txt', '.md', '.markdown', '.json', '.yaml', '.yml', '.toml', '.xml', '.html', '.css', '.js', '.ts', '.py', '.dart', '.cpp', '.c', '.h', '.java'].contains(ext)) {
+    if (const [
+      '.txt',
+      '.md',
+      '.markdown',
+      '.json',
+      '.yaml',
+      '.yml',
+      '.toml',
+      '.xml',
+      '.html',
+      '.css',
+      '.js',
+      '.ts',
+      '.py',
+      '.dart',
+      '.cpp',
+      '.c',
+      '.h',
+      '.java',
+    ].contains(ext)) {
       return Icons.description;
     }
     return Icons.insert_drive_file;
@@ -80,42 +127,191 @@ class FileItem {
   Color get iconColor {
     if (isDirectory) return Colors.cyan;
     final ext = extension;
-    if (const ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.heic'].contains(ext)) {
+    if (const [
+      '.png',
+      '.jpg',
+      '.jpeg',
+      '.gif',
+      '.webp',
+      '.bmp',
+      '.svg',
+      '.heic',
+    ].contains(ext)) {
       return const Color(0xFFE5C07B);
     }
     if (const ['.mp4', '.mkv', '.mov', '.avi', '.webm'].contains(ext)) {
       return const Color(0xFFC678DD);
     }
-    if (const ['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.opus'].contains(ext)) {
+    if (const [
+      '.mp3',
+      '.flac',
+      '.wav',
+      '.ogg',
+      '.m4a',
+      '.opus',
+    ].contains(ext)) {
       return const Color(0xFFC678DD);
     }
     if (ext == '.pdf') return const Color(0xFFE06C75);
-    if (const ['.zip', '.tar', '.gz', '.xz', '.7z', '.rar', '.zst', '.bz2'].contains(ext)) {
+    if (const [
+      '.zip',
+      '.tar',
+      '.gz',
+      '.xz',
+      '.7z',
+      '.rar',
+      '.zst',
+      '.bz2',
+    ].contains(ext)) {
       return const Color(0xFF98C379);
     }
-    if (const ['.json', '.yaml', '.yml', '.toml', '.xml', '.html', '.css', '.js', '.ts', '.py', '.dart', '.cpp', '.c', '.h', '.java'].contains(ext)) {
+    if (const [
+      '.json',
+      '.yaml',
+      '.yml',
+      '.toml',
+      '.xml',
+      '.html',
+      '.css',
+      '.js',
+      '.ts',
+      '.py',
+      '.dart',
+      '.cpp',
+      '.c',
+      '.h',
+      '.java',
+    ].contains(ext)) {
       return const Color(0xFF98C379);
     }
     return const Color(0xFF5C6370);
   }
 
   bool get isHidden => name.startsWith('.');
-  bool get isImage => const ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.heic'].contains(extension);
-  bool get isCode => const ['.py', '.dart', '.cpp', '.c', '.h', '.java', '.js', '.ts', '.jsx', '.tsx', '.rs', '.go', '.swift', '.kt', '.kotlin'].contains(extension);
+  bool get isImage => const [
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.gif',
+    '.webp',
+    '.bmp',
+    '.svg',
+    '.heic',
+  ].contains(extension);
+  bool get isCode => const [
+    '.py',
+    '.dart',
+    '.cpp',
+    '.c',
+    '.h',
+    '.java',
+    '.js',
+    '.ts',
+    '.jsx',
+    '.tsx',
+    '.rs',
+    '.go',
+    '.swift',
+    '.kt',
+    '.kotlin',
+  ].contains(extension);
   bool get isMarkdown => const ['.md', '.markdown'].contains(extension);
-  bool get isText => const ['.txt', '.md', '.markdown', '.json', '.yaml', '.yml', '.toml', '.xml', '.html', '.css', '.js', '.ts', '.py', '.dart', '.cpp', '.c', '.h', '.java', '.log', '.sh', '.bat'].contains(extension);
+  bool get isText => const [
+    '.txt',
+    '.md',
+    '.markdown',
+    '.json',
+    '.yaml',
+    '.yml',
+    '.toml',
+    '.xml',
+    '.html',
+    '.css',
+    '.js',
+    '.ts',
+    '.py',
+    '.dart',
+    '.cpp',
+    '.c',
+    '.h',
+    '.java',
+    '.log',
+    '.sh',
+    '.bat',
+  ].contains(extension);
   bool get isPdf => extension == '.pdf';
 }
 
 /// Sort options for the file browser.
 enum FileSortOption { name, size, date, type }
+
 enum SortDirection { ascending, descending }
+
+/// Directories that should never be navigated into or searched.
+/// Matches Linux SwordFM's filesystem boundary protection.
+///
+/// Note: `/tmp` (and any user temp location) is intentionally *not* blocked —
+/// it is a real, user-accessible directory (and the OS temporary directory),
+/// so browsing/searching it must remain possible. Only virtual/system dirs
+/// and system-file trees are protected.
+const Set<String> kBlockedDirectories = {
+  '/proc',
+  '/sys',
+  '/dev',
+  '/run',
+  '/snap',
+  '/boot',
+  '/lost+found',
+  '/opt',
+  '/usr',
+  '/var',
+};
+
+/// Returns true if [path] is inside a blocked system directory.
+bool isBlockedPath(String path) {
+  final normalized = path.endsWith('/') ? path : '$path/';
+  return kBlockedDirectories.any(
+    (blocked) => normalized == blocked || normalized.startsWith('$blocked/'),
+  );
+}
+
+/// Returns true if [name] looks like an auto-generated junk filename.
+/// Matches Linux SwordFM's FileFilterProxy::isJunkName exactly.
+bool isJunkName(String name) {
+  if (name.isEmpty) return true;
+  // Pure numeric names (e.g. "1000" from /run/user/1000)
+  if (RegExp(r'^\d+$').hasMatch(name)) return true;
+  final lower = name.toLowerCase();
+  // libvirt / virt clutter
+  if (lower.contains('libvirt')) return true;
+  // systemd unit / service files
+  const systemdExts = {
+    '.service',
+    '.socket',
+    '.target',
+    '.timer',
+    '.mount',
+    '.scope',
+    '.slice',
+    '.path',
+    '.device',
+    '.automount',
+    '.swap',
+  };
+  for (final ext in systemdExts) {
+    if (lower.endsWith(ext)) return true;
+  }
+  return false;
+}
 
 /// Directory operations.
 class FileUtils {
   /// Lists contents of [directoryPath].
   /// If [includeHidden] is true, hidden files (dot-prefixed) are included.
-  static Future<List<FileItem>> listDirectory(String directoryPath, {bool includeHidden = false}) async {
+  static Future<List<FileItem>> listDirectory(
+    String directoryPath, {
+    bool includeHidden = false,
+  }) async {
     final dir = Directory(directoryPath);
     if (!await dir.exists()) return [];
 
@@ -127,14 +323,16 @@ class FileUtils {
       if (!includeHidden && name.startsWith('.')) continue;
 
       final stat = await entity.stat();
-      items.add(FileItem(
-        entity: entity,
-        name: name,
-        path: entity.path,
-        isDirectory: entity is Directory,
-        size: stat.size,
-        lastModified: stat.modified,
-      ));
+      items.add(
+        FileItem(
+          entity: entity,
+          name: name,
+          path: entity.path,
+          isDirectory: entity is Directory,
+          size: stat.size,
+          lastModified: stat.modified,
+        ),
+      );
     }
 
     // Directories first, then sort by name within each group
@@ -147,7 +345,10 @@ class FileUtils {
   }
 
   /// Gets file metadata without reading directory.
-  static Future<FileItem> getFileItem(String path, {bool includeHidden = false}) async {
+  static Future<FileItem> getFileItem(
+    String path, {
+    bool includeHidden = false,
+  }) async {
     final entityType = await FileSystemEntity.type(path);
     final entity = entityType == FileSystemEntityType.directory
         ? Directory(path)
@@ -205,7 +406,8 @@ class FileUtils {
 
   /// Deletes [path], sends to trash on Linux-compatible systems.
   static Future<void> delete(String path) async {
-    final entity = await FileSystemEntity.type(path) == FileSystemEntityType.file
+    final entity =
+        await FileSystemEntity.type(path) == FileSystemEntityType.file
         ? File(path)
         : Directory(path);
     await entity.delete(recursive: true);
@@ -220,6 +422,13 @@ class FileUtils {
 
   static String? _clipboardOp = 'none'; // 'copy' | 'cut'
   static String? _clipboardPath;
+
+  static bool get hasClipboard =>
+      _clipboardPath != null && _clipboardOp != 'none';
+
+  /// Current clipboard operation ('copy' | 'cut'), or null when empty.
+  static String? get clipboardOperation =>
+      (_clipboardOp == null || _clipboardOp == 'none') ? null : _clipboardOp;
 
   static void setClipboard(String path, String op) {
     _clipboardPath = path;
@@ -264,7 +473,10 @@ class FileUtils {
   }
 
   /// Restores a trashed item to [originalPath].
-  static Future<void> restoreFromTrash(String trashPath, String originalPath) async {
+  static Future<void> restoreFromTrash(
+    String trashPath,
+    String originalPath,
+  ) async {
     await move(trashPath, originalPath);
   }
 
