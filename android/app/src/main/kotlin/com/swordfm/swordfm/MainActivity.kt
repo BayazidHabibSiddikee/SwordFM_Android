@@ -4,9 +4,10 @@ package com.swordfm.swordfm
 // SHARED BLUETOOTH FRAME PROTOCOL (see lib/services/bluetooth_share_service.dart)
 // Frame:
 //   [ 4-byte uint32 metadataLength ]  (big-endian)
-//   [ metadataLength bytes of JSON  ]  { "filename": "example.pdf", "size": 12345 }
+//   [ metadataLength bytes of JSON  ]  { "filename": "example.pdf", "size": 12345, "checksum": "<sha256 hex>" }
 //   [ raw file bytes of length `size` ]]
 // Reference impl: /home/sword/SwordFM/tools/swordblue
+// Sender MUST include "checksum"; receiver verifies and deletes on mismatch.
 // ============================================================================
 
 import android.bluetooth.BluetoothAdapter
@@ -14,10 +15,14 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.storage.StorageManager
+import android.webkit.MimeTypeMap
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -27,6 +32,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import org.json.JSONObject
+import java.security.MessageDigest
 
 /**
  * ┌───────────────────────────────────────────────────────────────┐
@@ -39,12 +45,15 @@ import org.json.JSONObject
  * │   [ raw file bytes (exactly "size" bytes) ]                   │
  * │                                                               │
  * │ JSON metadata:                                                │
- * │   { "filename": "example.pdf", "size": 12345 }                │
+ * │   { "filename": "example.pdf", "size": 12345,                 │
+ * │     "checksum": "<64-hex SHA-256 of file contents>" }         │
  * │                                                               │
  * │ The sender writes metadata then streams the raw bytes; the    │
  * │ receiver reads the 4-byte length, parses JSON, then reads     │
- * │ exactly "size" raw bytes. Do NOT change this without also     │
- * │ updating the Dart side and /home/sword/SwordFM/tools/swordblue│
+ * │ exactly "size" raw bytes, hashes them, and verifies against   │
+ * │ "checksum" (deleting the file on mismatch). Do NOT change     │
+ * │ this without also updating the Dart side and                  │
+ * │ /home/sword/SwordFM/tools/swordblue                           │
  * └───────────────────────────────────────────────────────────────┘
  */
 
@@ -55,6 +64,19 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
         private const val CONNECT_TIMEOUT_MS = 30000L
         private const val MAX_CONNECT_RETRIES = 1
         private const val NAME = "SwordFM_Bluetooth"
+
+        fun computeFileSha256(path: String): String? {
+            return try {
+                val file = java.io.File(path)
+                if (!file.exists()) return null
+                val bytes = file.readBytes()
+                val digest = MessageDigest.getInstance("SHA-256")
+                digest.update(bytes)
+                digest.digest().joinToString("") { "%02x".format(it) }
+            } catch (e: Exception) {
+                null
+            }
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -99,6 +121,12 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
         flutterEngine?.let {
             methodChannel = MethodChannel(it.dartExecutor.binaryMessenger, CHANNEL)
             methodChannel?.setMethodCallHandler(this)
+            // "Open With…" app chooser + "Open Terminal Here" (Termux) live on
+            // their own channels so the bluetooth channel stays focused.
+            MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/openwith")
+                .setMethodCallHandler(this)
+            MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/terminal")
+                .setMethodCallHandler(this)
         }
     }
 
@@ -193,10 +221,99 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                 }
                 result.success(null)
             }
+            "computeSha256" -> {
+                val path = call.argument<String>("path") ?: ""
+                val hash = computeFileSha256(path)
+                result.success(hash)
+            }
+            "openWithApp" -> {
+                val path = call.argument<String>("path") ?: ""
+                try {
+                    result.success(openFileWithChooser(path))
+                } catch (e: Exception) {
+                    result.error("OPEN_FAILED", e.message, null)
+                }
+            }
+            "openWithChooser" -> {
+                val path = call.argument<String>("path") ?: ""
+                try {
+                    result.success(openFileWithChooser(path))
+                } catch (e: Exception) {
+                    result.error("OPEN_FAILED", e.message, null)
+                }
+            }
+            "openTerminalAt" -> {
+                val path = call.argument<String>("path") ?: ""
+                try {
+                    openTerminalAt(path)
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("TERMUX_FAILED", e.message, null)
+                }
+            }
+            "getStorageVolumes" -> {
+                val volumes = mutableListOf<Map<String, Any?>>()
+                val sm = getSystemService(STORAGE_SERVICE) as? StorageManager
+                sm?.storageVolumes?.forEach { vol ->
+                    val path = vol.directory?.absolutePath
+                    if (!path.isNullOrEmpty()) {
+                        volumes.add(mapOf(
+                            "path" to path,
+                            "label" to vol.getDescription(this),
+                            "removable" to vol.isRemovable,
+                        ))
+                    }
+                }
+                // Always include the primary emulated volume
+                if (volumes.isEmpty()) {
+                    val dir = Environment.getExternalStorageDirectory()
+                    if (dir.exists()) {
+                        volumes.add(mapOf("path" to dir.absolutePath, "label" to "Internal storage", "removable" to false))
+                    }
+                }
+                result.success(volumes)
+            }
             else -> {
                 result.notImplemented()
             }
         }
+    }
+
+    /**
+     * Opens [path] through Android's "Open with" app chooser.
+     * Returns true when the chooser was launched. Paths that are already
+     * content:// URIs (SAF / file_picker) are passed through directly.
+     */
+    private fun openFileWithChooser(path: String): Boolean {
+        val file = File(path)
+        if (!file.exists()) return false
+        val uri: Uri = if (path.startsWith("content://")) {
+            Uri.parse(path)
+        } else {
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        }
+        val ext = file.extension
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(viewIntent, "Open with")
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(chooser)
+        return true
+    }
+
+    /** Opens a Termux session running bash at [path] via the RUN_COMMAND intent. */
+    private fun openTerminalAt(path: String) {
+        val intent = Intent("com.termux.RUN_COMMAND").apply {
+            setClassName("com.termux", "com.termux.app.RunCommandService")
+            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+            putExtra("com.termux.RUN_COMMAND_WORKDIR", path)
+            putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
+            putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", 0) // 0 = new session
+        }
+        startService(intent)
     }
 
     private fun stopAllThreads() {
@@ -353,6 +470,9 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     val metaJson = JSONObject(String(metaBuffer, Charsets.UTF_8))
                     val fileLength = metaJson.getLong("size")
                     val filename = metaJson.getString("filename")
+                    // Optional SHA-256 checksum (see frame-format comment at top).
+                    // Absent with legacy peers → verification is skipped, file still accepted.
+                    val expectedChecksum = if (metaJson.has("checksum")) metaJson.getString("checksum").lowercase() else null
 
                     runOnMain {
                         methodChannel?.invokeMethod("onTransferStarted", mapOf("filename" to filename, "isSending" to false))
@@ -377,12 +497,15 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
 
                     var totalBytesReceived = 0L
                     var lastUpdate = System.currentTimeMillis()
+                    // Compute SHA-256 while writing so we never re-read the whole file.
+                    val digest = MessageDigest.getInstance("SHA-256")
 
                     while (totalBytesReceived < fileLength && !isCancelled) {
                         val toRead = Math.min(buffer.size.toLong(), fileLength - totalBytesReceived).toInt()
                         bytes = mmInStream.read(buffer, 0, toRead)
                         if (bytes == -1) throw IOException("Stream cut off prematurely")
                         fileOutputStream.write(buffer, 0, bytes)
+                        digest.update(buffer, 0, bytes)
                         totalBytesReceived += bytes
 
                         val now = System.currentTimeMillis()
@@ -400,8 +523,25 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     fileOutputStream.close()
 
                     if (!isCancelled) {
+                        val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
+                        val verified = expectedChecksum != null && sha256 == expectedChecksum
+                        if (expectedChecksum != null && !verified) {
+                            // Corrupt transfer — delete and notify, matching swordblue.
+                            outputFile.delete()
+                            runOnMain {
+                                methodChannel?.invokeMethod("onTransferError", mapOf(
+                                    "message" to "Checksum mismatch for $filename — file deleted"
+                                ))
+                                methodChannel?.invokeMethod("onDisconnected", null)
+                            }
+                            break
+                        }
                         runOnMain {
-                            methodChannel?.invokeMethod("onTransferComplete", mapOf("savedPath" to outputFile.absolutePath))
+                            methodChannel?.invokeMethod("onTransferComplete", mapOf(
+                                "savedPath" to outputFile.absolutePath,
+                                "sha256" to sha256,
+                                "verified" to verified
+                            ))
                         }
                     }
                 } catch (e: IOException) {
@@ -434,10 +574,25 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                         methodChannel?.invokeMethod("onTransferStarted", mapOf("filename" to file.name, "isSending" to true))
                     }
 
+                    // SHA-256 of the file, computed by streaming once (pass 1).
+                    // We then rewind the same stream and send (pass 2), so there is
+                    // no TOCTOU window and no whole-file readBytes() in memory.
+                    val fileInputStream = FileInputStream(file)
+                    val fileChannel = fileInputStream.channel
+                    val buffer = ByteArray(65536)
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    var bytesRead: Int
+                    while (fileInputStream.read(buffer).also { bytesRead = it } != -1) {
+                        digest.update(buffer, 0, bytesRead)
+                    }
+                    fileChannel.position(0)
+
                     // Write the JSON metadata frame (see frame-format comment at top).
+                    val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
                     val metadata = JSONObject()
                         .put("filename", file.name)
                         .put("size", fileLength)
+                        .put("checksum", sha256)
                     val metadataBytes = metadata.toString().toByteArray(Charsets.UTF_8)
 
                     // 4-byte big-endian metadata length
@@ -447,9 +602,6 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     mmOutStream.write(metadataBytes)
                     mmOutStream.flush()
 
-                    val fileInputStream = FileInputStream(file)
-                    val buffer = ByteArray(65536)
-                    var bytesRead: Int
                     var totalBytesSent = 0L
                     var lastUpdate = System.currentTimeMillis()
 
@@ -474,7 +626,11 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
 
                     if (!isCancelled) {
                         runOnMain {
-                            methodChannel?.invokeMethod("onTransferComplete", mapOf("savedPath" to ""))
+                            methodChannel?.invokeMethod("onTransferComplete", mapOf(
+                                "savedPath" to "",
+                                "sha256" to sha256,
+                                "verified" to true
+                            ))
                         }
                     }
                 } catch (e: Exception) {

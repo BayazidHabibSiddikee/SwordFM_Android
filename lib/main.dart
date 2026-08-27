@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
@@ -495,11 +496,19 @@ class _MainScreenState extends State<MainScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           FilledButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) {
-                setState(() => _bookmarks.add(controller.text));
-                BookmarksService.save(_bookmarks);
+            onPressed: () async {
+              final path = controller.text.trim();
+              if (path.isEmpty) return;
+              final dir = Directory(path);
+              if (!await dir.exists()) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Path does not exist'), backgroundColor: OneDarkColors.red),
+                );
+                return;
               }
+              setState(() => _bookmarks.add(path));
+              BookmarksService.save(_bookmarks);
+              if (!mounted) return;
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Bookmark added'), backgroundColor: OneDarkColors.green),

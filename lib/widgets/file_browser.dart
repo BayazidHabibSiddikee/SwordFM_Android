@@ -583,87 +583,84 @@ class _FileBrowserState extends State<FileBrowser> {
     final key = event.logicalKey;
     final ctrl = HardwareKeyboard.instance.isControlPressed;
     final alt = HardwareKeyboard.instance.isAltPressed;
-    // Some Android hardware-keyboard stacks deliver Ctrl+C/X/V as character
-    // events instead of a logical key + ctrl modifier.
     final ch = event.character;
 
-    if (ctrl && ch != null) {
-      switch (ch) {
-        case '\u0003': // Ctrl+C
-          if (_selectedPaths.isNotEmpty) {
-            _copySelected();
-            return true;
-          }
-          return false;
-        case '\u0018': // Ctrl+X
-          if (_selectedPaths.isNotEmpty) {
-            _cutSelected();
-            return true;
-          }
-          return false;
-        case '\u0016': // Ctrl+V
-          _pasteToCurrent();
-          return true;
-        case '\u0001': // Ctrl+A
-          _selectAll();
-          return true;
-      }
+    if (ctrl && ch != null) return _handleCtrlCharShortcuts(ch);
+    if (ctrl) return _handleCtrlKeyShortcuts(key);
+    if (alt) return _handleAltShortcuts(key);
+    return _handlePlainKeyShortcuts(key);
+  }
+
+  bool _handleCtrlCharShortcuts(String ch) {
+    switch (ch) {
+      case '\u0003': // Ctrl+C
+        if (_selectedPaths.isNotEmpty) { _copySelected(); return true; }
+        return false;
+      case '\u0018': // Ctrl+X
+        if (_selectedPaths.isNotEmpty) { _cutSelected(); return true; }
+        return false;
+      case '\u0016': // Ctrl+V
+        _pasteToCurrent();
+        return true;
+      case '\u0001': // Ctrl+A
+        _selectAll();
+        return true;
     }
-    if (ctrl) {
-      switch (key) {
-        case LogicalKeyboardKey.keyC:
-          if (_selectedPaths.isNotEmpty) {
-            _copySelected();
-            return true;
-          }
-          return false;
-        case LogicalKeyboardKey.keyX:
-          if (_selectedPaths.isNotEmpty) {
-            _cutSelected();
-            return true;
-          }
-          return false;
-        case LogicalKeyboardKey.keyV:
-          _pasteToCurrent();
-          return true;
-        case LogicalKeyboardKey.keyA:
-          _selectAll();
-          return true;
-        case LogicalKeyboardKey.keyL:
-          _showGoToPathDialog();
-          return true;
-        case LogicalKeyboardKey.keyN:
-          _showNewFolderDialog();
-          return true;
-        case LogicalKeyboardKey.keyH:
-          setState(() => _showHidden = !_showHidden);
-          _loadDirectory();
-          return true;
-        case LogicalKeyboardKey.digit1:
-          setState(() => _viewMode = ViewMode.details);
-          return true;
-        case LogicalKeyboardKey.digit2:
-          setState(() => _viewMode = ViewMode.grid);
-          return true;
-        default:
-          break;
-      }
+    return false;
+  }
+
+  bool _handleCtrlKeyShortcuts(LogicalKeyboardKey key) {
+    switch (key) {
+      case LogicalKeyboardKey.keyC:
+        if (_selectedPaths.isNotEmpty) { _copySelected(); return true; }
+        return false;
+      case LogicalKeyboardKey.keyX:
+        if (_selectedPaths.isNotEmpty) { _cutSelected(); return true; }
+        return false;
+      case LogicalKeyboardKey.keyV:
+        _pasteToCurrent();
+        return true;
+      case LogicalKeyboardKey.keyA:
+        _selectAll();
+        return true;
+      case LogicalKeyboardKey.keyL:
+        _showGoToPathDialog();
+        return true;
+      case LogicalKeyboardKey.keyN:
+        _showNewFolderDialog();
+        return true;
+      case LogicalKeyboardKey.keyH:
+        setState(() => _showHidden = !_showHidden);
+        _loadDirectory();
+        return true;
+      case LogicalKeyboardKey.digit1:
+        setState(() => _viewMode = ViewMode.details);
+        return true;
+      case LogicalKeyboardKey.digit2:
+        setState(() => _viewMode = ViewMode.grid);
+        return true;
+      default:
+        return false;
     }
-    if (alt) {
-      switch (key) {
-        case LogicalKeyboardKey.arrowUp:
-          _goUp();
-          return true;
-        case LogicalKeyboardKey.arrowLeft:
-          _goBack();
-          return true;
-        case LogicalKeyboardKey.arrowRight:
-          _goForward();
-          return true;
-        default:
-          break;
-      }
+  }
+
+  bool _handleAltShortcuts(LogicalKeyboardKey key) {
+    switch (key) {
+      case LogicalKeyboardKey.arrowUp:
+        _goUp();
+        return true;
+      case LogicalKeyboardKey.arrowLeft:
+        _goBack();
+        return true;
+      case LogicalKeyboardKey.arrowRight:
+        _goForward();
+        return true;
+      default:
+        return false;
     }
+  }
+
+  bool _handlePlainKeyShortcuts(LogicalKeyboardKey key) {
     switch (key) {
       case LogicalKeyboardKey.f2:
         _startInPlaceRename();
@@ -1089,6 +1086,32 @@ class _FileBrowserState extends State<FileBrowser> {
     final (name, fmt) = result;
     if (name.isEmpty) return;
     final outputPath = p.join(p.dirname(paths.first), name);
+
+    if (await File(outputPath).exists()) {
+      final overwrite = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: OneDarkColors.bg,
+          title: const Text('Overwrite?', style: TextStyle(color: OneDarkColors.fg)),
+          content: Text(
+            '"$name" already exists. Overwrite?',
+            style: const TextStyle(color: OneDarkColors.fg),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Overwrite'),
+            ),
+          ],
+        ),
+      );
+      if (overwrite != true) return;
+    }
+
     try {
       switch (fmt) {
         case ArchiveFormat.zip:
@@ -1295,7 +1318,7 @@ class _FileBrowserState extends State<FileBrowser> {
           _menuItem(
             'Open With…',
             Icons.open_with,
-            () => _showOpenWithMenu(item),
+            () => _showOpenWithMenu(item, tapPosition),
           ),
         _menuItem(
           'Open Terminal Here',
@@ -1384,11 +1407,27 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   /// Shows a nested "Open With" menu with app options for a file.
-  void _showOpenWithMenu(FileItem item) {
+  void _showOpenWithMenu(FileItem item, [Offset? tapPosition]) {
     final box = context.findRenderObject() as RenderBox?;
     final RenderBox? parentBox = box?.parent as RenderBox?;
     if (box == null || parentBox == null) return;
-    final offset = box.localToGlobal(Offset.zero);
+    RelativeRect? position;
+    if (tapPosition != null) {
+      position = RelativeRect.fromLTRB(
+        tapPosition.dx,
+        tapPosition.dy,
+        parentBox.paintBounds.width - tapPosition.dx,
+        parentBox.paintBounds.height - tapPosition.dy,
+      );
+    } else {
+      final offset = box.localToGlobal(Offset.zero);
+      position = RelativeRect.fromLTRB(
+        offset.dx,
+        offset.dy,
+        parentBox.paintBounds.width - offset.dx - 200,
+        parentBox.paintBounds.height - offset.dy - 240,
+      );
+    }
     final isText =
         !item.isDirectory && _kTextExtensions.contains(item.extension);
 
@@ -1439,12 +1478,7 @@ class _FileBrowserState extends State<FileBrowser> {
 
     showMenu<String>(
       context: context,
-      position: RelativeRect.fromLTRB(
-        offset.dx + 200,
-        offset.dy + 100,
-        parentBox.paintBounds.width - offset.dx - 200,
-        parentBox.paintBounds.height - offset.dy - 100,
-      ),
+      position: position,
       items: entries,
     ).then((value) async {
       if (value == null || !mounted) return;
