@@ -50,21 +50,46 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
   /// Recursively collect folder sizes, capping depth at 3 to keep scan fast.
   Future<List<_FolderSize>> _collectSizes(Directory dir, String rootPath, [int depth = 0]) async {
     if (depth > 3) return [];
-    final children = await dir.list().toList();
+    List<FileSystemEntity> children;
+    try {
+      children = await dir.list().toList();
+    } catch (_) {
+      return []; // skip inaccessible directories
+    }
     final results = <_FolderSize>[];
     for (final entity in children) {
       if (entity is Directory) {
-        final subItems = await _collectSizes(entity, rootPath, depth + 1);
+        if (_isRestrictedPath(entity.path)) continue;
+        List<_FolderSize> subItems;
+        try {
+          subItems = await _collectSizes(entity, rootPath, depth + 1);
+        } catch (_) {
+          subItems = []; // one bad subfolder must not fail the whole scan
+        }
         int total = subItems.fold(0, (s, e) => s + e.size);
         // Also include direct files in this dir
-        for (final child in entity.listSync()) {
-          if (child is File) total += child.lengthSync();
-        }
+        try {
+          for (final child in entity.listSync()) {
+            if (child is File) {
+              try {
+                total += child.lengthSync();
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
         results.add(_FolderSize(entity.path, total, subItems));
       }
     }
     results.sort((a, b) => b.size.compareTo(a.size));
     return results;
+  }
+
+  /// Android forbids listing these without special permissions; skip them
+  /// instead of letting the whole scan fail with PathAccessException.
+  static bool _isRestrictedPath(String path) {
+    final segments = path.split('/');
+    if (!segments.contains('Android')) return false;
+    return segments.contains('data') || segments.contains('obb');
   }
 
   void _navigateTo(String path) {

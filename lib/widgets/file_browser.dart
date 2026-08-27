@@ -1549,11 +1549,6 @@ class _FileBrowserState extends State<FileBrowser> {
             );
           }),
         _menuItem(
-          'Share…',
-          Icons.share,
-          () => FileUtils.share(item.path),
-        ),
-        _menuItem(
           'Properties',
           Icons.info_outline,
           () => _showProperties(item),
@@ -2361,6 +2356,7 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   Widget _buildDetailsView() {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     return ListView.separated(
       padding: const EdgeInsets.only(top: 4),
       itemCount: _filteredItems.length + 1,
@@ -2420,16 +2416,18 @@ class _FileBrowserState extends State<FileBrowser> {
                   const SizedBox(width: 20),
                 if (isMarked)
                   Icon(Icons.check_circle, size: 14, color: OneDarkColors.amber),
-                if (isMarked) const SizedBox(width: 4),
+                if (isMarked) const SizedBox(width: 3),
                 Icon(item.icon, size: 18, color: item.iconColor),
-                const SizedBox(width: 10),
+                const SizedBox(width: 6),
                 Expanded(
+                  flex: 4,
                   child: Text(
                     item.name,
                     style: TextStyle(
                       color: isMarked ? OneDarkColors.amber : OneDarkColors.fg,
                       fontSize: 13,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 if (item.isDirectory)
@@ -2444,25 +2442,28 @@ class _FileBrowserState extends State<FileBrowser> {
                           color: OneDarkColors.fgDim,
                         ),
                         const SizedBox(width: 2),
-                        FutureBuilder<int>(
-                          future: _computeFolderSize(item),
-                          builder: (ctx, snap) {
-                            if (snap.connectionState == ConnectionState.waiting)
-                              return const SizedBox(
-                                width: 30,
-                                child: LinearProgressIndicator(minHeight: 4),
+                        Flexible(
+                          child: FutureBuilder<int>(
+                            future: _computeFolderSize(item),
+                            builder: (ctx, snap) {
+                              if (snap.connectionState == ConnectionState.waiting)
+                                return const SizedBox(
+                                  width: 30,
+                                  child: LinearProgressIndicator(minHeight: 4),
+                                );
+                              final s = snap.hasData && snap.data! >= 0
+                                  ? snap.data!
+                                  : 0;
+                              return Text(
+                                _formatBytes(s),
+                                style: const TextStyle(
+                                  color: OneDarkColors.fgDim,
+                                  fontSize: 12,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               );
-                            final s = snap.hasData && snap.data! >= 0
-                                ? snap.data!
-                                : 0;
-                            return Text(
-                              _formatBytes(s),
-                              style: const TextStyle(
-                                color: OneDarkColors.fgDim,
-                                fontSize: 12,
-                              ),
-                            );
-                          },
+                            },
+                          ),
                         ),
                       ],
                     ),
@@ -2490,17 +2491,18 @@ class _FileBrowserState extends State<FileBrowser> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                Flexible(
-                  flex: 1,
-                  child: Text(
-                    item.extension.isEmpty ? 'Folder' : item.extension,
-                    style: const TextStyle(
-                      color: OneDarkColors.fgDim,
-                      fontSize: 12,
+                if (!isMobile)
+                  Flexible(
+                    flex: 1,
+                    child: Text(
+                      item.extension.isEmpty ? 'Folder' : item.extension,
+                      style: const TextStyle(
+                        color: OneDarkColors.fgDim,
+                        fontSize: 12,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
               ],
             ),
           ),
@@ -2510,10 +2512,12 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   Widget _buildColumnHeaders() {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     return Row(
       children: [
         SizedBox(width: _selectionMode == SelectionMode.multi ? 42 : 28),
         Expanded(
+          flex: 4,
           child: Text(
             'Name',
             style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
@@ -2533,19 +2537,21 @@ class _FileBrowserState extends State<FileBrowser> {
             style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
           ),
         ),
-        Flexible(
-          flex: 1,
-          child: Text(
-            'Type',
-            style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+        if (!isMobile)
+          Flexible(
+            flex: 1,
+            child: Text(
+              'Type',
+              style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+            ),
           ),
-        ),
       ],
     );
   }
 
   /// Builds the in-place rename row (shown when [_renamingIndex] is active).
   Widget _buildRenameRow(FileItem item, int index) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     final isSelected = _selectedPaths.contains(item.path);
     return Container(
       color: isSelected
@@ -2645,14 +2651,15 @@ class _FileBrowserState extends State<FileBrowser> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          Flexible(
-            flex: 1,
-            child: Text(
-              item.extension.isEmpty ? 'Folder' : item.extension,
-              style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
-              overflow: TextOverflow.ellipsis,
+          if (!isMobile)
+            Flexible(
+              flex: 1,
+              child: Text(
+                item.extension.isEmpty ? 'Folder' : item.extension,
+                style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
         ],
       ),
     );

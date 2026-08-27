@@ -67,7 +67,9 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
+    return Scaffold(
+      backgroundColor: OneDarkColors.bg,
+      body: SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -110,14 +112,15 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   if (_server.isRunning)
-                    SizedBox(
-                      width: 200,
-                      height: 200,
+                    // buildQrCode() is a ~250px-tall Column (QR + URL + PIN);
+                    // render it at natural size so it scrolls instead of
+                    // overflowing a fixed-height box.
+                    Center(
                       child: _server.buildQrCode(),
                     ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -233,6 +236,7 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
               ),
             ),
         ],
+      ),
       ),
     );
   }

@@ -127,10 +127,10 @@ class FileItem {
   Future<String> get permissions async {
     try {
       final stat = await (entity as dynamic).stat();
-      // stat.permissions is a 9-char rwx string on Linux/Android.
-      if (stat != null && stat.permissions != null) {
-        final mode = stat.permissions as int;
-        return _permissionString(mode);
+      // FileStat exposes POSIX permission bits on `mode` (e.g. 0o755 = 493).
+      if (stat != null && stat.mode != null) {
+        final mode = stat.mode as int;
+        if (mode > 0) return _permissionString(mode);
       }
     } catch (_) {}
     // Fallback: check basic read/write/execute.
@@ -589,7 +589,7 @@ class FileUtils {
     } on FileSystemException {
       // Cross-device move: fall back to copy + delete.
       await copy(sourcePath, destPath);
-      final src = FileSystemEntity.type(sourcePath);
+      final src = await FileSystemEntity.type(sourcePath);
       if (src == FileSystemEntityType.file) {
         await File(sourcePath).delete();
       } else {

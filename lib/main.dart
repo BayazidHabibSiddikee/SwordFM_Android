@@ -136,10 +136,10 @@ class _MainScreenState extends State<MainScreen> {
                   child: AnimatedOpacity(
                     opacity: _sidebarVisible ? 1.0 : 0.0,
                     duration: const Duration(milliseconds: 220),
-                    child: IgnorePointer(
-                      ignoring: !_sidebarVisible,
-                      child: SizedBox(
-                        width: 200,
+                      child: IgnorePointer(
+                        ignoring: !_sidebarVisible,
+                        child: SizedBox(
+                          width: isMobile ? 160 : 200,
                         child: Card(
                           color: OneDarkColors.bgDark,
                           elevation: 0,
