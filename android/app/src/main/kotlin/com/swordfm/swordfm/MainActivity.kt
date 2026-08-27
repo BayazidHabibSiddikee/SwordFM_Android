@@ -127,6 +127,8 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                 .setMethodCallHandler(this)
             MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/terminal")
                 .setMethodCallHandler(this)
+            MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/share")
+                .setMethodCallHandler(this)
         }
     }
 
@@ -251,6 +253,15 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     result.error("TERMUX_FAILED", e.message, null)
                 }
             }
+            "shareFiles" -> {
+                @Suppress("UNCHECKED_CAST")
+                val paths = call.argument<List<String>>("paths") ?: emptyList()
+                try {
+                    result.success(shareFiles(paths))
+                } catch (e: Exception) {
+                    result.error("SHARE_FAILED", e.message, null)
+                }
+            }
             "getStorageVolumes" -> {
                 val volumes = mutableListOf<Map<String, Any?>>()
                 val sm = getSystemService(STORAGE_SERVICE) as? StorageManager
@@ -272,6 +283,26 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     }
                 }
                 result.success(volumes)
+            }
+            "shareFile" -> {
+                val path = call.argument<String>("path") ?: ""
+                try {
+                    val file = File(path)
+                    if (!file.exists()) {
+                        result.error("FILE_NOT_FOUND", "File not found: $path", null)
+                        return
+                    }
+                    val uri: Uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = contentResolver.getType(uri) ?: "*/*"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(shareIntent, "Share via"))
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("SHARE_FAILED", e.message, null)
+                }
             }
             else -> {
                 result.notImplemented()
@@ -299,6 +330,33 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         val chooser = Intent.createChooser(viewIntent, "Open with")
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(chooser)
+        return true
+    }
+
+    /** Shares [paths] through Android's share sheet (ACTION_SEND_MULTIPLE). */
+    private fun shareFiles(paths: List<String>): Boolean {
+        val uris = paths.mapNotNull { path ->
+            Uri.parse(path).takeIf { it.scheme == "content" }
+                ?: File(path).takeIf { it.exists() }?.let {
+                    FileProvider.getUriForFile(this, "$packageName.fileprovider", it)
+                }
+        }
+        if (uris.isEmpty()) return false
+        val firstMime = paths.firstOrNull()?.let {
+            MimeTypeMap.getSingleton().getMimeTypeFromExtension(File(it).extension)
+        } ?: "*/*"
+        val sendIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+            type = firstMime
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+        }
+        if (uris.size == 1) {
+            sendIntent.action = Intent.ACTION_SEND
+            sendIntent.putExtra(Intent.EXTRA_STREAM, uris.first())
+        }
+        val chooser = Intent.createChooser(sendIntent, "Share via")
         chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(chooser)
         return true

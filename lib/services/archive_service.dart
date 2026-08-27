@@ -2,13 +2,16 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 
-/// Pure-Dart archive operations for ZIP, TAR, and GZip formats.
+/// Pure-Dart archive operations built on the `archive` package.
 ///
 /// Supports:
-///   - Extracting archives to a target directory (ZIP, TAR, TARGZ)
-///   - Creating ZIP/TAR archives from files or directories (recursive)
+///   - Extracting archives to a target directory (ZIP, TAR, TAR.GZ,
+///     TAR.XZ, TAR.BZ2)
+///   - Creating ZIP/TAR archives from files or directories (recursive),
+///     optionally wrapped in GZip / XZ / BZip2 compression
 ///
-/// Unsupported formats: 7z, RAR, and bzip2 require native/FFI bindings.
+/// Formats that require native/FFI bindings (7z, RAR, tar.zst) are not
+/// covered by the Dart `archive` package and remain unsupported here.
 import 'package:crypto/crypto.dart';
 
 class ArchiveService {
@@ -24,7 +27,9 @@ class ArchiveService {
 
   /// Find potential duplicates in [paths] by SHA-256 hash.
   /// Returns map: hash -> list of paths with that hash.
-  static Future<Map<String, List<String>>> findDuplicates(List<String> paths) async {
+  static Future<Map<String, List<String>>> findDuplicates(
+    List<String> paths,
+  ) async {
     final Map<String, List<String>> groups = {};
     for (final p in paths) {
       final h = await sha256OfFile(p);
@@ -33,15 +38,42 @@ class ArchiveService {
       }
     }
     // Only keep groups with more than one entry
-    return {for (final e in groups.entries) if (e.value.length > 1) e.key: e.value};
+    return {
+      for (final e in groups.entries)
+        if (e.value.length > 1) e.key: e.value,
+    };
   }
+
   /// Supported extensions mapped to their operation type.
+  /// Note: `p.extension('a.tar.gz')` returns `.gz`, so multi-part suffixes are
+  /// matched by their outermost compression extension (`.gz` / `.xz` / `.bz2`).
+  ///
+  /// Formats marked `(native)` are detected but require platform-specific
+  /// extraction (7z, rar, zst are not supported by the pure-Dart archive pkg).
   static const Set<String> supportedExts = {
-    '.zip', '.tar', '.gz', '.tgz', '.tar.gz',
+    '.zip',
+    '.tar',
+    '.gz',
+    '.tgz',
+    '.tar.gz',
+    '.xz',
+    '.txz',
+    '.bz2',
+    '.tbz2',
+    '.7z',   // (native) detected, extraction requires native binding
+    '.rar',  // (native) detected, extraction requires native binding
+    '.zst',  // (native) detected, extraction requires native binding
+    '.lz',
+    '.lzma',
   };
 
   /// Returns true if [path] looks like a supported archive file.
   static bool isArchive(String path) {
+    final name = p.basename(path).toLowerCase();
+    // Check multi-part extensions first (e.g. .tar.gz, .tar.xz, .tar.bz2)
+    if (name.endsWith('.tar.gz') || name.endsWith('.tar.bz2') || name.endsWith('.tar.xz') || name.endsWith('.tar.zst')) {
+      return true;
+    }
     final ext = p.extension(path).toLowerCase();
     return supportedExts.contains(ext);
   }
@@ -60,7 +92,10 @@ class ArchiveService {
   ///
   /// Returns a list of extracted file paths. Throws [Exception] on failure
   /// with a prefix: `unsupported:`, `invalid:`, or `io:`.
-  static Future<List<String>> extract(String archivePath, String destDir) async {
+  static Future<List<String>> extract(
+    String archivePath,
+    String destDir,
+  ) async {
     final ext = p.extension(archivePath).toLowerCase();
     final archiveFile = File(archivePath);
     if (!await archiveFile.exists()) {
@@ -89,6 +124,25 @@ class ArchiveService {
         final gzipDecoded = GZipDecoder().decodeBytes(data);
         files = TarDecoder().decodeBytes(gzipDecoded).files;
         break;
+      case '.xz':
+      case '.txz':
+      case '.tar.xz':
+        final xzDecoded = XZDecoder().decodeBytes(data);
+        files = TarDecoder().decodeBytes(xzDecoded).files;
+        break;
+      case '.bz2':
+      case '.tbz2':
+      case '.tar.bz2':
+        final bz2Decoded = BZip2Decoder().decodeBytes(data);
+        files = TarDecoder().decodeBytes(bz2Decoded).files;
+        break;
+      case '.7z':
+        throw Exception('unsupported:7z extraction requires native bindings — install p7zip on your device');
+      case '.rar':
+        throw Exception('unsupported:RAR extraction requires native bindings — install unrar on your device');
+      case '.zst':
+      case '.tar.zst':
+        throw Exception('unsupported:Zstandard extraction requires native bindings — install zstd on your device');
       default:
         throw Exception('unsupported:unknown archive format $ext');
     }
@@ -101,7 +155,8 @@ class ArchiveService {
     for (final af in files) {
       final name = af.name;
       // Safety: reject path traversal in archive entries
-      if (name.contains('..') || name.contains(String.fromCharCode(0))) continue;
+      if (name.contains('..') || name.contains(String.fromCharCode(0)))
+        continue;
 
       final destPath = p.join(destDir, name);
 
@@ -153,6 +208,55 @@ class ArchiveService {
 
     final bytes = TarEncoder().encode(archive);
     await File(outputPath).writeAsBytes(bytes);
+    return outputPath;
+  }
+
+  /// Creates a GZip-compressed TAR archive (`*.tar.gz`) at [outputPath]
+  /// containing the given [sources].
+  static Future<String> createTarGz({
+    required String outputPath,
+    required List<String> sources,
+  }) async {
+    final archive = Archive();
+    for (final source in sources) {
+      await _addPathsToArchive(source, archive, prefix: '');
+    }
+
+    final tarBytes = TarEncoder().encode(archive);
+    final gzBytes = GZipEncoder().encode(tarBytes);
+    await File(outputPath).writeAsBytes(gzBytes);
+    return outputPath;
+  }
+
+  /// Creates an XZ-compressed TAR archive (`*.tar.xz`) at [outputPath].
+  static Future<String> createTarXz({
+    required String outputPath,
+    required List<String> sources,
+  }) async {
+    final archive = Archive();
+    for (final source in sources) {
+      await _addPathsToArchive(source, archive, prefix: '');
+    }
+
+    final tarBytes = TarEncoder().encode(archive);
+    final xzBytes = XZEncoder().encode(tarBytes);
+    await File(outputPath).writeAsBytes(xzBytes);
+    return outputPath;
+  }
+
+  /// Creates a BZip2-compressed TAR archive (`*.tar.bz2`) at [outputPath].
+  static Future<String> createTarBz2({
+    required String outputPath,
+    required List<String> sources,
+  }) async {
+    final archive = Archive();
+    for (final source in sources) {
+      await _addPathsToArchive(source, archive, prefix: '');
+    }
+
+    final tarBytes = TarEncoder().encode(archive);
+    final bz2Bytes = BZip2Encoder().encode(tarBytes);
+    await File(outputPath).writeAsBytes(bz2Bytes);
     return outputPath;
   }
 

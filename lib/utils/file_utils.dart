@@ -1,9 +1,67 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:intl/intl.dart';
 import 'constants.dart' show AppPaths;
 export 'constants.dart';
+
+/// Common MIME types mapped from file extensions.
+const Map<String, String> _mimeTypes = {
+  'txt': 'text/plain',
+  'md': 'text/markdown',
+  'html': 'text/html',
+  'htm': 'text/html',
+  'css': 'text/css',
+  'js': 'application/javascript',
+  'json': 'application/json',
+  'xml': 'application/xml',
+  'pdf': 'application/pdf',
+  'zip': 'application/zip',
+  'gz': 'application/gzip',
+  'tar': 'application/x-tar',
+  'rar': 'application/vnd.rar',
+  '7z': 'application/x-7z-compressed',
+  'jpg': 'image/jpeg',
+  'jpeg': 'image/jpeg',
+  'png': 'image/png',
+  'gif': 'image/gif',
+  'svg': 'image/svg+xml',
+  'webp': 'image/webp',
+  'bmp': 'image/bmp',
+  'ico': 'image/x-icon',
+  'mp3': 'audio/mpeg',
+  'wav': 'audio/wav',
+  'ogg': 'audio/ogg',
+  'flac': 'audio/flac',
+  'mp4': 'video/mp4',
+  'mkv': 'video/x-matroska',
+  'avi': 'video/x-msvideo',
+  'mov': 'video/quicktime',
+  'webm': 'video/webm',
+  'py': 'text/x-python',
+  'java': 'text/x-java-source',
+  'kt': 'text/x-kotlin',
+  'c': 'text/x-c',
+  'cpp': 'text/x-c++src',
+  'h': 'text/x-c',
+  'rs': 'text/x-rust',
+  'go': 'text/x-go',
+  'rb': 'text/x-ruby',
+  'sh': 'application/x-sh',
+  'sql': 'application/sql',
+  'csv': 'text/csv',
+  'yaml': 'application/x-yaml',
+  'yml': 'application/x-yaml',
+  'toml': 'application/toml',
+  'ini': 'text/plain',
+  'conf': 'text/plain',
+  'log': 'text/plain',
+  'apk': 'application/vnd.android.package-archive',
+  'so': 'application/x-sharedlib',
+  'dll': 'application/x-msdownload',
+  'exe': 'application/x-msdownload',
+};
 
 /// Represents a single file or directory entry.
 class FileItem {
@@ -56,6 +114,67 @@ class FileItem {
 
   String get formattedDate {
     return DateFormat('yyyy-MM-dd HH:mm').format(lastModified);
+  }
+
+  /// Returns the MIME type based on file extension.
+  String get mimeType {
+    if (isDirectory) return 'inode/directory';
+    final ext = extension.replaceAll('.', '');
+    return _mimeTypes[ext] ?? 'application/octet-stream';
+  }
+
+  /// Returns permission string like "rwxr-xr-x" (best-effort on Android).
+  Future<String> get permissions async {
+    try {
+      final stat = await (entity as dynamic).stat();
+      // stat.permissions is a 9-char rwx string on Linux/Android.
+      if (stat != null && stat.permissions != null) {
+        final mode = stat.permissions as int;
+        return _permissionString(mode);
+      }
+    } catch (_) {}
+    // Fallback: check basic read/write/execute.
+    final buf = StringBuffer('r');
+    buf.write(_canWrite ? 'w' : '-');
+    buf.write(_isExecutable ? 'x' : '-');
+    buf.write('r');
+    buf.write(_canWrite ? 'w' : '-');
+    buf.write(_isExecutable ? 'x' : '-');
+    buf.write('r');
+    buf.write(_canWrite ? 'w' : '-');
+    buf.write(_isExecutable ? 'x' : '-');
+    return buf.toString();
+  }
+
+  bool get _canWrite {
+    try {
+      // Attempt a tiny write to check writability; catch and return false.
+      // This is an approximation — Android sandbox restricts most writes.
+      return true; // Assume writable in app sandbox.
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool get _isExecutable {
+    final ext = extension.toLowerCase();
+    const executableExts = {
+      '.sh', '.bash', '.py', '.pl', '.rb', '.js', '.ts',
+      '.kt', '.java', '.c', '.cpp', '.go', '.rs',
+    };
+    return executableExts.contains(ext);
+  }
+
+  static String _permissionString(int mode) {
+    // mode is octal permission bits (e.g. 0o755 = 493 decimal).
+    // Owner: r(0x100) w(0x80) x(0x40), Group: r(0x20) w(0x10) x(0x08), Other: r(0x04) w(0x02) x(0x01)
+    const bits = [0x100, 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01];
+    const chars = ['r', 'w', 'x', 'r', 'w', 'x', 'r', 'w', 'x'];
+    final perms = StringBuffer();
+    for (var i = 0; i < bits.length; i++) {
+      perms.write((mode & bits[i]) != 0 ? chars[i] : '-');
+    }
+    return perms.toString();
   }
 
   IconData get icon {
@@ -344,6 +463,56 @@ class FileUtils {
     return items;
   }
 
+  /// Recursively walks [root] and returns entries for which [keep] returns
+  /// true. Directories are traversed but never included in the result —
+  /// matching the Linux "type/date filter" behaviour where matching files are
+  /// shown flat ("find these anywhere under here"). Hidden and (unless
+  /// [showJunk]) junk-named entries are skipped during the walk. An iterative
+  /// stack avoids deep-recursion overflow on large trees; unreadable
+  /// directories are skipped silently.
+  static Future<List<FileItem>> listRecursiveFiltered(
+    String root, {
+    bool includeHidden = false,
+    bool showJunk = false,
+    bool Function(FileItem item)? keep,
+  }) async {
+    final results = <FileItem>[];
+    final pending = <Directory>[Directory(root)];
+    while (pending.isNotEmpty) {
+      final dir = pending.removeLast();
+      final List<FileSystemEntity> entities;
+      try {
+        entities = await dir.list().toList();
+      } catch (_) {
+        continue; // unreadable directory — skip
+      }
+      for (final entity in entities) {
+        final name = p.basename(entity.path);
+        if (!includeHidden && name.startsWith('.')) continue;
+        if (!showJunk && isJunkName(name)) continue;
+        final isDir = entity is Directory;
+        final stat = await entity.stat();
+        final item = FileItem(
+          entity: entity,
+          name: name,
+          path: entity.path,
+          isDirectory: isDir,
+          size: stat.size,
+          lastModified: stat.modified,
+        );
+        if (isDir) {
+          pending.add(entity);
+        } else if (keep == null || keep(item)) {
+          results.add(item);
+        }
+      }
+    }
+    results.sort(
+      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    );
+    return results;
+  }
+
   /// Gets file metadata without reading directory.
   static Future<FileItem> getFileItem(
     String path, {
@@ -367,13 +536,31 @@ class FileUtils {
   // --- CRUD Operations ---
 
   /// Copies [sourcePath] to [destPath].
+  /// Returns a unique destination path by appending (1), (2), etc. if
+  /// [destPath] already exists. Matches Linux SwordFM's uniqueDestPath().
+  static Future<String> uniqueDestPath(String destPath) async {
+    if (await FileSystemEntity.type(destPath) ==
+        FileSystemEntityType.notFound) return destPath;
+    final dir = p.dirname(destPath);
+    final ext = p.extension(destPath);
+    final base = p.basenameWithoutExtension(destPath);
+    int n = 1;
+    while (true) {
+      final candidate = p.join(dir, '$base ($n)$ext');
+      if (await FileSystemEntity.type(candidate) ==
+          FileSystemEntityType.notFound) return candidate;
+      n++;
+    }
+  }
+
   static Future<void> copy(String sourcePath, String destPath) async {
+    destPath = await uniqueDestPath(destPath);
     final src = File(sourcePath);
     if (await src.exists()) {
       await src.copy(destPath);
     } else {
       final dir = Directory(sourcePath);
-      await dir.create(recursive: true);
+      await Directory(destPath).create(recursive: true);
       final entities = await dir.list(recursive: true).toList();
       for (final entity in entities) {
         final relative = p.relative(entity.path, from: sourcePath);
@@ -388,13 +575,26 @@ class FileUtils {
   }
 
   /// Moves [sourcePath] to [destPath].
+  /// Falls back to copy+delete when rename fails (cross-device / EXDEV).
   static Future<void> move(String sourcePath, String destPath) async {
-    final src = File(sourcePath);
-    if (await src.exists()) {
-      await src.rename(destPath);
-    } else {
-      final dir = Directory(sourcePath);
-      await dir.rename(destPath);
+    destPath = await uniqueDestPath(destPath);
+    try {
+      final src = File(sourcePath);
+      if (await src.exists()) {
+        await src.rename(destPath);
+      } else {
+        final dir = Directory(sourcePath);
+        await dir.rename(destPath);
+      }
+    } on FileSystemException {
+      // Cross-device move: fall back to copy + delete.
+      await copy(sourcePath, destPath);
+      final src = FileSystemEntity.type(sourcePath);
+      if (src == FileSystemEntityType.file) {
+        await File(sourcePath).delete();
+      } else {
+        await Directory(sourcePath).delete(recursive: true);
+      }
     }
   }
 
@@ -421,35 +621,65 @@ class FileUtils {
   // --- Clipboard ---
 
   static String? _clipboardOp = 'none'; // 'copy' | 'cut'
-  static String? _clipboardPath;
+  static List<String> _clipboardPaths = [];
 
   static bool get hasClipboard =>
-      _clipboardPath != null && _clipboardOp != 'none';
+      _clipboardPaths.isNotEmpty && _clipboardOp != 'none';
 
   /// Current clipboard operation ('copy' | 'cut'), or null when empty.
   static String? get clipboardOperation =>
       (_clipboardOp == null || _clipboardOp == 'none') ? null : _clipboardOp;
 
+  /// Number of items in the clipboard.
+  static int get clipboardCount => _clipboardPaths.length;
+
+  /// All paths in the clipboard.
+  static List<String> get clipboardPaths => List.unmodifiable(_clipboardPaths);
+
   static void setClipboard(String path, String op) {
-    _clipboardPath = path;
+    _clipboardPaths = [path];
+    _clipboardOp = op;
+  }
+
+  static void setClipboardMultiple(List<String> paths, String op) {
+    _clipboardPaths = List.from(paths);
     _clipboardOp = op;
   }
 
   static Future<void> paste(String destDir) async {
-    if (_clipboardPath == null || _clipboardOp == null) return;
-    final destPath = p.join(destDir, p.basename(_clipboardPath!));
-    if (_clipboardOp == 'copy') {
-      await copy(_clipboardPath!, destPath);
-    } else if (_clipboardOp == 'cut') {
-      await move(_clipboardPath!, destPath);
-      _clipboardPath = null;
+    if (_clipboardPaths.isEmpty || _clipboardOp == null) return;
+    final pathsToPaste = List<String>.from(_clipboardPaths);
+    for (final srcPath in pathsToPaste) {
+      final destPath = p.join(destDir, p.basename(srcPath));
+      if (_clipboardOp == 'copy') {
+        await copy(srcPath, destPath);
+      } else if (_clipboardOp == 'cut') {
+        await move(srcPath, destPath);
+      }
+    }
+    if (_clipboardOp == 'cut') {
+      _clipboardPaths.clear();
       _clipboardOp = 'none';
     }
   }
 
   static void clearClipboard() {
-    _clipboardPath = null;
+    _clipboardPaths.clear();
     _clipboardOp = 'none';
+  }
+
+  // --- Share ---
+
+  static const _shareChannel = MethodChannel('com.swordfm/share');
+
+  /// Opens the Android system share sheet for [path].
+  static Future<bool> share(String path) async {
+    try {
+      final result = await _shareChannel.invokeMethod<bool>('shareFile', {'path': path});
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
   // --- Trash ---

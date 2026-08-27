@@ -5,6 +5,7 @@ import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 import '../services/archive_service.dart';
 import '../services/open_with_service.dart';
+import '../services/share_service.dart';
 import '../services/terminal_service.dart';
 import 'convert_dialog.dart';
 import 'package:path/path.dart' as p;
@@ -21,7 +22,7 @@ enum SelectionMode { none, multi }
 enum FileTypeFilter { all, images, videos, audio, documents, archives, discs }
 
 /// Archive formats supported by the "Compress…" dialog.
-enum ArchiveFormat { zip, tar, tarGz }
+enum ArchiveFormat { zip, tar, tarGz, tarXz, tarBz2 }
 
 /// Extension sets matching Linux SwordFM's filefilter.cpp exactly.
 const Map<FileTypeFilter, Set<String>> _kTypeExtensions = {
@@ -344,6 +345,32 @@ class _FileBrowserState extends State<FileBrowser> {
     return result;
   }
 
+  /// True when the type/date filter is active — the browser then searches the
+  /// whole subtree (Linux: "find these anywhere under here").
+  bool get _isRecursiveFilterActive =>
+      _filterType != FileTypeFilter.all ||
+      _dateFrom != null ||
+      _dateTo != null;
+
+  /// File-only predicate used by the recursive walk: directories are traversed
+  /// but never shown as results (matching Linux filtered-search behaviour).
+  bool _matchesTypeDate(FileItem item) {
+    if (item.isDirectory) return false;
+    if (_filterType != FileTypeFilter.all) {
+      final exts = _kTypeExtensions[_filterType];
+      if (exts != null && !exts.contains(item.extension.substring(1))) {
+        return false;
+      }
+    }
+    if (_dateFrom != null || _dateTo != null) {
+      final d = item.lastModified;
+      if (_dateFrom != null && d.isBefore(_dateFrom!)) return false;
+      if (_dateTo != null && d.isAfter(_dateTo!.add(const Duration(days: 1))))
+        return false;
+    }
+    return true;
+  }
+
   Future<void> _loadDirectory({String? path, bool pushHistory = true}) async {
     if (path != null) {
       // Block navigation into system directories (matches Linux SwordFM).
@@ -384,10 +411,19 @@ class _FileBrowserState extends State<FileBrowser> {
     setState(() {
       _isLoading = true;
     });
-    final items = await FileUtils.listDirectory(
-      _currentPath,
-      includeHidden: _showHidden,
-    );
+    // With an active type/date filter, search the whole subtree instead of
+    // listing just this directory (matches Linux filtered-search behaviour).
+    final items = _isRecursiveFilterActive
+        ? await FileUtils.listRecursiveFiltered(
+            _currentPath,
+            includeHidden: _showHidden,
+            showJunk: _showJunk,
+            keep: _matchesTypeDate,
+          )
+        : await FileUtils.listDirectory(
+            _currentPath,
+            includeHidden: _showHidden,
+          );
     _sortItems(items);
     if (mounted) {
       setState(() {
@@ -531,14 +567,15 @@ class _FileBrowserState extends State<FileBrowser> {
   // ---------------------------------------------------------------------------
 
   /// Builds aggregate info about the current selection.
-  SelectionInfo _computeSelectionInfo() {
+  /// Directories are recursively summed (matching Linux SwordFM behaviour).
+  Future<SelectionInfo> _computeSelectionInfo() async {
     final selected = _items
         .where((i) => _selectedPaths.contains(i.path))
         .toList();
-    final total = selected.fold<int>(
-      0,
-      (sum, i) => sum + (i.isDirectory ? 0 : i.size),
-    );
+    int total = 0;
+    for (final item in selected) {
+      total += await FileItem.getTotalSize(item);
+    }
     return SelectionInfo(
       count: _selectedPaths.length,
       totalSizeBytes: total,
@@ -546,8 +583,9 @@ class _FileBrowserState extends State<FileBrowser> {
     );
   }
 
-  void _notifySelectionChanged() {
-    widget.onSelectionChanged?.call(_computeSelectionInfo());
+  void _notifySelectionChanged() async {
+    final info = await _computeSelectionInfo();
+    widget.onSelectionChanged?.call(info);
   }
 
   /// Reports clipboard state to the parent (status bar indicator).
@@ -778,7 +816,7 @@ class _FileBrowserState extends State<FileBrowser> {
             ? ClipboardInfo(
                 hasClipboard: true,
                 operation: FileUtils.clipboardOperation ?? 'copy',
-                count: 1,
+                count: FileUtils.clipboardCount,
               )
             : const ClipboardInfo.empty(),
       );
@@ -948,11 +986,25 @@ class _FileBrowserState extends State<FileBrowser> {
     }
   }
 
+  /// Shares [paths] (files only) through the Android share sheet.
+  Future<void> _sharePaths(List<String> paths) async {
+    final ok = await ShareService.share(paths);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Sharing ${paths.length} item(s)…'
+              : 'Share not available here',
+        ),
+        backgroundColor: ok ? OneDarkColors.cyan : OneDarkColors.red,
+      ),
+    );
+  }
+
   void _copySelected() {
     final paths = _actionPaths;
-    for (final path in paths) {
-      FileUtils.setClipboard(path, 'copy');
-    }
+    FileUtils.setClipboardMultiple(paths, 'copy');
     _setClipboardInfo(
       ClipboardInfo(
         hasClipboard: true,
@@ -970,9 +1022,7 @@ class _FileBrowserState extends State<FileBrowser> {
 
   void _cutSelected() {
     final paths = _actionPaths;
-    for (final path in paths) {
-      FileUtils.setClipboard(path, 'cut');
-    }
+    FileUtils.setClipboardMultiple(paths, 'cut');
     _setClipboardInfo(
       ClipboardInfo(
         hasClipboard: true,
@@ -1044,8 +1094,21 @@ class _FileBrowserState extends State<FileBrowser> {
     );
     ArchiveFormat format = ArchiveFormat.zip;
 
-    String suffixFor(ArchiveFormat f) =>
-        f == ArchiveFormat.tarGz ? '.tar.gz' : '.${f.name}';
+    String suffixFor(ArchiveFormat f) {
+      switch (f) {
+        case ArchiveFormat.tarGz:
+          return '.tar.gz';
+        case ArchiveFormat.tarXz:
+          return '.tar.xz';
+        case ArchiveFormat.tarBz2:
+          return '.tar.bz2';
+        default:
+          return '.${f.name}';
+      }
+    }
+
+    // Outermost multi-part suffixes, longest-first, for stripping.
+    const multiPartSuffixes = ['tar.bz2', 'tar.gz', 'tar.xz'];
 
     final result = await showDialog<(String, ArchiveFormat)?>(
       context: context,
@@ -1055,8 +1118,15 @@ class _FileBrowserState extends State<FileBrowser> {
             final current = controller.text;
             // Strip any known archive extension before re-appending the new one.
             String base = current;
-            if (base.endsWith('.tar.gz')) {
-              base = base.substring(0, base.length - '.tar.gz'.length);
+            String? matched;
+            for (final s in multiPartSuffixes) {
+              if (base.endsWith('.$s')) {
+                matched = s;
+                break;
+              }
+            }
+            if (matched != null) {
+              base = base.substring(0, base.length - matched.length - 1);
             } else if (base.endsWith('.zip') || base.endsWith('.tar')) {
               base = base.substring(0, base.lastIndexOf('.'));
             }
@@ -1106,6 +1176,16 @@ class _FileBrowserState extends State<FileBrowser> {
                     ButtonSegment(
                       value: ArchiveFormat.tarGz,
                       label: Text('TAR.GZ'),
+                      icon: Icon(Icons.compress),
+                    ),
+                    ButtonSegment(
+                      value: ArchiveFormat.tarXz,
+                      label: Text('TAR.XZ'),
+                      icon: Icon(Icons.compress),
+                    ),
+                    ButtonSegment(
+                      value: ArchiveFormat.tarBz2,
+                      label: Text('TAR.BZ2'),
                       icon: Icon(Icons.compress),
                     ),
                   ],
@@ -1187,6 +1267,19 @@ class _FileBrowserState extends State<FileBrowser> {
             outputPath: outputPath,
             sources: paths,
           );
+          break;
+        case ArchiveFormat.tarXz:
+          await ArchiveService.createTarXz(
+            outputPath: outputPath,
+            sources: paths,
+          );
+          break;
+        case ArchiveFormat.tarBz2:
+          await ArchiveService.createTarBz2(
+            outputPath: outputPath,
+            sources: paths,
+          );
+          break;
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1221,17 +1314,17 @@ class _FileBrowserState extends State<FileBrowser> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _propRow('Name', item.name),
-              _propRow(
-                'Type',
-                item.isDirectory
-                    ? 'Folder'
-                    : (item.extension.isNotEmpty
-                          ? item.extension.toUpperCase().replaceAll('.', '')
-                          : 'File'),
-              ),
+              _propRow('Type', item.isDirectory ? 'Folder' : item.mimeType),
               _propRow('Size', item.formattedSize),
               _propRow('Modified', item.formattedDate),
               _propRow('Path', item.path),
+              FutureBuilder<String>(
+                future: item.permissions,
+                builder: (ctx, snap) {
+                  if (!snap.hasData) return const SizedBox.shrink();
+                  return _propRow('Permissions', snap.data!);
+                },
+              ),
               if (item.isDirectory) ...[
                 const SizedBox(height: 4),
                 _buildFolderSizeFutureBuilder(item),
@@ -1378,6 +1471,8 @@ class _FileBrowserState extends State<FileBrowser> {
             Icons.open_with,
             () => _showOpenWithMenu(item, tapPosition),
           ),
+        if (!item.isDirectory)
+          _menuItem('Share…', Icons.share, () => _sharePaths([item.path])),
         _menuItem(
           'Open Terminal Here',
           Icons.terminal,
@@ -1453,6 +1548,11 @@ class _FileBrowserState extends State<FileBrowser> {
               ),
             );
           }),
+        _menuItem(
+          'Share…',
+          Icons.share,
+          () => FileUtils.share(item.path),
+        ),
         _menuItem(
           'Properties',
           Icons.info_outline,
@@ -1942,6 +2042,12 @@ class _FileBrowserState extends State<FileBrowser> {
                 icon: const Icon(Icons.archive, color: OneDarkColors.green),
                 onPressed: () => _compressSelection(_actionPaths),
                 tooltip: 'Compress…',
+              ),
+            if (inSelectMode)
+              IconButton(
+                icon: const Icon(Icons.share, color: OneDarkColors.cyan),
+                onPressed: () => _sharePaths(_actionPaths),
+                tooltip: 'Share…',
               ),
             if (inSelectMode)
               PopupMenuButton<bool>(
