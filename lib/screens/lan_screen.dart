@@ -12,7 +12,11 @@ class LANSharingScreen extends StatefulWidget {
   /// Optional pre-configured server (tests inject one on a free port);
   /// defaults to a standard 8080 server.
   final WebShareServer? server;
-  const LANSharingScreen({super.key, this.server});
+
+  /// When set (e.g. "Share via LAN…" from a folder's context menu), the
+  /// server starts sharing this folder instead of the default share root.
+  final String? initialShareRoot;
+  const LANSharingScreen({super.key, this.server, this.initialShareRoot});
 
   @override
   State<LANSharingScreen> createState() => _LANSharingScreenState();
@@ -29,7 +33,7 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
 
   Future<void> _startServer() async {
     setState(() => _statusMessage = 'Starting server...');
-    final ip = await _server.start();
+    final ip = await _server.start(shareRootOverride: widget.initialShareRoot);
     if (ip != null) {
       setState(() {
         _statusMessage = 'Server running at http://$ip:${_server.port}';

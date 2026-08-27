@@ -485,13 +485,15 @@ class _FileBrowserState extends State<FileBrowser> {
     if (item.isDirectory) {
       _loadDirectory(path: item.path);
     } else {
-      // Launch file in the system default app
-      final uri = Uri.file(item.path);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        // Fallback: select the item for preview
-        widget.onItemSelected(item);
+      // Keep the selection for the preview panel, then open the file with its
+      // default app. On Android, plain file:// URIs are rejected by the OS
+      // (FileUriExposedException), so go through the FileProvider-backed
+      // OpenWithService instead.
+      widget.onItemSelected(item);
+      try {
+        await OpenWithService.openDefault(item.path);
+      } catch (e) {
+        _openFailed(e);
       }
     }
   }
@@ -840,6 +842,14 @@ class _FileBrowserState extends State<FileBrowser> {
       );
       _clearMarks(); // auto-clear marks after paste (matching Linux SwordFM)
       _loadDirectory();
+    }).catchError((Object e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Paste failed: $e'),
+          backgroundColor: OneDarkColors.red,
+        ),
+      );
     });
   }
 
@@ -1017,6 +1027,8 @@ class _FileBrowserState extends State<FileBrowser> {
       ),
     );
   }
+
+  /// Shares a folder over LAN using the standard _sharePaths flow.
 
   void _copySelected() {
     final paths = _actionPaths;
@@ -1482,7 +1494,14 @@ class _FileBrowserState extends State<FileBrowser> {
             Icons.open_with,
             () => _showOpenWithMenu(item, tapPosition),
           ),
-        _menuItem('Share…', Icons.share, () => _sharePaths([item.path])),
+        if (item.isDirectory)
+          _menuItem(
+            'Share via LAN…',
+            Icons.wifi,
+            () => _sharePaths([item.path]),
+          )
+        else
+          _menuItem('Share…', Icons.share, () => _sharePaths([item.path])),
         _menuItem(
           'Open Terminal Here',
           Icons.terminal,
@@ -1491,6 +1510,13 @@ class _FileBrowserState extends State<FileBrowser> {
         const PopupMenuDivider(),
         _menuItem('Copy', Icons.copy, () {
           FileUtils.setClipboard(item.path, 'copy');
+          _setClipboardInfo(
+            ClipboardInfo(
+              hasClipboard: true,
+              operation: 'copy',
+              count: 1,
+            ),
+          );
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Copied: ${item.name}'),
@@ -1500,6 +1526,13 @@ class _FileBrowserState extends State<FileBrowser> {
         }),
         _menuItem('Cut', Icons.content_cut, () {
           FileUtils.setClipboard(item.path, 'cut');
+          _setClipboardInfo(
+            ClipboardInfo(
+              hasClipboard: true,
+              operation: 'cut',
+              count: 1,
+            ),
+          );
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Cut: ${item.name}'),
@@ -1510,8 +1543,19 @@ class _FileBrowserState extends State<FileBrowser> {
         if (FileUtils.hasClipboard)
           _menuItem('Paste here', Icons.content_paste, () async {
             final destDir = item.isDirectory ? item.path : p.dirname(item.path);
-            await FileUtils.paste(destDir);
-            if (mounted) _loadDirectory();
+            try {
+              await FileUtils.paste(destDir);
+              if (mounted) _loadDirectory();
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Paste failed: $e'),
+                    backgroundColor: OneDarkColors.red,
+                  ),
+                );
+              }
+            }
           }),
         const PopupMenuDivider(),
         _menuItem(

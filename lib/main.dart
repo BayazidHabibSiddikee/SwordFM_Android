@@ -104,6 +104,10 @@ class _MainScreenState extends State<MainScreen> {
   // Storage volumes from Android device service (null until loaded)
   List<StorageVolume>? _volumes;
 
+  // Real directories found in the home folder
+  List<FileSystemEntity> _homeDirs = [];
+  bool _homeDirsLoaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -112,12 +116,47 @@ class _MainScreenState extends State<MainScreen> {
       if (mounted) setState(() => _currentPath = AppPaths.home);
       _loadVolumes();
       _loadBookmarks();
+      _loadHomeDirs();
     });
   }
 
   Future<void> _loadBookmarks() async {
     final bookmarks = await BookmarksService.load();
     if (mounted) setState(() => _bookmarks = bookmarks);
+  }
+
+  Future<void> _loadHomeDirs() async {
+    try {
+      final home = Directory(AppPaths.home);
+      if (await home.exists()) {
+        final entities = await home.list().toList();
+        final dirs = entities.whereType<Directory>().toList()
+          ..sort((a, b) => a.path.compareTo(b.path));
+        if (mounted) setState(() {
+          _homeDirs = dirs;
+          _homeDirsLoaded = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _homeDirsLoaded = true);
+    }
+  }
+
+  IconData _iconForDir(String name) {
+    switch (name.toLowerCase()) {
+      case 'dcim': return Icons.camera_alt;
+      case 'download': case 'downloads': return Icons.download;
+      case 'music': return Icons.music_note;
+      case 'pictures': return Icons.image;
+      case 'movies': case 'videos': return Icons.movie;
+      case 'documents': return Icons.description;
+      case 'android': return Icons.android;
+      case 'alarms': return Icons.alarm;
+      case 'notifications': return Icons.notifications;
+      case 'podcasts': return Icons.podcasts;
+      case 'ringtones': return Icons.music_note;
+      default: return Icons.folder;
+    }
   }
 
   Future<void> _loadVolumes() async {
@@ -136,12 +175,10 @@ class _MainScreenState extends State<MainScreen> {
             // Tab 0: Files
             Row(
               children: [
-                // ── Sidebar (collapses to 0 width when hidden) ──
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  width: _sidebarVisible ? (isMobile ? 160 : 200) : 0,
-                  curve: Curves.easeInOut,
-                  child: ClipRect(
+                // ── Sidebar (conditionally rendered) ──
+                if (_sidebarVisible)
+                  SizedBox(
+                    width: isMobile ? 160 : 200,
                     child: Card(
                           color: OneDarkColors.bgDark,
                           elevation: 0,
@@ -168,12 +205,24 @@ class _MainScreenState extends State<MainScreen> {
                                   physics: const NeverScrollableScrollPhysics(),
                                   children: [
                                     _sidebarTile(0, Icons.home, 'Home', AppPaths.home),
-                                    _sidebarTile(1, Icons.desktop_windows, 'Desktop', AppPaths.desktop),
-                                    _sidebarTile(2, Icons.document_scanner, 'Documents', AppPaths.documents),
-                                    _sidebarTile(3, Icons.download, 'Downloads', AppPaths.downloads),
-                                    _sidebarTile(4, Icons.image, 'Pictures', AppPaths.pictures),
-                                    _sidebarTile(5, Icons.music_note, 'Music', AppPaths.music),
-                                    _sidebarTile(6, Icons.movie, 'Videos', AppPaths.videos),
+                                    if (_homeDirsLoaded)
+                                      ..._homeDirs.where((d) {
+                                        final name = d.path.split('/').last;
+                                        return !name.startsWith('.');
+                                      }).take(15).toList().asMap().entries.map((entry) {
+                                        final i = entry.key;
+                                        final dir = entry.value;
+                                        final name = dir.path.split('/').last;
+                                        final icon = _iconForDir(name);
+                                        final tileIndex = 100 + i;
+                                        return _sidebarTile(tileIndex, icon, name, dir.path);
+                                      })
+                                    else
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                        child: SizedBox(height: 16, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
+                                      ),
+                                    const Divider(),
                                     ListTile(
                                       contentPadding: const EdgeInsets.symmetric(horizontal: 8),
                                       minLeadingWidth: 0,
@@ -257,7 +306,6 @@ class _MainScreenState extends State<MainScreen> {
                             ],
                           ),
                         ),
-                      ),
                 ),
 
                 // ── Main file browser area ───────────────────────────────
