@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../services/web_share_server.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
@@ -116,12 +117,16 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  if (_server.isRunning)
-                    // buildQrCode() is a ~250px-tall Column (QR + URL + PIN);
-                    // render it at natural size so it scrolls instead of
-                    // overflowing a fixed-height box.
+                  if (_server.isRunning && _server.currentIp != null)
                     Center(
-                      child: _server.buildQrCode(),
+                      child: QrImageView(
+                        data: 'http://${_server.currentIp}:${_server.port}',
+                        version: QrVersions.auto,
+                        size: 180.0,
+                        gapless: false,
+                        eyeStyle: const QrEyeStyle(color: OneDarkColors.cyan),
+                        dataModuleStyle: const QrDataModuleStyle(color: OneDarkColors.cyan),
+                      ),
                     ),
                   const SizedBox(height: 12),
                   Wrap(

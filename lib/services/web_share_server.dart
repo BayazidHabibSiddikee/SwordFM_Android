@@ -623,22 +623,15 @@ class WebShareServer {
       return const Center(child: Text('No IP address available'));
     }
     final url = 'http://$_currentIp:$port';
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        QrImageView(
-          data: url,
-          version: QrVersions.auto,
-          size: 200.0,
-          gapless: false,
-          eyeStyle: const QrEyeStyle(color: OneDarkColors.cyan),
-          dataModuleStyle: const QrDataModuleStyle(color: OneDarkColors.cyan),
-        ),
-        const SizedBox(height: 12),
-        Text(url, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: OneDarkColors.cyan)),
-        const SizedBox(height: 4),
-        Text('PIN: $_pin', style: const TextStyle(fontSize: 13, color: OneDarkColors.amber)),
-      ],
+    // Just the QR — the URL and PIN are already shown in the status card
+    // above the code, so duplicating them here only crowds the layout.
+    return QrImageView(
+      data: url,
+      version: QrVersions.auto,
+      size: 200.0,
+      gapless: false,
+      eyeStyle: const QrEyeStyle(color: OneDarkColors.cyan),
+      dataModuleStyle: const QrDataModuleStyle(color: OneDarkColors.cyan),
     );
   }
 

@@ -485,7 +485,14 @@ class _FileBrowserState extends State<FileBrowser> {
     if (item.isDirectory) {
       _loadDirectory(path: item.path);
     } else {
-      widget.onItemSelected(item);
+      // Launch file in the system default app
+      final uri = Uri.file(item.path);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        // Fallback: select the item for preview
+        widget.onItemSelected(item);
+      }
     }
   }
 
@@ -1475,8 +1482,7 @@ class _FileBrowserState extends State<FileBrowser> {
             Icons.open_with,
             () => _showOpenWithMenu(item, tapPosition),
           ),
-        if (!item.isDirectory)
-          _menuItem('Share…', Icons.share, () => _sharePaths([item.path])),
+        _menuItem('Share…', Icons.share, () => _sharePaths([item.path])),
         _menuItem(
           'Open Terminal Here',
           Icons.terminal,

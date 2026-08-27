@@ -24,6 +24,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool? _emailVerified;
   bool _isPremium = false;
   bool _loading = true;
+  bool _showHiddenFiles = false;
+  String _sortBy = 'Name';
+  bool _bluetoothAutoConnect = false;
+  int _lanPort = 8080;
 
   @override
   void initState() {
@@ -139,10 +143,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // Appearance
           _sectionTitle('Appearance'),
           _settingTile(
-            icon: Icons.dark_mode,
+            icon: isDarkTheme ? Icons.dark_mode : Icons.light_mode,
             title: 'Theme',
-            subtitle: 'One Dark (Default)',
+            subtitle: isDarkTheme ? 'One Dark (Default)' : 'Cream Light',
             trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              final newMode = isDarkTheme ? 'light' : 'dark';
+              await saveThemeMode(newMode);
+              themeNotifier.value++;
+            },
           ),
           _settingTile(
             icon: Icons.grid_view,
@@ -163,13 +172,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icons.visibility,
             title: 'Show Hidden Files',
             subtitle: 'Toggle to show dotfiles',
-            trailing: Switch(value: false, onChanged: (_) {}),
+            trailing: Switch(
+              value: _showHiddenFiles,
+              onChanged: (v) => setState(() => _showHiddenFiles = v),
+            ),
           ),
           _settingTile(
             icon: Icons.sort,
             title: 'Sort By',
-            subtitle: 'Name',
+            subtitle: _sortBy,
             trailing: const Icon(Icons.chevron_right),
+            onTap: _showSortByPicker,
           ),
           _settingTile(
             icon: Icons.delete_outline,
@@ -193,19 +206,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icons.bluetooth,
             title: 'Bluetooth Auto-Connect',
             subtitle: 'Connect to paired devices',
-            trailing: Switch(value: false, onChanged: (_) {}),
+            trailing: Switch(
+              value: _bluetoothAutoConnect,
+              onChanged: (v) => setState(() => _bluetoothAutoConnect = v),
+            ),
           ),
           _settingTile(
             icon: Icons.wifi,
             title: 'LAN Server Port',
-            subtitle: '8080',
+            subtitle: '$_lanPort',
             trailing: const Icon(Icons.chevron_right),
+            onTap: _showPortPicker,
           ),
 
           const SizedBox(height: 16),
 
           // Tools
           _sectionTitle('Tools'),
+          _settingTile(
+            icon: Icons.bar_chart,
+            title: 'Storage Analysis',
+            subtitle: 'See disk usage by folder',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              // Navigate to Storage tab (index 4)
+              Navigator.of(context).popUntil((route) => route.isFirst);
+              // The caller needs to switch tabs — use a callback approach
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Tap the Storage tab in the bottom bar')),
+              );
+            },
+          ),
+          const SizedBox(height: 8),
           _settingTile(
             icon: Icons.all_inclusive,
             title: 'Find Duplicates',
@@ -374,6 +406,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
       trailing: trailing,
       onTap: onTap ?? (trailing is Switch ? null : () {}),
     );
+  }
+
+  Future<void> _showSortByPicker() async {
+    final options = ['Name', 'Size', 'Date', 'Type'];
+    final result = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: const Text('Sort By', style: TextStyle(color: OneDarkColors.fg)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: options.map((opt) => RadioListTile<String>(
+            value: opt,
+            groupValue: _sortBy,
+            title: Text(opt, style: const TextStyle(color: OneDarkColors.fg)),
+            activeColor: OneDarkColors.cyan,
+            dense: true,
+            onChanged: (v) => Navigator.pop(context, v),
+          )).toList(),
+        ),
+      ),
+    );
+    if (result != null && mounted) setState(() => _sortBy = result);
+  }
+
+  Future<void> _showPortPicker() async {
+    final controller = TextEditingController(text: '$_lanPort');
+    final result = await showDialog<int>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: const Text('LAN Server Port', style: TextStyle(color: OneDarkColors.fg)),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          style: const TextStyle(color: OneDarkColors.fg),
+          decoration: const InputDecoration(
+            labelText: 'Port',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final port = int.tryParse(controller.text);
+              if (port != null && port > 0 && port < 65536) Navigator.pop(context, port);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result != null && mounted) setState(() => _lanPort = result);
   }
 
   /// Opens rclone browser via Termux. Prefers URL scheme; falls back to

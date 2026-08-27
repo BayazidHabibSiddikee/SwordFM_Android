@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+const String _kThemePref = 'swordfm_theme_mode';
 
 /// Tries to extract dynamic colors from the system accent, falling back to
 /// the One Dark palette when no dynamic palette is available.
@@ -21,8 +24,57 @@ class OneDarkColors {
   static const Color selectFg = Color(0xFF61AFEF);
 }
 
-/// Base dark color palette (One Dark). Used as fallback when no dynamic
-/// palette is available or when dynamic colors are disabled.
+/// Cream/light theme colors.
+class CreamColors {
+  static const Color bg = Color(0xFFFAF7F0);
+  static const Color bgDark = Color(0xFFF5F0E6);
+  static const Color dim = Color(0xFFE8E0D0);
+  static const Color border = Color(0xFFDDD5C5);
+  static const Color fg = Color(0xFF3E3832);
+  static const Color fgDim = Color(0xFF8A8078);
+  
+  static const Color cyan = Color(0xFF2E78B7);
+  static const Color green = Color(0xFF4A8C3F);
+  static const Color amber = Color(0xFFB8860B);
+  static const Color red = Color(0xFFC0392B);
+  static const Color purple = Color(0xFF8E44AD);
+  
+  static const Color hover = Color(0xFFEDE8DE);
+  static const Color select = Color(0xFFE8E0D0);
+  static const Color selectFg = Color(0xFF2E78B7);
+}
+
+/// Current theme mode: 'dark' or 'light'.
+String _currentThemeMode = 'dark';
+
+/// Global notifier for theme changes — callers update via [themeNotifier.value++].
+final ValueNotifier<int> themeNotifier = ValueNotifier<int>(0);
+
+/// Gets the current theme mode.
+String get currentThemeMode => _currentThemeMode;
+
+/// Loads the saved theme mode from preferences.
+Future<void> loadThemeMode() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    _currentThemeMode = prefs.getString(_kThemePref) ?? 'dark';
+  } catch (_) {
+    _currentThemeMode = 'dark';
+  }
+}
+
+/// Saves the theme mode to preferences.
+Future<void> saveThemeMode(String mode) async {
+  _currentThemeMode = mode;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kThemePref, mode);
+  } catch (_) {}
+}
+
+/// Returns whether the current theme is dark.
+bool get isDarkTheme => _currentThemeMode == 'dark';
+
 const _ONE_DARK = ColorScheme.dark(
   surface: Color(0xFF21252B),
   onSurface: Color(0xFFABB2BF),
@@ -34,16 +86,19 @@ const _ONE_DARK = ColorScheme.dark(
   onError: Color(0xFF282C34),
 );
 
-/// Builds a ThemeData using [palette] as primary color source.
-/// If [useDynamicColor] is true and the device supports it, the system
-/// palette is blended into the One Dark base; otherwise the static palette
-/// is used unchanged.
+const _CREAM = ColorScheme.light(
+  surface: Color(0xFFF5F0E6),
+  onSurface: Color(0xFF3E3832),
+  primary: Color(0xFF2E78B7),
+  onPrimary: Color(0xFFFFFFFF),
+  secondary: Color(0xFF4A8C3F),
+  onSecondary: Color(0xFFFFFFFF),
+  error: Color(0xFFC0392B),
+  onError: Color(0xFFFFFFFF),
+);
+
 ThemeData buildOneDarkTheme({bool useDynamicColor = false}) {
   ColorScheme base = _ONE_DARK;
-  if (useDynamicColor) {
-    // dynamic_color is handled at the MaterialApp level via builder;
-    // this function provides a static fallback.
-  }
   return ThemeData(
     brightness: Brightness.dark,
     scaffoldBackgroundColor: const Color(0xFF282C34),
@@ -75,3 +130,35 @@ ThemeData buildOneDarkTheme({bool useDynamicColor = false}) {
   );
 }
 
+ThemeData buildCreamTheme() {
+  const base = _CREAM;
+  return ThemeData(
+    brightness: Brightness.light,
+    scaffoldBackgroundColor: CreamColors.bg,
+    colorScheme: base,
+    appBarTheme: const AppBarTheme(
+      backgroundColor: CreamColors.bgDark,
+      foregroundColor: CreamColors.fg,
+      elevation: 0,
+    ),
+    dividerTheme: const DividerThemeData(
+      color: CreamColors.border,
+      thickness: 1,
+      space: 1,
+    ),
+    listTileTheme: const ListTileThemeData(
+      textColor: CreamColors.fg,
+      iconColor: CreamColors.fg,
+      selectedTileColor: CreamColors.select,
+      selectedColor: CreamColors.cyan,
+    ),
+    textTheme: const TextTheme(
+      bodyLarge: TextStyle(color: CreamColors.fg, fontSize: 15),
+      bodyMedium: TextStyle(color: CreamColors.fg, fontSize: 13),
+      titleMedium: TextStyle(color: CreamColors.cyan, fontSize: 16, fontWeight: FontWeight.w600),
+      titleSmall: TextStyle(color: CreamColors.fgDim, fontSize: 12),
+    ),
+    cardColor: CreamColors.bgDark,
+    dialogTheme: const DialogThemeData(backgroundColor: CreamColors.bg),
+  );
+}

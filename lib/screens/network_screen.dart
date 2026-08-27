@@ -19,6 +19,7 @@ class _NetworkScreenState extends State<NetworkScreen> {
   String? _currentProfileId;
   List<RemoteEntry> _remoteEntries = [];
   final _logController = StreamController<List<ConnLog>>.broadcast();
+  bool _showProfiles = true; // toggleable on mobile
 
   @override
   void initState() {
@@ -94,6 +95,7 @@ class _NetworkScreenState extends State<NetworkScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     return Scaffold(
       backgroundColor: OneDarkColors.bg,
       appBar: AppBar(
@@ -102,66 +104,135 @@ class _NetworkScreenState extends State<NetworkScreen> {
         foregroundColor: OneDarkColors.fg,
         iconTheme: const IconThemeData(color: OneDarkColors.fg),
         actions: [
+          if (isMobile)
+            IconButton(
+              icon: Icon(_showProfiles ? Icons.close : Icons.people),
+              onPressed: () => setState(() => _showProfiles = !_showProfiles),
+              tooltip: _showProfiles ? 'Show Files' : 'Show Profiles',
+            ),
           IconButton(icon: const Icon(Icons.add), onPressed: _addProfile, tooltip: 'Add Profile'),
         ],
       ),
-      body: Row(
-        children: [
-          // Left: profile list
-          SizedBox(
-            width: 260,
-            child: Card(
-              color: OneDarkColors.bgDark,
+      body: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
+    );
+  }
+
+  Widget _buildMobileLayout() {
+    if (_showProfiles) {
+      // Profile list fullscreen
+      return _profiles.isEmpty
+          ? Center(
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Text('Profiles', style: TextStyle(color: OneDarkColors.cyan, fontWeight: FontWeight.w600)),
-                  ),
-                  const Divider(height: 1),
-                  Expanded(
-                    child: _profiles.isEmpty
-                        ? Center(child: Text('No profiles', style: TextStyle(color: OneDarkColors.fgDim)))
-                        : ListView.separated(
-                            itemCount: _profiles.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
-                            itemBuilder: (context, i) {
-                              final profile = _profiles[i];
-                              final isActive = _currentProfileId == profile.profile.id;
-                              return ListTile(
-                                leading: Icon(
-                                  profile.profile.type == 'webdav' ? Icons.cloud : Icons.storage,
-                                  color: isActive ? OneDarkColors.cyan : OneDarkColors.fgDim,
-                                ),
-                                title: Text(profile.profile.name, style: TextStyle(color: isActive ? OneDarkColors.cyan : OneDarkColors.fg)),
-                                subtitle: Text('${profile.profile.host}:${profile.profile.port}', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.delete, size: 18),
-                                  color: OneDarkColors.red,
-                                  onPressed: () => _removeProfile(profile.profile.id),
-                                ),
-                                onTap: () => _connect(profile.profile.id),
-                              );
-                            },
-                          ),
-                  ),
+                  Icon(Icons.cloud_off, size: 48, color: OneDarkColors.fgDim),
+                  const SizedBox(height: 12),
+                  Text('No profiles', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 16)),
+                  const SizedBox(height: 8),
+                  Text('Tap + to add a WebDAV or SFTP connection', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
                 ],
               ),
+            )
+          : ListView.separated(
+              itemCount: _profiles.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, i) {
+                final profile = _profiles[i];
+                final isActive = _currentProfileId == profile.profile.id;
+                return ListTile(
+                  leading: Icon(
+                    profile.profile.type == 'webdav' ? Icons.cloud : Icons.storage,
+                    color: isActive ? OneDarkColors.cyan : OneDarkColors.fgDim,
+                  ),
+                  title: Text(profile.profile.name, style: TextStyle(color: isActive ? OneDarkColors.cyan : OneDarkColors.fg)),
+                  subtitle: Text('${profile.profile.host}:${profile.profile.port}', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete, size: 18),
+                    color: OneDarkColors.red,
+                    onPressed: () => _removeProfile(profile.profile.id),
+                  ),
+                  onTap: () {
+                    _connect(profile.profile.id);
+                    setState(() => _showProfiles = false);
+                  },
+                );
+              },
+            );
+    }
+    // Remote file view
+    return _loading
+        ? const Center(child: CircularProgressIndicator())
+        : _error != null
+            ? Center(child: Text(_error!, style: const TextStyle(color: OneDarkColors.red)))
+            : _currentProfileId == null
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.cloud_queue, size: 48, color: OneDarkColors.fgDim),
+                        const SizedBox(height: 12),
+                        Text('Select a profile to connect', style: TextStyle(color: OneDarkColors.fgDim)),
+                      ],
+                    ),
+                  )
+                : _RemoteFileView(profileId: _currentProfileId!, entries: _remoteEntries);
+  }
+
+  Widget _buildDesktopLayout() {
+    return Row(
+      children: [
+        SizedBox(
+          width: 260,
+          child: Card(
+            color: OneDarkColors.bgDark,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text('Profiles', style: TextStyle(color: OneDarkColors.cyan, fontWeight: FontWeight.w600)),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: _profiles.isEmpty
+                      ? Center(child: Text('No profiles', style: TextStyle(color: OneDarkColors.fgDim)))
+                      : ListView.separated(
+                          itemCount: _profiles.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, i) {
+                            final profile = _profiles[i];
+                            final isActive = _currentProfileId == profile.profile.id;
+                            return ListTile(
+                              leading: Icon(
+                                profile.profile.type == 'webdav' ? Icons.cloud : Icons.storage,
+                                color: isActive ? OneDarkColors.cyan : OneDarkColors.fgDim,
+                              ),
+                              title: Text(profile.profile.name, style: TextStyle(color: isActive ? OneDarkColors.cyan : OneDarkColors.fg)),
+                              subtitle: Text('${profile.profile.host}:${profile.profile.port}', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.delete, size: 18),
+                                color: OneDarkColors.red,
+                                onPressed: () => _removeProfile(profile.profile.id),
+                              ),
+                              onTap: () => _connect(profile.profile.id),
+                            );
+                          },
+                        ),
+                ),
+              ],
             ),
           ),
-          const VerticalDivider(width: 1),
-          // Right: remote file view or log
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                    ? Center(child: Text(_error!, style: const TextStyle(color: OneDarkColors.red)))
-                    : _currentProfileId == null
-                        ? const Center(child: Text('Select a profile to connect', style: TextStyle(color: OneDarkColors.fgDim)))
-                        : _RemoteFileView(profileId: _currentProfileId!, entries: _remoteEntries),
-          ),
-        ],
-      ),
+        ),
+        const VerticalDivider(width: 1),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+                  ? Center(child: Text(_error!, style: const TextStyle(color: OneDarkColors.red)))
+                  : _currentProfileId == null
+                      ? const Center(child: Text('Select a profile to connect', style: TextStyle(color: OneDarkColors.fgDim)))
+                      : _RemoteFileView(profileId: _currentProfileId!, entries: _remoteEntries),
+        ),
+      ],
     );
   }
 }

@@ -35,6 +35,8 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('Permission request failed: $e');
   }
+  // Load saved theme mode
+  await loadThemeMode();
   runApp(const SwordFM());
 }
 
@@ -43,26 +45,31 @@ class SwordFM extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DynamicColorBuilder(
-      builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
-        final baseTheme = buildOneDarkTheme();
-        final theme = darkDynamic != null
-            ? baseTheme.copyWith(colorScheme: baseTheme.colorScheme.copyWith(
-                  primary: darkDynamic.primary,
-                  secondary: darkDynamic.secondary,
-                  error: darkDynamic.error,
-                ))
-            : baseTheme;
-        return MultiProvider(
-          providers: [
-            ChangeNotifierProvider(create: (_) => EntitlementService()),
-          ],
-          child: MaterialApp(
-            title: 'SwordFM',
-            debugShowCheckedModeBanner: false,
-            theme: theme,
-            home: const MainScreen(),
-          ),
+    return ValueListenableBuilder<int>(
+      valueListenable: themeNotifier,
+      builder: (context, _, __) {
+        return DynamicColorBuilder(
+          builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
+            final baseTheme = isDarkTheme ? buildOneDarkTheme() : buildCreamTheme();
+            final theme = darkDynamic != null
+                ? baseTheme.copyWith(colorScheme: baseTheme.colorScheme.copyWith(
+                      primary: darkDynamic.primary,
+                      secondary: darkDynamic.secondary,
+                      error: darkDynamic.error,
+                    ))
+                : baseTheme;
+            return MultiProvider(
+              providers: [
+                ChangeNotifierProvider(create: (_) => EntitlementService()),
+              ],
+              child: MaterialApp(
+                title: 'SwordFM',
+                debugShowCheckedModeBanner: false,
+                theme: theme,
+                home: const MainScreen(),
+              ),
+            );
+          },
         );
       },
     );
@@ -129,18 +136,13 @@ class _MainScreenState extends State<MainScreen> {
             // Tab 0: Files
             Row(
               children: [
-                // ── Sidebar (slides in/out via clipping, always present) ──
-                AnimatedSlide(
-                  offset: _sidebarVisible ? Offset.zero : const Offset(-1, 0),
+                // ── Sidebar (collapses to 0 width when hidden) ──
+                AnimatedContainer(
                   duration: const Duration(milliseconds: 220),
-                  child: AnimatedOpacity(
-                    opacity: _sidebarVisible ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 220),
-                      child: IgnorePointer(
-                        ignoring: !_sidebarVisible,
-                        child: SizedBox(
-                          width: isMobile ? 160 : 200,
-                        child: Card(
+                  width: _sidebarVisible ? (isMobile ? 160 : 200) : 0,
+                  curve: Curves.easeInOut,
+                  child: ClipRect(
+                    child: Card(
                           color: OneDarkColors.bgDark,
                           elevation: 0,
                           margin: EdgeInsets.zero,
@@ -256,8 +258,6 @@ class _MainScreenState extends State<MainScreen> {
                           ),
                         ),
                       ),
-                    ),
-                  ),
                 ),
 
                 // ── Main file browser area ───────────────────────────────
