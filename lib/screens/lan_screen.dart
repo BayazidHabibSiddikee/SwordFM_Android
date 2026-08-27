@@ -8,14 +8,17 @@ import 'qr_scanner_screen.dart';
 /// Full LAN sharing screen with QR code, server controls, auth management,
 /// share-root picker, and client-access log.
 class LANSharingScreen extends StatefulWidget {
-  const LANSharingScreen({super.key});
+  /// Optional pre-configured server (tests inject one on a free port);
+  /// defaults to a standard 8080 server.
+  final WebShareServer? server;
+  const LANSharingScreen({super.key, this.server});
 
   @override
   State<LANSharingScreen> createState() => _LANSharingScreenState();
 }
 
 class _LANSharingScreenState extends State<LANSharingScreen> {
-  final _server = WebShareServer();
+  late final WebShareServer _server = widget.server ?? WebShareServer();
   String? _statusMessage;
 
   @override
@@ -28,7 +31,7 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
     final ip = await _server.start();
     if (ip != null) {
       setState(() {
-        _statusMessage = 'Server running at http://$ip:8080';
+        _statusMessage = 'Server running at http://$ip:${_server.port}';
       });
     } else {
       setState(() => _statusMessage = 'Failed to start server. Check network permissions.');
@@ -99,7 +102,7 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
                             ),
                             if (_server.currentIp != null)
                               Text(
-                                'http://${_server.currentIp}:8080',
+                                'http://${_server.currentIp}:${_server.port}',
                                 style: const TextStyle(color: OneDarkColors.cyan, fontSize: 13),
                               ),
                             if (_server.isRunning)

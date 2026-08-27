@@ -32,5 +32,7 @@ Future<List<StorageVolume>> getStorageVolumes() async {
     return raw.whereType<Map<dynamic, dynamic>>().map((m) => StorageVolume.fromJson(m)).toList();
   } on PlatformException {
     return [];
+  } catch (_) {
+    return []; // e.g. MissingPluginException on desktop/tests
   }
 }

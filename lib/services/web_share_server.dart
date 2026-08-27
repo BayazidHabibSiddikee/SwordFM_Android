@@ -28,6 +28,12 @@ const int _kMaxSafeNameLen = 255;
 ///   • Downloads stream from disk; uploads stream to disk — neither buffers
 ///     the entire body in memory.
 class WebShareServer {
+  /// TCP port the web server listens on. Defaults to 8080 (matching the
+  /// Linux SwordFM share); tests inject a free port.
+  final int port;
+
+  WebShareServer({this.port = 8080});
+
   HttpServer? _server;
   final NetworkInfo _networkInfo = NetworkInfo();
 
@@ -56,8 +62,6 @@ class WebShareServer {
   bool get isRunning => _isRunning;
   String get pin => _pin;
   String get shareRoot => _shareRoot;
-
-  static const int port = 8080;
 
   /// Generate a random 6-digit PIN for client authorization.
   String _generatePin() {

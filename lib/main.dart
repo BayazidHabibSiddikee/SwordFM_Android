@@ -173,6 +173,9 @@ class _MainScreenState extends State<MainScreen> {
                                     _sidebarTile(5, Icons.music_note, 'Music', AppPaths.music),
                                     _sidebarTile(6, Icons.movie, 'Videos', AppPaths.videos),
                                     ListTile(
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                                      minLeadingWidth: 0,
+                                      horizontalTitleGap: 6,
                                       leading: Icon(Icons.delete_outline, size: 18, color: OneDarkColors.fgDim),
                                       title: const Text('Trash', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13)),
                                       onTap: () => Navigator.of(context).push(
@@ -194,6 +197,7 @@ class _MainScreenState extends State<MainScreen> {
                                     else
                                       ..._volumes!.map((vol) => ListTile(
                                         dense: true,
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
                                         horizontalTitleGap: 4,
                                         minLeadingWidth: 0,
                                         leading: Icon(vol.isRemovable ? Icons.sd_storage : Icons.storage, size: 18, color: OneDarkColors.cyan),
@@ -213,6 +217,9 @@ class _MainScreenState extends State<MainScreen> {
                                     ),
                                     // Add bookmark button
                                     ListTile(
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                                      minLeadingWidth: 0,
+                                      horizontalTitleGap: 6,
                                       leading: Icon(Icons.bookmark_add, size: 18, color: OneDarkColors.fgDim),
                                       title: const Text('Add Bookmark', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
                                       onTap: _addBookmark,
@@ -220,6 +227,9 @@ class _MainScreenState extends State<MainScreen> {
                                     // Saved bookmarks — tap to navigate, long-press to remove
                                     ..._bookmarks.map((path) => ListTile(
                                       dense: true,
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                                      minLeadingWidth: 0,
+                                      horizontalTitleGap: 6,
                                       leading: Icon(Icons.bookmark, size: 18, color: OneDarkColors.amber),
                                       title: Text(_shortPath(path),
                                           style: const TextStyle(color: OneDarkColors.fg, fontSize: 13)),
@@ -470,6 +480,10 @@ class _MainScreenState extends State<MainScreen> {
       onEnter: (_) => setState(() => _hoveredIndex.add(index)),
       onExit: (_) => setState(() => _hoveredIndex.remove(index)),
       child: ListTile(
+        // Compact padding so tiles fit the narrow (160px) mobile sidebar.
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        minLeadingWidth: 0,
+        horizontalTitleGap: 6,
         leading: Icon(icon, size: 18, color: isActive ? OneDarkColors.cyan : OneDarkColors.fg),
         tileColor: _hoveredIndex.contains(index) ? OneDarkColors.dim.withValues(alpha: 0.3) : null,
         title: Row(

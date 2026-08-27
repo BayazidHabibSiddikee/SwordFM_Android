@@ -247,7 +247,8 @@ class _FileBrowserState extends State<FileBrowser> {
   SelectionMode _selectionMode = SelectionMode.none;
   // ignore: prefer_final_fields — mutated via setState
   Set<String> _selectedPaths = {};
-  final Set<String> _markedPaths = {}; // persistent mark state across directory changes
+  final Set<String> _markedPaths =
+      {}; // persistent mark state across directory changes
   final Map<String, int> _folderSizes = {};
   final Set<String> _loadingFolders = {};
 
@@ -348,9 +349,7 @@ class _FileBrowserState extends State<FileBrowser> {
   /// True when the type/date filter is active — the browser then searches the
   /// whole subtree (Linux: "find these anywhere under here").
   bool get _isRecursiveFilterActive =>
-      _filterType != FileTypeFilter.all ||
-      _dateFrom != null ||
-      _dateTo != null;
+      _filterType != FileTypeFilter.all || _dateFrom != null || _dateTo != null;
 
   /// File-only predicate used by the recursive walk: directories are traversed
   /// but never shown as results (matching Linux filtered-search behaviour).
@@ -679,10 +678,16 @@ class _FileBrowserState extends State<FileBrowser> {
   bool _handleCtrlCharShortcuts(String ch) {
     switch (ch) {
       case '\u0003': // Ctrl+C
-        if (_selectedPaths.isNotEmpty) { _copySelected(); return true; }
+        if (_selectedPaths.isNotEmpty) {
+          _copySelected();
+          return true;
+        }
         return false;
       case '\u0018': // Ctrl+X
-        if (_selectedPaths.isNotEmpty) { _cutSelected(); return true; }
+        if (_selectedPaths.isNotEmpty) {
+          _cutSelected();
+          return true;
+        }
         return false;
       case '\u0016': // Ctrl+V
         _pasteToCurrent();
@@ -697,10 +702,16 @@ class _FileBrowserState extends State<FileBrowser> {
   bool _handleCtrlKeyShortcuts(LogicalKeyboardKey key) {
     switch (key) {
       case LogicalKeyboardKey.keyC:
-        if (_selectedPaths.isNotEmpty) { _copySelected(); return true; }
+        if (_selectedPaths.isNotEmpty) {
+          _copySelected();
+          return true;
+        }
         return false;
       case LogicalKeyboardKey.keyX:
-        if (_selectedPaths.isNotEmpty) { _cutSelected(); return true; }
+        if (_selectedPaths.isNotEmpty) {
+          _cutSelected();
+          return true;
+        }
         return false;
       case LogicalKeyboardKey.keyV:
         _pasteToCurrent();
@@ -993,9 +1004,7 @@ class _FileBrowserState extends State<FileBrowser> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          ok
-              ? 'Sharing ${paths.length} item(s)…'
-              : 'Share not available here',
+          ok ? 'Sharing ${paths.length} item(s)…' : 'Share not available here',
         ),
         backgroundColor: ok ? OneDarkColors.cyan : OneDarkColors.red,
       ),
@@ -1006,11 +1015,7 @@ class _FileBrowserState extends State<FileBrowser> {
     final paths = _actionPaths;
     FileUtils.setClipboardMultiple(paths, 'copy');
     _setClipboardInfo(
-      ClipboardInfo(
-        hasClipboard: true,
-        operation: 'copy',
-        count: paths.length,
-      ),
+      ClipboardInfo(hasClipboard: true, operation: 'copy', count: paths.length),
     );
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1024,11 +1029,7 @@ class _FileBrowserState extends State<FileBrowser> {
     final paths = _actionPaths;
     FileUtils.setClipboardMultiple(paths, 'cut');
     _setClipboardInfo(
-      ClipboardInfo(
-        hasClipboard: true,
-        operation: 'cut',
-        count: paths.length,
-      ),
+      ClipboardInfo(hasClipboard: true, operation: 'cut', count: paths.length),
     );
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1230,7 +1231,10 @@ class _FileBrowserState extends State<FileBrowser> {
         context: context,
         builder: (_) => AlertDialog(
           backgroundColor: OneDarkColors.bg,
-          title: const Text('Overwrite?', style: TextStyle(color: OneDarkColors.fg)),
+          title: const Text(
+            'Overwrite?',
+            style: TextStyle(color: OneDarkColors.fg),
+          ),
           content: Text(
             '"$name" already exists. Overwrite?',
             style: const TextStyle(color: OneDarkColors.fg),
@@ -1506,7 +1510,9 @@ class _FileBrowserState extends State<FileBrowser> {
         const PopupMenuDivider(),
         _menuItem(
           _markedPaths.contains(item.path) ? 'Unmark (Space)' : 'Mark (Space)',
-          _markedPaths.contains(item.path) ? Icons.check_circle_outline : Icons.check_circle,
+          _markedPaths.contains(item.path)
+              ? Icons.check_circle_outline
+              : Icons.check_circle,
           () {
             _selectedPaths.add(item.path);
             _toggleMarkSelection();
@@ -1644,42 +1650,40 @@ class _FileBrowserState extends State<FileBrowser> {
       ),
     ];
 
-    showMenu<String>(
-      context: context,
-      position: position,
-      items: entries,
-    ).then((value) async {
-      if (value == null || !mounted) return;
-      switch (value) {
-        case 'default':
-          try {
-            await OpenWithService.openDefault(item.path);
-          } catch (e) {
-            _openFailed(e);
-          }
-          break;
-        case 'chooser':
-          try {
-            await OpenWithService.openWithChooser(item.path);
-          } catch (e) {
-            _openFailed(e);
-          }
-          break;
-        case 'termux':
-          _openTerminalHere(p.dirname(item.path));
-          break;
-        case 'copy':
-          await Clipboard.setData(ClipboardData(text: item.path));
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Path copied'),
-              backgroundColor: OneDarkColors.green,
-            ),
-          );
-          break;
-      }
-    });
+    showMenu<String>(context: context, position: position, items: entries).then(
+      (value) async {
+        if (value == null || !mounted) return;
+        switch (value) {
+          case 'default':
+            try {
+              await OpenWithService.openDefault(item.path);
+            } catch (e) {
+              _openFailed(e);
+            }
+            break;
+          case 'chooser':
+            try {
+              await OpenWithService.openWithChooser(item.path);
+            } catch (e) {
+              _openFailed(e);
+            }
+            break;
+          case 'termux':
+            _openTerminalHere(p.dirname(item.path));
+            break;
+          case 'copy':
+            await Clipboard.setData(ClipboardData(text: item.path));
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Path copied'),
+                backgroundColor: OneDarkColors.green,
+              ),
+            );
+            break;
+        }
+      },
+    );
   }
 
   /// Shows an error snackbar for a failed open-with launch.
@@ -2258,98 +2262,116 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   Widget _buildGridView() {
-    return GridView.builder(
-      padding: const EdgeInsets.all(8),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
-        childAspectRatio: 0.75,
-        crossAxisSpacing: 4,
-        mainAxisSpacing: 4,
-      ),
-      itemCount: _filteredItems.length,
-      itemBuilder: (context, index) {
-        final item = _filteredItems[index];
-        final isSelected = _selectedPaths.contains(item.path);
-        final isMarked = _markedPaths.contains(item.path);
-        return GestureDetector(
-          onLongPressStart: (details) =>
-              _showContextMenu(item, details.globalPosition),
-          onSecondaryTapDown: (details) =>
-              _showContextMenu(item, details.globalPosition),
-          onTap: () {
-            if (_selectionMode == SelectionMode.multi) {
-              _toggleSelection(item.path);
-            } else if (isSelected) {
-              _openItem(item);
-            } else {
-              _toggleSelection(item.path);
-            }
-          },
-          child: Stack(
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  color: isSelected ? OneDarkColors.select : Colors.transparent,
-                  borderRadius: BorderRadius.circular(4),
-                  border: isSelected
-                      ? Border.all(color: OneDarkColors.cyan, width: 1.5)
-                      : null,
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(item.icon, size: 32, color: item.iconColor),
-                    const SizedBox(height: 4),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Text(
-                        item.name,
-                        style: TextStyle(
-                          color: isMarked ? OneDarkColors.amber : OneDarkColors.fg,
-                          fontSize: 11,
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (isMarked)
-                Positioned(
-                  top: 2,
-                  left: 2,
-                  child: Icon(
-                    Icons.check_circle,
-                    size: 16,
-                    color: OneDarkColors.amber,
-                  ),
-                ),
-              if (_selectionMode == SelectionMode.multi)
-                Positioned(
-                  top: 2,
-                  right: 2,
-                  child: Container(
-                    width: 20,
-                    height: 20,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Fewer columns on narrow panes (e.g. phone with sidebar open) so
+        // tiles stay readable instead of shrinking to ~44px with truncated
+        // names.
+        final crossAxisCount = constraints.maxWidth < 300
+            ? 3
+            : constraints.maxWidth < 520
+            ? 4
+            : 6;
+        return GridView.builder(
+          padding: const EdgeInsets.all(8),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            childAspectRatio: crossAxisCount >= 6 ? 0.75 : 0.85,
+            crossAxisSpacing: 4,
+            mainAxisSpacing: 4,
+          ),
+          itemCount: _filteredItems.length,
+          itemBuilder: (context, index) {
+            final item = _filteredItems[index];
+            final isSelected = _selectedPaths.contains(item.path);
+            final isMarked = _markedPaths.contains(item.path);
+            return GestureDetector(
+              onLongPressStart: (details) =>
+                  _showContextMenu(item, details.globalPosition),
+              onSecondaryTapDown: (details) =>
+                  _showContextMenu(item, details.globalPosition),
+              onTap: () {
+                if (_selectionMode == SelectionMode.multi) {
+                  _toggleSelection(item.path);
+                } else if (isSelected) {
+                  _openItem(item);
+                } else {
+                  _toggleSelection(item.path);
+                }
+              },
+              child: Stack(
+                children: [
+                  Container(
                     decoration: BoxDecoration(
                       color: isSelected
-                          ? OneDarkColors.cyan
-                          : OneDarkColors.dim,
-                      shape: BoxShape.circle,
+                          ? OneDarkColors.select
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(4),
+                      border: isSelected
+                          ? Border.all(color: OneDarkColors.cyan, width: 1.5)
+                          : null,
                     ),
-                    child: Center(
-                      child: Icon(
-                        isSelected ? Icons.check : Icons.circle_outlined,
-                        size: 14,
-                        color: isSelected ? Colors.black : OneDarkColors.fgDim,
-                      ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(item.icon, size: 32, color: item.iconColor),
+                        const SizedBox(height: 4),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Text(
+                            item.name,
+                            style: TextStyle(
+                              color: isMarked
+                                  ? OneDarkColors.amber
+                                  : OneDarkColors.fg,
+                              fontSize: 11,
+                            ),
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-            ],
-          ),
+                  if (isMarked)
+                    Positioned(
+                      top: 2,
+                      left: 2,
+                      child: Icon(
+                        Icons.check_circle,
+                        size: 16,
+                        color: OneDarkColors.amber,
+                      ),
+                    ),
+                  if (_selectionMode == SelectionMode.multi)
+                    Positioned(
+                      top: 2,
+                      right: 2,
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? OneDarkColors.cyan
+                              : OneDarkColors.dim,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Icon(
+                            isSelected ? Icons.check : Icons.circle_outlined,
+                            size: 14,
+                            color: isSelected
+                                ? Colors.black
+                                : OneDarkColors.fgDim,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -2415,7 +2437,11 @@ class _FileBrowserState extends State<FileBrowser> {
                 else
                   const SizedBox(width: 20),
                 if (isMarked)
-                  Icon(Icons.check_circle, size: 14, color: OneDarkColors.amber),
+                  Icon(
+                    Icons.check_circle,
+                    size: 14,
+                    color: OneDarkColors.amber,
+                  ),
                 if (isMarked) const SizedBox(width: 3),
                 Icon(item.icon, size: 18, color: item.iconColor),
                 const SizedBox(width: 6),
@@ -2446,7 +2472,8 @@ class _FileBrowserState extends State<FileBrowser> {
                           child: FutureBuilder<int>(
                             future: _computeFolderSize(item),
                             builder: (ctx, snap) {
-                              if (snap.connectionState == ConnectionState.waiting)
+                              if (snap.connectionState ==
+                                  ConnectionState.waiting)
                                 return const SizedBox(
                                   width: 30,
                                   child: LinearProgressIndicator(minHeight: 4),
@@ -2582,7 +2609,7 @@ class _FileBrowserState extends State<FileBrowser> {
           else
             const SizedBox(width: 20),
           Icon(item.icon, size: 18, color: item.iconColor),
-          const SizedBox(width: 10),
+          const SizedBox(width: 6),
           Expanded(
             child: TextField(
               controller: _renameController,
@@ -2608,25 +2635,28 @@ class _FileBrowserState extends State<FileBrowser> {
                 children: [
                   Icon(Icons.folder, size: 11, color: OneDarkColors.fgDim),
                   const SizedBox(width: 2),
-                  FutureBuilder<int>(
-                    future: _computeFolderSize(item),
-                    builder: (ctx, snap) {
-                      if (snap.connectionState == ConnectionState.waiting)
-                        return const SizedBox(
-                          width: 30,
-                          child: LinearProgressIndicator(minHeight: 4),
+                  Flexible(
+                    child: FutureBuilder<int>(
+                      future: _computeFolderSize(item),
+                      builder: (ctx, snap) {
+                        if (snap.connectionState == ConnectionState.waiting)
+                          return const SizedBox(
+                            width: 30,
+                            child: LinearProgressIndicator(minHeight: 4),
+                          );
+                        final s = snap.hasData && snap.data! >= 0
+                            ? snap.data!
+                            : 0;
+                        return Text(
+                          _formatBytes(s),
+                          style: const TextStyle(
+                            color: OneDarkColors.fgDim,
+                            fontSize: 12,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         );
-                      final s = snap.hasData && snap.data! >= 0
-                          ? snap.data!
-                          : 0;
-                      return Text(
-                        _formatBytes(s),
-                        style: const TextStyle(
-                          color: OneDarkColors.fgDim,
-                          fontSize: 12,
-                        ),
-                      );
-                    },
+                      },
+                    ),
                   ),
                 ],
               ),
@@ -2656,7 +2686,10 @@ class _FileBrowserState extends State<FileBrowser> {
               flex: 1,
               child: Text(
                 item.extension.isEmpty ? 'Folder' : item.extension,
-                style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                style: const TextStyle(
+                  color: OneDarkColors.fgDim,
+                  fontSize: 12,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
