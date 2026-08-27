@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fa;
+import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/theme.dart';
 import '../services/auth_service.dart';
 import '../services/entitlement_service.dart';
@@ -175,6 +177,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'Ask before deleting',
             trailing: Switch(value: true, onChanged: (_) {}),
           ),
+          _settingTile(
+            icon: Icons.play_arrow,
+            title: 'Preferred Video Player',
+            subtitle: _videoPlayerSubtitle(),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _showVideoPlayerPicker,
+          ),
 
           const SizedBox(height: 16),
 
@@ -205,6 +214,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const DuplicatesScreen()),
             ),
+          ),
+          const SizedBox(height: 8),
+          _settingTile(
+            icon: Icons.cloud,
+            title: 'rclone Cloud Mounts',
+            subtitle: 'Browse cloud storage via rclone (requires Termux)',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _openRcloneBrowser,
           ),
 
           const SizedBox(height: 16),
@@ -357,5 +374,122 @@ class _SettingsScreenState extends State<SettingsScreen> {
       trailing: trailing,
       onTap: onTap ?? (trailing is Switch ? null : () {}),
     );
+  }
+
+  /// Opens rclone browser via Termux. Prefers URL scheme; falls back to
+  /// instructions if the scheme is unavailable.
+  Future<void> _openRcloneBrowser() async {
+    // Try opening rclone browser in Termux via URI scheme
+    final uri = Uri.parse('termux://com.termux.app?action=run_command&command=rclone%20browser');
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else {
+        // Fallback: show instructions
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: OneDarkColors.bg,
+            title: const Text('rclone Browser', style: TextStyle(color: OneDarkColors.fg)),
+            content: const Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Open Termux and run:', style: TextStyle(color: OneDarkColors.fg)),
+                SizedBox(height: 8),
+                Text('rclone browser', style: TextStyle(color: OneDarkColors.cyan, fontFamily: 'monospace')),
+                SizedBox(height: 12),
+                Text('Or browse a specific remote:', style: TextStyle(color: OneDarkColors.fgDim)),
+                SizedBox(height: 4),
+                Text('rclone browser remote:path', style: TextStyle(color: OneDarkColors.cyan, fontFamily: 'monospace')),
+                SizedBox(height: 12),
+                Text('Prerequisites: Termux + rclone installed.', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+              FilledButton(
+                onPressed: () async {
+                  if (!mounted) return;
+                  Navigator.pop(context);
+                  final termuxUri = Uri.parse('https://f-droid.org/packages/com.termux/');
+                  if (await canLaunchUrl(termuxUri)) {
+                    await launchUrl(termuxUri);
+                  }
+                },
+                child: const Text('Install Termux'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open rclone: $e'), backgroundColor: OneDarkColors.red),
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Video player preference (persisted via shared_preferences)
+  // ---------------------------------------------------------------------------
+
+  static const _kVideoPlayer = 'swordfm_preferred_video_player';
+  static const _playerOptions = <String, String>{
+    'default': 'Default (system)',
+    'vlc':   'VLC',
+    'mpv':   'MPV',
+    'MX':    'MX Player',
+  };
+
+  Future<String> _loadVideoPlayerPref() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_kVideoPlayer) ?? 'default';
+  }
+
+  Future<void> _saveVideoPlayerPref(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kVideoPlayer, key);
+  }
+
+  String _videoPlayerSubtitle() {
+    // Default to 'Default (system)' before the async pref is loaded — the
+    // setState in _showVideoPlayerPicker will update it afterwards.
+    return _playerOptions['default']!;
+  }
+
+  Future<void> _showVideoPlayerPicker() async {
+    final current = await _loadVideoPlayerPref();
+    if (!mounted) return;
+    await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: const Text('Preferred Video Player', style: TextStyle(color: OneDarkColors.fg)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: _playerOptions.entries.map((e) {
+            final selected = e.key == current;
+            return RadioListTile<String>(
+              value: e.key,
+              groupValue: selected ? e.key : '',
+              title: Text(e.value, style: const TextStyle(color: OneDarkColors.fg)),
+              activeColor: OneDarkColors.cyan,
+              dense: true,
+              onChanged: (v) {
+                if (v != null) Navigator.pop(context, v);
+              },
+            );
+          }).toList(),
+        ),
+      ),
+    ).then((selected) async {
+      if (selected != null && mounted) {
+        await _saveVideoPlayerPref(selected);
+        setState(() {}); // refresh subtitle
+      }
+    });
   }
 }

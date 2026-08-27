@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider paths for the "Open With…" chooser (see AndroidManifest.xml provider).
+     Declared separately from open_file's bundled provider so we never couple to plugin internals. -->
+<paths>
+    <external-path name="external_storage" path="." />
+    <external-files-path name="app_files" path="." />
+    <external-cache-path name="app_cache" path="." />
+    <cache-path name="cache" path="." />
+</paths>

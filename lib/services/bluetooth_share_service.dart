@@ -4,7 +4,12 @@
 //   [metadataLength bytes of JSON]
 //   [raw file bytes = "size" from JSON]
 //
-// JSON metadata: {"filename": "example.pdf", "size": 12345}
+// JSON metadata: {"filename": "example.pdf", "size": 12345, "checksum": "<64-hex sha256>"}
+//
+// Sender MUST include "checksum" (SHA-256 of the file contents). The receiver
+// hashes the received bytes and verifies against it, DELETING the file on
+// mismatch (matches swordblue). Legacy peers that omit "checksum" are accepted
+// with verified=false.
 //
 // Sender writes: 4B length + JSON + raw bytes
 // Receiver reads: 4B length → parse JSON → read "size" bytes
@@ -80,6 +85,14 @@ class BluetoothShareService {
 
   String? _connectedDeviceName;
   String? get connectedDeviceName => _connectedDeviceName;
+
+  // SHA-256 of the most recent transfer (null if not computed on native side)
+  String? _lastTransferSha256;
+  String? get lastTransferSha256 => _lastTransferSha256;
+
+  // Whether the most recent transfer was verified against its SHA-256 checksum.
+  bool _lastTransferVerified = false;
+  bool get lastTransferVerified => _lastTransferVerified;
 
   void _updateState(BluetoothState newState) {
     _state = newState;
@@ -254,10 +267,13 @@ class BluetoothShareService {
         );
         break;
       case 'onTransferComplete':
-        final savedPath = call.arguments['savedPath'] as String? ?? '';
-        _messageController.add(savedPath.isEmpty
-            ? 'Transfer Complete!'
-            : 'Transfer Complete! Saved to $savedPath');
+        final args = call.arguments as Map<dynamic, dynamic>? ?? {};
+        final savedPath = args['savedPath'] as String? ?? '';
+        final sha256 = args['sha256'] as String? ?? '';
+        final verified = args['verified'] as bool? ?? false;
+        _messageController.add(_buildTransferCompleteMessage(savedPath, sha256, verified));
+        _lastTransferSha256 = sha256.isNotEmpty ? sha256 : null;
+        _lastTransferVerified = verified;
         _updateState(BluetoothState.connected);
         break;
       case 'onTransferError':
@@ -274,5 +290,31 @@ class BluetoothShareService {
         }
         break;
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // SHA-256 helpers
+  // ---------------------------------------------------------------------------
+
+  /// Requests the native side to compute the SHA-256 hash of [filePath].
+  /// Returns null on failure.
+  static Future<String?> computeSha256(String filePath) async {
+    try {
+      final result = await _channel.invokeMethod<String?>('computeSha256', {'path': filePath});
+      return result;
+    } on PlatformException catch (_) {
+      return null;
+    }
+  }
+
+  /// Builds a human-readable transfer-complete message, including the SHA-256
+  /// checksum and verification status when available from the native side.
+  String _buildTransferCompleteMessage(String savedPath, String sha256, bool verified) {
+    var msg = savedPath.isEmpty ? 'Transfer Complete!' : 'Transfer Complete! Saved to $savedPath';
+    if (sha256.isNotEmpty) {
+      msg += '\nSHA-256: $sha256';
+      msg += verified ? ' (verified)' : ' (not verified)';
+    }
+    return msg;
   }
 }

@@ -12,6 +12,12 @@ void main() {
     test('recognizes .tar.gz', () {
       expect(ArchiveService.isArchive('file.tar.gz'), isTrue);
     });
+    test('recognizes .tar.xz', () {
+      expect(ArchiveService.isArchive('file.tar.xz'), isTrue);
+    });
+    test('recognizes .tar.bz2', () {
+      expect(ArchiveService.isArchive('file.tar.bz2'), isTrue);
+    });
     test('rejects .pdf', () {
       expect(ArchiveService.isArchive('file.pdf'), isFalse);
     });
@@ -33,7 +39,7 @@ void main() {
 
     test('extracts a zip archive', () async {
       final zipPath = '$tmpDir/test.zip';
-      
+
       final archive = Archive();
       archive.addFile(ArchiveFile('src.txt', 13, utf8.encode('hello archive')));
       final bytes = ZipEncoder().encode(archive);
@@ -46,18 +52,30 @@ void main() {
     });
 
     test('rejects unsupported format', () async {
-      final badPath = '$tmpDir/file.bz2';
+      final badPath = '$tmpDir/file.rar';
       await File(badPath).writeAsString('not valid');
       expect(
         () => ArchiveService.extract(badPath, tmpDir),
-        throwsA(isA<Exception>().having((e) => e.toString(), 'msg', contains('unsupported'))),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'msg',
+            contains('unsupported'),
+          ),
+        ),
       );
     });
 
     test('throws when archive not found', () async {
       expect(
         () => ArchiveService.extract('/nonexistent/path.zip', tmpDir),
-        throwsA(isA<Exception>().having((e) => e.toString(), 'msg', contains('not found'))),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'msg',
+            contains('not found'),
+          ),
+        ),
       );
     });
   });
@@ -105,6 +123,141 @@ void main() {
       final outDir = '$tmpDir/unpacked';
       final extracted = await ArchiveService.extract(result, outDir);
       expect(extracted.length, 2);
+    });
+  });
+
+  group('ArchiveService.createTar', () {
+    late String tmpDir;
+
+    setUp(() {
+      tmpDir = Directory.systemTemp.createTempSync('arc_tar_').path;
+    });
+
+    tearDown(() {
+      Directory(tmpDir).deleteSync(recursive: true);
+    });
+
+    test('creates a valid tar and extracts it back', () async {
+      final srcFile = File('$tmpDir/hello.txt');
+      await srcFile.writeAsString('hello world');
+      final tarPath = '$tmpDir/out.tar';
+
+      final result = await ArchiveService.createTar(
+        outputPath: tarPath,
+        sources: [srcFile.path],
+      );
+      expect(result, tarPath);
+      expect(File(tarPath).existsSync(), isTrue);
+
+      final outDir = '$tmpDir/unpacked';
+      final extracted = await ArchiveService.extract(result, outDir);
+      expect(extracted.length, 1);
+      expect(File(extracted[0]).readAsStringSync(), 'hello world');
+    });
+  });
+
+  group('ArchiveService.createTarGz', () {
+    late String tmpDir;
+
+    setUp(() {
+      tmpDir = Directory.systemTemp.createTempSync('arc_targz_').path;
+    });
+
+    tearDown(() {
+      Directory(tmpDir).deleteSync(recursive: true);
+    });
+
+    test('creates a valid .tar.gz and extracts it back', () async {
+      final srcFile = File('$tmpDir/hello.txt');
+      await srcFile.writeAsString('hello compressed world');
+      final gzPath = '$tmpDir/out.tar.gz';
+
+      final result = await ArchiveService.createTarGz(
+        outputPath: gzPath,
+        sources: [srcFile.path],
+      );
+      expect(result, gzPath);
+      expect(File(gzPath).existsSync(), isTrue);
+
+      final outDir = '$tmpDir/unpacked';
+      final extracted = await ArchiveService.extract(result, outDir);
+      expect(extracted.length, 1);
+      expect(File(extracted[0]).readAsStringSync(), 'hello compressed world');
+    });
+
+    test('archives multiple files', () async {
+      await File('$tmpDir/a.txt').writeAsString('aaa');
+      await File('$tmpDir/b.txt').writeAsString('bbb');
+      final gzPath = '$tmpDir/multi.tar.gz';
+
+      await ArchiveService.createTarGz(
+        outputPath: gzPath,
+        sources: ['$tmpDir/a.txt', '$tmpDir/b.txt'],
+      );
+
+      final outDir = '$tmpDir/unpacked';
+      final extracted = await ArchiveService.extract(gzPath, outDir);
+      expect(extracted.length, 2);
+    });
+  });
+
+  group('ArchiveService.createTarXz', () {
+    late String tmpDir;
+
+    setUp(() {
+      tmpDir = Directory.systemTemp.createTempSync('arc_tarxz_').path;
+    });
+
+    tearDown(() {
+      Directory(tmpDir).deleteSync(recursive: true);
+    });
+
+    test('creates a valid .tar.xz and extracts it back', () async {
+      final srcFile = File('$tmpDir/hello.txt');
+      await srcFile.writeAsString('hello xz world');
+      final xzPath = '$tmpDir/out.tar.xz';
+
+      final result = await ArchiveService.createTarXz(
+        outputPath: xzPath,
+        sources: [srcFile.path],
+      );
+      expect(result, xzPath);
+      expect(File(xzPath).existsSync(), isTrue);
+
+      final outDir = '$tmpDir/unpacked';
+      final extracted = await ArchiveService.extract(result, outDir);
+      expect(extracted.length, 1);
+      expect(File(extracted[0]).readAsStringSync(), 'hello xz world');
+    });
+  });
+
+  group('ArchiveService.createTarBz2', () {
+    late String tmpDir;
+
+    setUp(() {
+      tmpDir = Directory.systemTemp.createTempSync('arc_tarbz2_').path;
+    });
+
+    tearDown(() {
+      Directory(tmpDir).deleteSync(recursive: true);
+    });
+
+    test('creates a valid .tar.bz2 and extracts it back', () async {
+      final srcFile = File('$tmpDir/hello.txt');
+      await srcFile.writeAsString('hello bz2 world');
+      final bz2Path = '$tmpDir/out.tar.bz2';
+
+      final result = await ArchiveService.createTarBz2(
+        outputPath: bz2Path,
+        sources: [srcFile.path],
+      );
+      expect(result, bz2Path);
+      expect(File(bz2Path).existsSync(), isTrue);
+
+      final outDir = '$tmpDir/unpacked';
+      final extracted = await ArchiveService.extract(result, outDir);
+      expect(extracted.length, 1);
+      expect(File(extracted[0]).readAsStringSync(), 'hello bz2 world');
     });
   });
 

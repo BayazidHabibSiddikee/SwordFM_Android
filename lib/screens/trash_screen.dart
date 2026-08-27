@@ -34,7 +34,6 @@ class _TrashScreenState extends State<TrashScreen> {
   }
 
   Future<void> _restore(FileItem item) async {
-    // Reconstruct original path from trash filename pattern: timestamp_basename
     final originalPath = _originalPath(item.path);
     try {
       await FileUtils.restoreFromTrash(item.path, originalPath);
@@ -73,6 +72,107 @@ class _TrashScreenState extends State<TrashScreen> {
     }
   }
 
+  void _showContextMenu(FileItem item) {
+    showMenu(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        MediaQuery.of(context).size.width / 2 - 100,
+        MediaQuery.of(context).size.height / 2 - 150,
+        MediaQuery.of(context).size.width / 2 + 100,
+        MediaQuery.of(context).size.height / 2 + 150,
+      ),
+      items: [
+        _menuItem('Restore', Icons.restore, () => _restore(item)),
+        _menuItem('Rename', Icons.edit, () => _showRenameDialog(item)),
+        _menuItem('Delete permanently', Icons.delete_forever, () => _permanentDelete(item)),
+        _menuItem('Properties', Icons.info_outline, () => _showProperties(item)),
+      ],
+    );
+  }
+
+  PopupMenuItem<Object?> _menuItem(String title, IconData icon, VoidCallback onTap) {
+    return PopupMenuItem<Object?>(onTap: onTap, child: Row(children: [
+      Icon(icon, size: 18, color: OneDarkColors.fg),
+      const SizedBox(width: 12),
+      Text(title, style: const TextStyle(color: OneDarkColors.fg)),
+    ]));
+  }
+
+  void _showRenameDialog(FileItem item) {
+    final controller = TextEditingController(text: item.name);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: const Text('Rename', style: TextStyle(color: OneDarkColors.fg)),
+        content: TextField(controller: controller, style: const TextStyle(color: OneDarkColors.fg), autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () async {
+              if (!mounted) return;
+              final newName = controller.text.trim();
+              if (newName.isNotEmpty && newName != item.name) {
+                try {
+                  await FileUtils.rename(item.path, newName);
+                  if (mounted) _loadTrash();
+                } catch (_) {}
+              }
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showProperties(FileItem item) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: Text(item.name, style: const TextStyle(color: OneDarkColors.fg)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _propRow('Name', item.name),
+              _propRow('Type', item.isDirectory ? 'Folder' : (item.extension.isNotEmpty ? item.extension.toUpperCase().replaceAll('.', '') : 'File')),
+              _propRow('Size', item.formattedSize),
+              _propRow('Modified', item.formattedDate),
+              _propRow('Path', item.path),
+            ],
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  Widget _propRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(width: 80, child: Text(label, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12))),
+        Expanded(child: Text(value, style: const TextStyle(color: OneDarkColors.fg, fontSize: 12))),
+      ]),
+    );
+  }
+
+  /// Reconstructs the likely original path from a trash entry path.
+  String _originalPath(String trashPath) {
+    final name = p.basename(trashPath);
+    final possibleBase = name.replaceFirst(RegExp(r'^\d+_(.+)$'), r'$1');
+    final dirs = [AppPaths.home, AppPaths.downloads, AppPaths.documents, AppPaths.desktop, AppPaths.pictures];
+    for (final dir in dirs) {
+      final candidate = p.join(dir, possibleBase);
+      if (File(candidate).existsSync() || Directory(candidate).existsSync()) return candidate;
+    }
+    return p.join(p.dirname(AppPaths.trash), possibleBase);
+  }
+
   Future<void> _emptyTrash() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -89,19 +189,6 @@ class _TrashScreenState extends State<TrashScreen> {
       await FileUtils.emptyTrash();
       if (mounted) _loadTrash();
     }
-  }
-
-  /// Reconstructs the likely original path from a trash entry path.
-  /// The trash stores files as `<timestamp>_<original_name>`.
-  String _originalPath(String trashPath) {
-    final name = p.basename(trashPath);
-    final possibleBase = name.replaceFirst(RegExp(r'^\d+_(.+)$'), r'$1');
-    final dirs = [AppPaths.home, AppPaths.downloads, AppPaths.documents, AppPaths.desktop, AppPaths.pictures];
-    for (final dir in dirs) {
-      final candidate = p.join(dir, possibleBase);
-      if (File(candidate).existsSync() || Directory(candidate).existsSync()) return candidate;
-    }
-    return p.join(p.dirname(AppPaths.trash), possibleBase);
   }
 
   @override
@@ -163,6 +250,7 @@ class _TrashScreenState extends State<TrashScreen> {
                               ),
                             ],
                           ),
+                          onLongPress: () => _showContextMenu(item),
                         );
                       },
                     ),

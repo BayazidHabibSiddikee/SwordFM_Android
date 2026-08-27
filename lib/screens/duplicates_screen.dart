@@ -1,15 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
-import '../services/archive_service.dart';
+import 'package:intl/intl.dart';
 import '../theme/theme.dart';
-
-String _fmtBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  if (bytes < 1024 * 1024 * 1024) return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
-  return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(1)} GB';
-}
+import '../utils/file_utils.dart';
+import '../services/archive_service.dart';
 
 /// Screen that scans directories for duplicate files based on SHA-256 hash.
 class DuplicatesScreen extends StatefulWidget {
@@ -29,7 +24,6 @@ class _DupsState extends State<DuplicatesScreen> {
   Future<void> _scan() async {
     setState(() { _loading = true; _error = null; });
     try {
-      // Collect all file paths under scan dirs
       final allPaths = <String>[];
       for (final root in widget.scanPaths) {
         final dir = Directory(root);
@@ -59,6 +53,128 @@ class _DupsState extends State<DuplicatesScreen> {
   void initState() {
     super.initState();
     _scan();
+  }
+
+  void _showContextMenu(String path) {
+    showMenu(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        MediaQuery.of(context).size.width / 2 - 100,
+        MediaQuery.of(context).size.height / 2 - 150,
+        MediaQuery.of(context).size.width / 2 + 100,
+        MediaQuery.of(context).size.height / 2 + 150,
+      ),
+      items: [
+        _menuItem('Rename', Icons.edit, () => _showRenameDialog(path)),
+        _menuItem('Delete', Icons.delete, () => _deleteFile(path)),
+        _menuItem('Properties', Icons.info_outline, () => _showProperties(path)),
+      ],
+    );
+  }
+
+  PopupMenuItem<Object?> _menuItem(String title, IconData icon, VoidCallback onTap) {
+    return PopupMenuItem<Object?>(onTap: onTap, child: Row(children: [
+      Icon(icon, size: 18, color: OneDarkColors.fg),
+      const SizedBox(width: 12),
+      Text(title, style: const TextStyle(color: OneDarkColors.fg)),
+    ]));
+  }
+
+  void _showRenameDialog(String path) {
+    final controller = TextEditingController(text: p.basename(path));
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: const Text('Rename', style: TextStyle(color: OneDarkColors.fg)),
+        content: TextField(controller: controller, style: const TextStyle(color: OneDarkColors.fg), autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () async {
+              if (!mounted) return;
+              final newName = controller.text.trim();
+              if (newName.isNotEmpty && newName != p.basename(path)) {
+                try {
+                  await FileUtils.rename(path, p.join(p.dirname(path), newName));
+                  if (mounted) _scan();
+                } catch (_) {}
+              }
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteFile(String path) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: Text('Delete "${p.basename(path)}"?', style: const TextStyle(color: OneDarkColors.fg)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete', style: TextStyle(color: OneDarkColors.red))),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      try {
+        await File(path).delete();
+        if (mounted) _scan();
+      } catch (_) {}
+    }
+  }
+
+  void _showProperties(String path) {
+    final file = File(path);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: Text(p.basename(path), style: const TextStyle(color: OneDarkColors.fg)),
+        content: FutureBuilder<FileStat>(
+          future: file.stat(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) return const SizedBox.shrink();
+            final stat = snapshot.data!;
+            return SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _propRow('Name', p.basename(path)),
+                  _propRow('Size', _formatBytes(stat.size)),
+                  _propRow('Modified', DateFormat('yyyy-MM-dd HH:mm').format(stat.modified)),
+                  _propRow('Path', path),
+                ],
+              ),
+            );
+          },
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+    return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(1)} GB';
+  }
+
+  Widget _propRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(width: 80, child: Text(label, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12))),
+        Expanded(child: Text(value, style: const TextStyle(color: OneDarkColors.fg, fontSize: 12))),
+      ]),
+    );
   }
 
   @override
@@ -100,7 +216,7 @@ class _DupsState extends State<DuplicatesScreen> {
                               const SizedBox(width: 8),
                               Text(
                                 '${_duplicates.length} duplicate group(s) — '
-                                'up to ${_fmtBytes(_totalWastedBytes)} could be freed',
+                                'up to ${_formatBytes(_totalWastedBytes)} could be freed',
                                 style: const TextStyle(color: OneDarkColors.fg),
                               ),
                             ],
@@ -115,7 +231,7 @@ class _DupsState extends State<DuplicatesScreen> {
                               return ExpansionTile(
                                 leading: Icon(Icons.error_outline, color: OneDarkColors.red),
                                 title: Text(
-                                  '${entry.value.length} files (${_fmtBytes(entry.value.first.length)})',
+                                  '${entry.value.length} files (${_formatBytes(entry.value.first.length)})',
                                   style: const TextStyle(color: OneDarkColors.fg),
                                 ),
                                 subtitle: Text(p.basename(entry.value.first),
@@ -128,12 +244,10 @@ class _DupsState extends State<DuplicatesScreen> {
                                     subtitle: Text(p.dirname(path), style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 10)),
                                     trailing: IconButton(
                                       icon: const Icon(Icons.delete_outline, color: OneDarkColors.red),
-                                      onPressed: () async {
-                                        await File(path).delete();
-                                        if (mounted) _scan();
-                                      },
+                                      onPressed: () => _deleteFile(path),
                                       tooltip: 'Delete',
                                     ),
+                                    onLongPress: () => _showContextMenu(path),
                                   );
                                 }).toList(),
                               );

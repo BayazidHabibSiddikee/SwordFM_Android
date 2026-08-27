@@ -16,6 +16,10 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
   final _service = BluetoothShareService();
   final List<BluetoothDeviceItem> _devices = [];
   String? _statusMessage;
+  // SHA-256 of the most recently transferred file (null when unavailable)
+  String? _lastSha256;
+  // Whether the last transfer passed SHA-256 verification (see protocol doc)
+  bool _lastVerified = false;
   // ignore: prefer_final_fields — mutated via setState
   bool _permissionsReady = false;
   // Tracks filenames currently queued for sending so we can show a queue indicator.
@@ -38,7 +42,13 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
       });
     });
     _service.messageStream.listen((msg) {
-      setState(() => _statusMessage = msg);
+      setState(() {
+        _statusMessage = msg;
+        // Extract trailing SHA-256 hash (64 hex chars) if present
+        final match = RegExp(r'\b[0-9a-f]{64}\b').firstMatch(msg);
+        _lastSha256 = match?.group(0);
+        _lastVerified = _service.lastTransferVerified;
+      });
     });
   }
 
@@ -165,6 +175,18 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                           style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 11,
+                          ),
+                        ),
+                      if (_lastSha256 != null && state != BluetoothState.disconnected)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            'SHA-256: ${_lastSha256!}${_lastVerified ? ' ✓ verified' : ' (not verified)'}',
+                            style: TextStyle(
+                              color: _lastVerified ? Colors.greenAccent : Colors.amberAccent,
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                            ),
                           ),
                         ),
                       if (_sendingFiles.isNotEmpty)

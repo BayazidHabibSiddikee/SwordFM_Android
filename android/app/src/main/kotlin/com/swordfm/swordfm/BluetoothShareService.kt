@@ -22,6 +22,11 @@ import org.json.JSONObject
  * Foreground service that keeps the Bluetooth RFCOMM server running
  * even when the app is in the background.
  *
+ * Frame protocol (must match MainActivity.kt & swordblue):
+ *   [4-byte uint32 metadataLength] [JSON {filename, size, checksum}] [raw bytes]
+ *   Sender includes the SHA-256 "checksum"; receiver verifies and deletes
+ *   the file on mismatch.
+ *
  * Permissions required (already in AndroidManifest.xml):
  *   - FOREGROUND_SERVICE
  *   - FOREGROUND_SERVICE_BLUETOOTH
@@ -153,6 +158,8 @@ class TransferWorker(private val socket: BluetoothSocket, private val service: B
             val metaJson = JSONObject(String(metaBuf, Charsets.UTF_8))
             val filename = metaJson.getString("filename")
             val fileSize = metaJson.getLong("size")
+            // Optional SHA-256 checksum (absent with legacy peers → skip verification).
+            val expectedChecksum = if (metaJson.has("checksum")) metaJson.getString("checksum").lowercase() else null
 
             mainHandler.post {
                 BluetoothShareService.methodChannel?.invokeMethod("onTransferStarted", mapOf("filename" to filename, "isSending" to false))
@@ -176,11 +183,14 @@ class TransferWorker(private val socket: BluetoothSocket, private val service: B
             val fos = FileOutputStream(outFile)
             var totalRead = 0L
             var lastUpdate = System.currentTimeMillis()
+            // Compute SHA-256 while writing so we never re-read the whole file.
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
             while (totalRead < fileSize && !cancelled) {
                 val toRead = minOf(buf.size.toLong(), fileSize - totalRead).toInt()
                 bytes = input.read(buf, 0, toRead)
                 if (bytes == -1) break
                 fos.write(buf, 0, bytes)
+                digest.update(buf, 0, bytes)
                 totalRead += bytes
                 val now = System.currentTimeMillis()
                 if (now - lastUpdate > 100) {
@@ -195,8 +205,25 @@ class TransferWorker(private val socket: BluetoothSocket, private val service: B
             }
             fos.close()
             if (!cancelled) {
+                val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
+                val verified = expectedChecksum != null && sha256 == expectedChecksum
+                if (expectedChecksum != null && !verified) {
+                    // Corrupt transfer — delete and notify, matching swordblue.
+                    outFile.delete()
+                    mainHandler.post {
+                        BluetoothShareService.methodChannel?.invokeMethod("onTransferError", mapOf(
+                            "message" to "Checksum mismatch for $filename — file deleted"
+                        ))
+                        BluetoothShareService.methodChannel?.invokeMethod("onDisconnected", null)
+                    }
+                    return
+                }
                 mainHandler.post {
-                    BluetoothShareService.methodChannel?.invokeMethod("onTransferComplete", mapOf("savedPath" to outFile.absolutePath))
+                    BluetoothShareService.methodChannel?.invokeMethod("onTransferComplete", mapOf(
+                        "savedPath" to outFile.absolutePath,
+                        "sha256" to sha256,
+                        "verified" to verified
+                    ))
                 }
             }
         } catch (e: Exception) {

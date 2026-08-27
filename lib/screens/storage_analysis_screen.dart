@@ -73,6 +73,118 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
     ));
   }
 
+  void _showContextMenu(_FolderSize entry) {
+    final hasItems = entry.children.isNotEmpty;
+    showMenu(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        MediaQuery.of(context).size.width / 2 - 100,
+        MediaQuery.of(context).size.height / 2 - 150,
+        MediaQuery.of(context).size.width / 2 + 100,
+        MediaQuery.of(context).size.height / 2 + 150,
+      ),
+      items: [
+        _menuItem('Open', Icons.folder_open, () => _navigateTo(entry.path)),
+        _menuItem('Rename', Icons.edit, () => _showRenameDialog(entry.path)),
+        if (hasItems)
+          _menuItem('Delete All', Icons.delete_sweep, () => _deleteFolder(entry)),
+        _menuItem('Properties', Icons.info_outline, () => _showProperties(entry)),
+      ],
+    );
+  }
+
+  PopupMenuItem<Object?> _menuItem(String title, IconData icon, VoidCallback onTap) {
+    return PopupMenuItem<Object?>(onTap: onTap, child: Row(children: [
+      Icon(icon, size: 18, color: OneDarkColors.fg),
+      const SizedBox(width: 12),
+      Text(title, style: const TextStyle(color: OneDarkColors.fg)),
+    ]));
+  }
+
+  void _showRenameDialog(String path) {
+    final controller = TextEditingController(text: p.basename(path));
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: const Text('Rename', style: TextStyle(color: OneDarkColors.fg)),
+        content: TextField(controller: controller, style: const TextStyle(color: OneDarkColors.fg), autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () async {
+              if (!mounted) return;
+              final newName = controller.text.trim();
+              if (newName.isNotEmpty && newName != p.basename(path)) {
+                try {
+                  final newPath = p.join(p.dirname(path), newName);
+                  await Directory(path).rename(newPath);
+                  if (mounted) _scan(p.dirname(path));
+                } catch (_) {}
+              }
+              if (mounted) Navigator.pop(context);
+            },
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteFolder(_FolderSize entry) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: Text('Delete "${p.basename(entry.path)}" and all contents?', style: const TextStyle(color: OneDarkColors.fg)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete', style: TextStyle(color: OneDarkColors.red))),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      try {
+        await Directory(entry.path).delete(recursive: true);
+        if (mounted) _scan(widget.rootPath);
+      } catch (_) {}
+    }
+  }
+
+  void _showProperties(_FolderSize entry) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: Text(p.basename(entry.path), style: const TextStyle(color: OneDarkColors.fg)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _propRow('Name', p.basename(entry.path)),
+              _propRow('Path', entry.path),
+              _propRow('Size', _formatBytes(entry.size)),
+              _propRow('Subfolders', '${entry.children.length}'),
+              _propRow('Total items', '${entry.children.fold(0, (s, e) => s + 1 + e.children.length)} est.'),
+            ],
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  Widget _propRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(width: 80, child: Text(label, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12))),
+        Expanded(child: Text(value, style: const TextStyle(color: OneDarkColors.fg, fontSize: 12))),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -96,7 +208,6 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
               ? Center(child: Text(_error!, style: const TextStyle(color: OneDarkColors.red)))
               : Column(
                   children: [
-                    // Summary bar
                     Container(
                       padding: const EdgeInsets.all(16),
                       color: OneDarkColors.bgDark,
@@ -119,7 +230,6 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
                       ),
                     ),
                     const Divider(height: 1),
-                    // Folder list
                     Expanded(
                       child: _entries.isEmpty
                           ? Center(child: Text('No subfolders found', style: TextStyle(color: OneDarkColors.fgDim)))
@@ -159,6 +269,7 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
                                     ],
                                   ),
                                   onTap: () => _navigateTo(entry.path),
+                                  onLongPress: () => _showContextMenu(entry),
                                 );
                               },
                             ),
