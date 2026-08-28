@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -50,13 +49,20 @@ class SwordFM extends StatelessWidget {
       builder: (context, _, __) {
         return DynamicColorBuilder(
           builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
-            final baseTheme = isDarkTheme ? buildOneDarkTheme() : buildCreamTheme();
-            final theme = darkDynamic != null
-                ? baseTheme.copyWith(colorScheme: baseTheme.colorScheme.copyWith(
-                      primary: darkDynamic.primary,
-                      secondary: darkDynamic.secondary,
-                      error: darkDynamic.error,
-                    ))
+            final baseTheme = isDarkTheme
+                ? buildOneDarkTheme()
+                : buildCreamTheme();
+            // Blend the matching dynamic palette: dark scheme for dark mode,
+            // light scheme for cream/light mode.
+            final dynamicScheme = isDarkTheme ? darkDynamic : lightDynamic;
+            final theme = dynamicScheme != null
+                ? baseTheme.copyWith(
+                    colorScheme: baseTheme.colorScheme.copyWith(
+                      primary: dynamicScheme.primary,
+                      secondary: dynamicScheme.secondary,
+                      error: dynamicScheme.error,
+                    ),
+                  )
                 : baseTheme;
             return MultiProvider(
               providers: [
@@ -96,9 +102,11 @@ class _MainScreenState extends State<MainScreen> {
   SelectionInfo? _selectionInfo; // aggregate multi-select info from FileBrowser
   ClipboardInfo? _clipboardInfo; // clipboard state from FileBrowser
   int _markCount = 0; // mark count from FileBrowser
+  int _itemCount = 0; // item count in the current directory
 
   // ignore: prefer_final_fields — mutated via setState
-  List<String> _bookmarks = []; // loaded/persisted via BookmarksService (bookmarks.json)
+  List<String> _bookmarks =
+      []; // loaded/persisted via BookmarksService (bookmarks.json)
   final Set<int> _hoveredIndex = {}; // tracks which sidebar item is hovered
 
   // Storage volumes from Android device service (null until loaded)
@@ -132,10 +140,11 @@ class _MainScreenState extends State<MainScreen> {
         final entities = await home.list().toList();
         final dirs = entities.whereType<Directory>().toList()
           ..sort((a, b) => a.path.compareTo(b.path));
-        if (mounted) setState(() {
-          _homeDirs = dirs;
-          _homeDirsLoaded = true;
-        });
+        if (mounted)
+          setState(() {
+            _homeDirs = dirs;
+            _homeDirsLoaded = true;
+          });
       }
     } catch (_) {
       if (mounted) setState(() => _homeDirsLoaded = true);
@@ -144,18 +153,32 @@ class _MainScreenState extends State<MainScreen> {
 
   IconData _iconForDir(String name) {
     switch (name.toLowerCase()) {
-      case 'dcim': return Icons.camera_alt;
-      case 'download': case 'downloads': return Icons.download;
-      case 'music': return Icons.music_note;
-      case 'pictures': return Icons.image;
-      case 'movies': case 'videos': return Icons.movie;
-      case 'documents': return Icons.description;
-      case 'android': return Icons.android;
-      case 'alarms': return Icons.alarm;
-      case 'notifications': return Icons.notifications;
-      case 'podcasts': return Icons.podcasts;
-      case 'ringtones': return Icons.music_note;
-      default: return Icons.folder;
+      case 'dcim':
+        return Icons.camera_alt;
+      case 'download':
+      case 'downloads':
+        return Icons.download;
+      case 'music':
+        return Icons.music_note;
+      case 'pictures':
+        return Icons.image;
+      case 'movies':
+      case 'videos':
+        return Icons.movie;
+      case 'documents':
+        return Icons.description;
+      case 'android':
+        return Icons.android;
+      case 'alarms':
+        return Icons.alarm;
+      case 'notifications':
+        return Icons.notifications;
+      case 'podcasts':
+        return Icons.podcasts;
+      case 'ringtones':
+        return Icons.music_note;
+      default:
+        return Icons.folder;
     }
   }
 
@@ -167,6 +190,11 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 600;
+    final cs = Theme.of(context).colorScheme;
+    final surfaceHighest = cs.surfaceContainerHighest;
+    final surface = cs.surfaceContainer;
+    final onSurface = cs.onSurface;
+    final onSurfaceDim = cs.onSurfaceVariant;
     return Scaffold(
       body: SafeArea(
         child: IndexedStack(
@@ -175,137 +203,287 @@ class _MainScreenState extends State<MainScreen> {
             // Tab 0: Files
             Row(
               children: [
-                // ── Sidebar (conditionally rendered) ──
-                if (_sidebarVisible)
-                  SizedBox(
-                    width: isMobile ? 160 : 200,
-                    child: Card(
-                          color: OneDarkColors.bgDark,
-                          elevation: 0,
-                          margin: EdgeInsets.zero,
-                          child: Column(
-                            children: [
-                              // Sidebar header
-                              Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.folder_special, color: OneDarkColors.cyan, size: 20),
-                                    const SizedBox(width: 8),
-                                    const Text('Places', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
-                                  ],
+                // ── Sidebar (collapses smoothly when hidden) ──
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeInOut,
+                  child: _sidebarVisible
+                      ? SizedBox(
+                          width: isMobile ? 160 : 200,
+                          child: Card(
+                            color: surfaceHighest,
+                            elevation: 0,
+                            margin: EdgeInsets.zero,
+                            child: Column(
+                              children: [
+                                // Sidebar header
+                                Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.folder_special,
+                                        color: cs.primary,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Places',
+                                        style: TextStyle(
+                                          color: onSurfaceDim,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              const Divider(height: 1),
+                                const Divider(height: 1),
 
-                              // Places list
-                              Expanded(
-                                child: ListView(
-                                  shrinkWrap: true,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  children: [
-                                    _sidebarTile(0, Icons.home, 'Home', AppPaths.home),
-                                    if (_homeDirsLoaded)
-                                      ..._homeDirs.where((d) {
-                                        final name = d.path.split('/').last;
-                                        return !name.startsWith('.');
-                                      }).take(15).toList().asMap().entries.map((entry) {
-                                        final i = entry.key;
-                                        final dir = entry.value;
-                                        final name = dir.path.split('/').last;
-                                        final icon = _iconForDir(name);
-                                        final tileIndex = 100 + i;
-                                        return _sidebarTile(tileIndex, icon, name, dir.path);
-                                      })
-                                    else
-                                      const Padding(
-                                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                        child: SizedBox(height: 16, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
+                                // Places list — scrolls when the drawer is short
+                                Expanded(
+                                  child: ListView(
+                                    children: [
+                                      _sidebarTile(
+                                        0,
+                                        Icons.home,
+                                        'Home',
+                                        AppPaths.home,
                                       ),
-                                    const Divider(),
-                                    ListTile(
-                                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                      minLeadingWidth: 0,
-                                      horizontalTitleGap: 6,
-                                      leading: Icon(Icons.delete_outline, size: 18, color: OneDarkColors.fgDim),
-                                      title: const Text('Trash', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13)),
-                                      onTap: () => Navigator.of(context).push(
-                                        MaterialPageRoute(builder: (_) => const TrashScreen()),
-                                      ),
-                                    ),
-                                    const Divider(),
-                                    // ── Devices section ──────────────────────
-                                    if (_volumes != null && _volumes!.isNotEmpty)
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                        child: Text('Devices', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
-                                      ),
-                                    if (_volumes == null)
-                                      const Padding(
-                                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                        child: SizedBox(height: 16, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
-                                      )
-                                    else
-                                      ..._volumes!.map((vol) => ListTile(
-                                        dense: true,
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                        horizontalTitleGap: 4,
+                                      if (_homeDirsLoaded)
+                                        ..._homeDirs
+                                            .where((d) {
+                                              final name = d.path
+                                                  .split('/')
+                                                  .last;
+                                              return !name.startsWith('.');
+                                            })
+                                            .take(15)
+                                            .toList()
+                                            .asMap()
+                                            .entries
+                                            .map((entry) {
+                                              final i = entry.key;
+                                              final dir = entry.value;
+                                              final name = dir.path
+                                                  .split('/')
+                                                  .last;
+                                              final icon = _iconForDir(name);
+                                              final tileIndex = 100 + i;
+                                              return _sidebarTile(
+                                                tileIndex,
+                                                icon,
+                                                name,
+                                                dir.path,
+                                              );
+                                            })
+                                      else
+                                        const Padding(
+                                          padding: EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 4,
+                                          ),
+                                          child: SizedBox(
+                                            height: 16,
+                                            child: Center(
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      const Divider(),
+                                      ListTile(
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                            ),
                                         minLeadingWidth: 0,
-                                        leading: Icon(vol.isRemovable ? Icons.sd_storage : Icons.storage, size: 18, color: OneDarkColors.cyan),
-                                        title: Text(vol.label.isNotEmpty ? vol.label : 'Storage',
-                                            style: const TextStyle(color: OneDarkColors.fg, fontSize: 13)),
-                                        subtitle: Text(_shortPath(vol.path),
-                                            style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 10)),
-                                        onTap: () {
-                                          setState(() => _currentPath = vol.path);
-                                        },
-                                      )),
-                                    const Divider(),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                      child: Text('Bookmarks',
-                                          style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
-                                    ),
-                                    // Add bookmark button
-                                    ListTile(
-                                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                      minLeadingWidth: 0,
-                                      horizontalTitleGap: 6,
-                                      leading: Icon(Icons.bookmark_add, size: 18, color: OneDarkColors.fgDim),
-                                      title: const Text('Add Bookmark', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
-                                      onTap: _addBookmark,
-                                    ),
-                                    // Saved bookmarks — tap to navigate, long-press to remove
-                                    ..._bookmarks.map((path) => ListTile(
-                                      dense: true,
-                                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                      minLeadingWidth: 0,
-                                      horizontalTitleGap: 6,
-                                      leading: Icon(Icons.bookmark, size: 18, color: OneDarkColors.amber),
-                                      title: Text(_shortPath(path),
-                                          style: const TextStyle(color: OneDarkColors.fg, fontSize: 13)),
-                                      onTap: () => setState(() => _currentPath = path),
-                                      onLongPress: () => _confirmRemoveBookmark(path),
-                                    )),
-                                  ],
+                                        horizontalTitleGap: 6,
+                                        leading: Icon(
+                                          Icons.delete_outline,
+                                          size: 18,
+                                          color: onSurfaceDim,
+                                        ),
+                                        title: Text(
+                                          'Trash',
+                                          style: TextStyle(
+                                            color: onSurfaceDim,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                        onTap: () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => const TrashScreen(),
+                                          ),
+                                        ),
+                                      ),
+                                      const Divider(),
+                                      // ── Devices section ──────────────────────
+                                      if (_volumes != null &&
+                                          _volumes!.isNotEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 6,
+                                          ),
+                                        child: Text(
+                                          'Devices',
+                                          style: TextStyle(
+                                            color: onSurfaceDim,
+                                            fontSize: 11,
+                                          ),
+                                          ),
+                                        ),
+                                      if (_volumes == null)
+                                        const Padding(
+                                          padding: EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 4,
+                                          ),
+                                          child: SizedBox(
+                                            height: 16,
+                                            child: Center(
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                      else
+                                        ..._volumes!.map(
+                                          (vol) => ListTile(
+                                            dense: true,
+                                            contentPadding:
+                                                const EdgeInsets.symmetric(
+                                                  horizontal: 8,
+                                                ),
+                                            horizontalTitleGap: 4,
+                                            minLeadingWidth: 0,
+                                            leading: Icon(
+                                              vol.isRemovable
+                                                  ? Icons.sd_storage
+                                                  : Icons.storage,
+                                              size: 18,
+                                              color: OneDarkColors.cyan,
+                                            ),
+                                            title: Text(
+                                              vol.label.isNotEmpty
+                                                  ? vol.label
+                                                  : 'Storage',
+                                              style: TextStyle(
+                                                color: onSurface,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                            subtitle: Text(
+                                              _shortPath(vol.path),
+                                              style: TextStyle(
+                                                color: onSurfaceDim,
+                                                fontSize: 10,
+                                              ),
+                                            ),
+                                            onTap: () {
+                                              setState(
+                                                () => _currentPath = vol.path,
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      const Divider(),
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        child: Text(
+                                          'Bookmarks',
+                                          style: TextStyle(
+                                            color: onSurfaceDim,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ),
+                                      // Add bookmark button
+                                      ListTile(
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                            ),
+                                        minLeadingWidth: 0,
+                                        horizontalTitleGap: 6,
+                                        leading: Icon(
+                                          Icons.bookmark_add,
+                                          size: 18,
+                                          color: onSurfaceDim,
+                                        ),
+                                        title: Text(
+                                          'Add Bookmark',
+                                          style: TextStyle(
+                                            color: onSurfaceDim,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        onTap: _addBookmark,
+                                      ),
+                                      // Saved bookmarks — tap to navigate, long-press to remove
+                                      ..._bookmarks.map(
+                                        (path) => ListTile(
+                                          dense: true,
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                                horizontal: 8,
+                                              ),
+                                          minLeadingWidth: 0,
+                                          horizontalTitleGap: 6,
+                                          leading: Icon(
+                                            Icons.bookmark,
+                                            size: 18,
+                                            color: OneDarkColors.amber,
+                                          ),
+                                          title: Text(
+                                            _shortPath(path),
+                                            style: TextStyle(
+                                              color: onSurface,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                          onTap: () => setState(
+                                            () => _currentPath = path,
+                                          ),
+                                          onLongPress: () =>
+                                              _confirmRemoveBookmark(path),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
 
-                              // Bottom spacer + status
-                              const Spacer(),
-                              Padding(
-                                padding: const EdgeInsets.all(8),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.info_outline, size: 14, color: OneDarkColors.fgDim),
-                                    const SizedBox(width: 4),
-                                    Text('$itemsCount items', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 10)),
-                                  ],
+                                // Bottom status row
+                                Padding(
+                                  padding: const EdgeInsets.all(8),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.info_outline,
+                                        size: 14,
+                                        color: onSurfaceDim,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '$_itemCount items',
+                                        style: TextStyle(
+                                          color: onSurfaceDim,
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
+                        )
+                      : const SizedBox(width: 0),
                 ),
 
                 // ── Main file browser area ───────────────────────────────
@@ -314,31 +492,35 @@ class _MainScreenState extends State<MainScreen> {
                     children: [
                       // Top bar
                       Container(
-                        color: OneDarkColors.bgDark,
+                        color: surfaceHighest,
                         child: Row(
                           children: [
                             IconButton(
-                              icon: const Icon(Icons.menu, color: OneDarkColors.fg),
-                              onPressed: () => setState(() => _sidebarVisible = !_sidebarVisible),
+                              icon: Icon(Icons.menu, color: onSurface),
+                              onPressed: () => setState(
+                                () => _sidebarVisible = !_sidebarVisible,
+                              ),
                               tooltip: 'Toggle Sidebar',
                             ),
                             // Breadcrumb navigation
                             Expanded(
                               child: SingleChildScrollView(
                                 scrollDirection: Axis.horizontal,
-                                child: Row(
-                                  children: _buildBreadcrumbs(),
-                                ),
+                                child: Row(children: _buildBreadcrumbs()),
                               ),
                             ),
                             const SizedBox(width: 4),
                             IconButton(
-                              icon: const Icon(Icons.search, color: OneDarkColors.fgDim),
+                              icon: Icon(
+                                Icons.search,
+                                color: onSurfaceDim,
+                              ),
                               onPressed: () async {
                                 final result = await Navigator.push<String>(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => SearchScreen(startPath: _currentPath),
+                                    builder: (_) =>
+                                        SearchScreen(startPath: _currentPath),
                                   ),
                                 );
                                 if (result != null && mounted) {
@@ -348,20 +530,33 @@ class _MainScreenState extends State<MainScreen> {
                               tooltip: 'Search',
                             ),
                             IconButton(
-                              icon: const Icon(Icons.account_tree, color: OneDarkColors.fgDim),
+                              icon: Icon(
+                                Icons.account_tree,
+                                color: onSurfaceDim,
+                              ),
                               onPressed: () {
                                 Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (_) => FolderGraphScreen(startPath: _currentPath),
+                                    builder: (_) => FolderGraphScreen(
+                                      startPath: _currentPath,
+                                    ),
                                   ),
                                 );
                               },
                               tooltip: 'Folder Graph',
                             ),
                             IconButton(
-                              icon: Icon(_previewVisible ? Icons.unfold_less : Icons.unfold_more,
-                                  color: _previewVisible ? OneDarkColors.cyan : OneDarkColors.fgDim),
-                              onPressed: () => setState(() => _previewVisible = !_previewVisible),
+                              icon: Icon(
+                                _previewVisible
+                                    ? Icons.unfold_less
+                                    : Icons.unfold_more,
+                                color: _previewVisible
+                                    ? cs.primary
+                                    : onSurfaceDim,
+                              ),
+                              onPressed: () => setState(
+                                () => _previewVisible = !_previewVisible,
+                              ),
                               tooltip: 'Toggle Preview',
                             ),
                           ],
@@ -373,50 +568,85 @@ class _MainScreenState extends State<MainScreen> {
                       Expanded(
                         child: FileBrowser(
                           initialPath: _currentPath,
-                          onItemSelected: (item) => setState(() => _selectedItem = item),
-                          onSelectionChanged: (info) => setState(() => _selectionInfo = info),
-                          onClipboardChanged: (info) => setState(() => _clipboardInfo = info),
-                          onPathChanged: (path) => setState(() => _currentPath = path),
-                          onMarksChanged: (count) => setState(() => _markCount = count),
+                          onItemSelected: (item) =>
+                              setState(() => _selectedItem = item),
+                          onSelectionChanged: (info) =>
+                              setState(() => _selectionInfo = info),
+                          onClipboardChanged: (info) =>
+                              setState(() => _clipboardInfo = info),
+                          onPathChanged: (path) => setState(() {
+                            _currentPath = path;
+                            _selectedItem = null;
+                          }),
+                          onMarksChanged: (count) =>
+                              setState(() => _markCount = count),
+                          onItemCountChanged: (count) =>
+                              setState(() => _itemCount = count),
                         ),
                       ),
                       // Status bar
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        color: OneDarkColors.bgDark,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        color: surfaceHighest,
                         child: Row(
                           children: [
-                            Icon(Icons.folder_open, size: 14, color: OneDarkColors.fgDim),
+                            Icon(
+                              Icons.folder_open,
+                              size: 14,
+                              color: onSurfaceDim,
+                            ),
                             const SizedBox(width: 6),
                             Flexible(
-                              child: Text(_currentPath,
-                                  style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                              child: Text(
+                                _currentPath,
+                                style: TextStyle(
+                                  color: onSurfaceDim,
+                                  fontSize: 11,
+                                ),
+                              ),
                             ),
                             // Clipboard indicator (copy = cyan, cut = amber)
-                            if (_clipboardInfo != null && _clipboardInfo!.hasClipboard) ...[
+                            if (_clipboardInfo != null &&
+                                _clipboardInfo!.hasClipboard) ...[
                               const SizedBox(width: 8),
                               Icon(
-                                _clipboardInfo!.operation == 'cut' ? Icons.content_cut : Icons.content_copy,
+                                _clipboardInfo!.operation == 'cut'
+                                    ? Icons.content_cut
+                                    : Icons.content_copy,
                                 size: 14,
-                                color: _clipboardInfo!.operation == 'cut' ? OneDarkColors.amber : OneDarkColors.cyan,
+                                color: _clipboardInfo!.operation == 'cut'
+                                    ? OneDarkColors.amber
+                                    : OneDarkColors.cyan,
                               ),
                               const SizedBox(width: 4),
-                              Text(
-                                '${_clipboardInfo!.operation == 'cut' ? 'Cut' : 'Copied'}: ${_clipboardInfo!.count}',
-                                style: TextStyle(
-                                  color: _clipboardInfo!.operation == 'cut' ? OneDarkColors.amber : OneDarkColors.cyan,
-                                  fontSize: 11,
+                              Flexible(
+                                child: Text(
+                                  '${_clipboardInfo!.operation == 'cut' ? 'Cut' : 'Copied'}: ${_clipboardInfo!.count}',
+                                  style: TextStyle(
+                                    color: _clipboardInfo!.operation == 'cut'
+                                        ? OneDarkColors.amber
+                                        : OneDarkColors.cyan,
+                                    fontSize: 11,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ],
                             // Mark count indicator
                             if (_markCount > 0) ...[
                               const SizedBox(width: 8),
-                              Icon(Icons.check_circle, size: 14, color: OneDarkColors.amber),
+                              Icon(
+                                Icons.check_circle,
+                                size: 14,
+                                color: OneDarkColors.amber,
+                              ),
                               const SizedBox(width: 4),
                               Text(
                                 '$_markCount marked',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: OneDarkColors.amber,
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
@@ -424,12 +654,16 @@ class _MainScreenState extends State<MainScreen> {
                               ),
                             ],
                             // Multi-select aggregate summary
-                            if (_selectionInfo != null && _selectionInfo!.count > 1) ...[
+                            if (_selectionInfo != null &&
+                                _selectionInfo!.count > 1) ...[
                               const SizedBox(width: 8),
                               Flexible(
                                 child: Text(
                                   '${_selectionInfo!.count} selected (${_formatBytes(_selectionInfo!.totalSizeBytes)})',
-                                  style: const TextStyle(color: OneDarkColors.fg, fontSize: 11),
+                                  style: TextStyle(
+                                    color: onSurface,
+                                    fontSize: 11,
+                                  ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
@@ -437,15 +671,33 @@ class _MainScreenState extends State<MainScreen> {
                             const Spacer(),
                             if (_selectedItem != null) ...[
                               const SizedBox(width: 12),
-                              Icon(_selectedItem!.icon, size: 14, color: _selectedItem!.iconColor),
+                              Icon(
+                                _selectedItem!.icon,
+                                size: 14,
+                                color: _selectedItem!.iconColor,
+                              ),
                               const SizedBox(width: 4),
                               Flexible(
-                                child: Text(_selectedItem!.name,
-                                    style: const TextStyle(color: OneDarkColors.fg, fontSize: 11)),
+                                child: Text(
+                                  _selectedItem!.name,
+                                  style: TextStyle(
+                                    color: onSurface,
+                                    fontSize: 11,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                               const SizedBox(width: 12),
-                              Text(_selectedItem!.formattedSize,
-                                  style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                              Flexible(
+                                child: Text(
+                                  _selectedItem!.formattedSize,
+                                  style: TextStyle(
+                                    color: onSurfaceDim,
+                                    fontSize: 11,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                             ],
                           ],
                         ),
@@ -456,11 +708,7 @@ class _MainScreenState extends State<MainScreen> {
 
                 // ── Preview panel (collapsible) ──────────────────────────
                 if (_previewVisible && !isMobile)
-                  PreviewPanel(
-                    item: _selectedItem,
-                    width: 280,
-                    isVisible: _previewVisible,
-                  ),
+                  PreviewPanel(item: _selectedItem, width: 280),
               ],
             ),
             // Tab 1-4: Full-screen screens
@@ -475,14 +723,17 @@ class _MainScreenState extends State<MainScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) => setState(() {
-            _selectedIndex = index;
-            if (index == 0) _previewVisible = true;
-          }),
-        backgroundColor: OneDarkColors.bgDark,
-        indicatorColor: OneDarkColors.select,
+          _selectedIndex = index;
+          if (index == 0) _previewVisible = true;
+        }),
+        backgroundColor: surface,
+        indicatorColor: cs.primaryContainer,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.folder), label: 'Files'),
-          NavigationDestination(icon: Icon(Icons.bluetooth), label: 'Bluetooth'),
+          NavigationDestination(
+            icon: Icon(Icons.bluetooth),
+            label: 'Bluetooth',
+          ),
           NavigationDestination(icon: Icon(Icons.wifi), label: 'LAN'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Storage'),
@@ -497,32 +748,42 @@ class _MainScreenState extends State<MainScreen> {
     final widgets = <Widget>[];
     String accumulated = '';
 
-    // Home root
-    widgets.add(_breadcrumbChip('/', '/', isLast: true));
+    // Home root — only styled as the last crumb when we're actually at '/'
+    widgets.add(_breadcrumbChip('/', '/', isLast: parts.isEmpty));
 
     for (final part in parts) {
       accumulated += '/$part';
       widgets.add(const SizedBox(width: 4));
-      widgets.add(_breadcrumbChip(part, accumulated, isLast: part == parts.last));
+      widgets.add(
+        _breadcrumbChip(part, accumulated, isLast: part == parts.last),
+      );
     }
     return widgets;
   }
 
   Widget _breadcrumbChip(String label, String path, {required bool isLast}) {
+    final cs = Theme.of(context).colorScheme;
     return TextButton(
       onPressed: () => setState(() => _currentPath = path),
-      style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
-      child: Text(label,
-          style: TextStyle(
-            color: isLast ? OneDarkColors.cyan : OneDarkColors.fg,
-            fontSize: 13,
-            fontWeight: isLast ? FontWeight.w600 : FontWeight.normal,
-          )),
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: isLast ? cs.primary : cs.onSurface,
+          fontSize: 13,
+          fontWeight: isLast ? FontWeight.w600 : FontWeight.normal,
+        ),
+      ),
     );
   }
 
   Widget _sidebarTile(int index, IconData icon, String label, String path) {
-    final isActive = _currentPath.startsWith(path) &&
+    final cs = Theme.of(context).colorScheme;
+    final onSurface = cs.onSurface;
+    final isActive =
+        _currentPath.startsWith(path) &&
         (_currentPath == path || _currentPath.startsWith('$path/'));
     return MouseRegion(
       onEnter: (_) => setState(() => _hoveredIndex.add(index)),
@@ -532,15 +793,21 @@ class _MainScreenState extends State<MainScreen> {
         contentPadding: const EdgeInsets.symmetric(horizontal: 8),
         minLeadingWidth: 0,
         horizontalTitleGap: 6,
-        leading: Icon(icon, size: 18, color: isActive ? OneDarkColors.cyan : OneDarkColors.fg),
-        tileColor: _hoveredIndex.contains(index) ? OneDarkColors.dim.withValues(alpha: 0.3) : null,
+        leading: Icon(
+          icon,
+          size: 18,
+          color: isActive ? cs.primary : onSurface,
+        ),
+        tileColor: _hoveredIndex.contains(index)
+            ? onSurface.withValues(alpha: 0.08)
+            : null,
         title: Row(
           children: [
             Flexible(
               child: Text(
                 label,
                 style: TextStyle(
-                  color: isActive ? OneDarkColors.selectFg : OneDarkColors.fg,
+                  color: isActive ? cs.primary : onSurface,
                   fontSize: 13,
                 ),
                 overflow: TextOverflow.ellipsis,
@@ -550,7 +817,7 @@ class _MainScreenState extends State<MainScreen> {
           ],
         ),
         selected: isActive,
-        selectedTileColor: OneDarkColors.select,
+        selectedTileColor: cs.primaryContainer.withValues(alpha: 0.3),
         onTap: () => setState(() => _currentPath = path),
       ),
     );
@@ -558,29 +825,45 @@ class _MainScreenState extends State<MainScreen> {
 
   void _addBookmark() {
     final controller = TextEditingController(text: _currentPath);
+    final cs = Theme.of(context).colorScheme;
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: OneDarkColors.bg,
-        title: const Text('Add Bookmark', style: TextStyle(color: OneDarkColors.fg)),
+        backgroundColor: cs.surface,
+        title: Text('Add Bookmark', style: TextStyle(color: cs.onSurface)),
         content: TextField(
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'Path',
-            labelStyle: TextStyle(color: OneDarkColors.fgDim),
+            labelStyle: TextStyle(color: cs.onSurfaceVariant),
           ),
-          style: const TextStyle(color: OneDarkColors.fg),
+          style: TextStyle(color: cs.onSurface),
           controller: controller,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () async {
               final path = controller.text.trim();
               if (path.isEmpty) return;
+              if (_bookmarks.contains(path)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Already bookmarked'),
+                    backgroundColor: OneDarkColors.amber,
+                  ),
+                );
+                return;
+              }
               final dir = Directory(path);
               if (!await dir.exists()) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Path does not exist'), backgroundColor: OneDarkColors.red),
+                  SnackBar(
+                    content: Text('Path does not exist'),
+                    backgroundColor: OneDarkColors.red,
+                  ),
                 );
                 return;
               }
@@ -589,7 +872,10 @@ class _MainScreenState extends State<MainScreen> {
               if (!mounted) return;
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Bookmark added'), backgroundColor: OneDarkColors.green),
+                SnackBar(
+                  content: Text('Bookmark added'),
+                  backgroundColor: OneDarkColors.green,
+                ),
               );
             },
             child: const Text('Add'),
@@ -601,17 +887,27 @@ class _MainScreenState extends State<MainScreen> {
 
   /// Long-press on a bookmark tile: confirm before removing it.
   void _confirmRemoveBookmark(String path) {
+    final cs = Theme.of(context).colorScheme;
     showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: OneDarkColors.bg,
-        title: const Text('Remove bookmark?', style: TextStyle(color: OneDarkColors.fg)),
-        content: Text(_shortPath(path), style: const TextStyle(color: OneDarkColors.fgDim)),
+        backgroundColor: cs.surface,
+        title: Text(
+          'Remove bookmark?',
+          style: TextStyle(color: cs.onSurface),
+        ),
+        content: Text(
+          _shortPath(path),
+          style: TextStyle(color: cs.onSurfaceVariant),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove', style: TextStyle(color: OneDarkColors.red)),
+            child: Text('Remove', style: TextStyle(color: cs.error)),
           ),
         ],
       ),
@@ -627,12 +923,10 @@ class _MainScreenState extends State<MainScreen> {
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes < 1024 * 1024 * 1024)
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
-
-  // Count items placeholder — in production this would be a state manager
-  int get itemsCount => 0;
 
   /// Strips the primary emulated storage prefix for display.
   String _shortPath(String path) {

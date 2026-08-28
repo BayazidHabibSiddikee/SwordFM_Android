@@ -35,25 +35,25 @@ class NetworkProfile {
   bool _connected = false;
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'type': type,
-        'host': host,
-        'port': port,
-        'username': username,
-        'remotePath': remotePath,
-      };
+    'id': id,
+    'name': name,
+    'type': type,
+    'host': host,
+    'port': port,
+    'username': username,
+    'remotePath': remotePath,
+  };
 
   factory NetworkProfile.fromJson(Map<String, dynamic> json) => NetworkProfile(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        type: json['type'] as String,
-        host: json['host'] as String,
-        port: json['port'] as int,
-        username: json['username'] as String,
-        password: json['password'] as String,
-        remotePath: json['remotePath'] as String?,
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    type: json['type'] as String,
+    host: json['host'] as String,
+    port: json['port'] as int,
+    username: json['username'] as String,
+    password: json['password'] as String,
+    remotePath: json['remotePath'] as String?,
+  );
 }
 
 /// Service managing WebDAV and SFTP connections.
@@ -68,7 +68,10 @@ class _CryptoHelper {
   static Future<void> initKey() async {
     final existing = await _keyStorage.read(key: _keyName);
     if (existing != null) return;
-    final key = List<int>.generate(32, (_) => DateTime.now().millisecondsSinceEpoch % 256);
+    final key = List<int>.generate(
+      32,
+      (_) => DateTime.now().millisecondsSinceEpoch % 256,
+    );
     await _keyStorage.write(key: _keyName, value: base64Encode(key));
   }
 
@@ -134,7 +137,8 @@ class NetworkService {
   final Map<String, NetworkProfile> _profiles = {};
   final List<ConnLog> _logs = [];
   final List<TransferJob> _transferQueue = [];
-  final StreamController<List<TransferJob>> _transferStream = StreamController.broadcast();
+  final StreamController<List<TransferJob>> _transferStream =
+      StreamController.broadcast();
   bool _transferring = false;
 
   Stream<List<ConnLog>> get logStream => _logController.stream;
@@ -200,8 +204,10 @@ class NetworkService {
   bool hasProfile(String id) => _profiles.containsKey(id);
 
   /// Connect to a profile via WebDAV or SFTP and list remote directory.
-  Future<List<RemoteEntry>> listDirectory(String profileId,
-      {String path = '/'}) async {
+  Future<List<RemoteEntry>> listDirectory(
+    String profileId, {
+    String path = '/',
+  }) async {
     final profile = _profiles[profileId];
     if (profile == null) throw Exception('Profile not found: $profileId');
 
@@ -219,8 +225,11 @@ class NetworkService {
   }
 
   /// Upload a local file to a remote server.
-  Future<void> uploadFile(String profileId, String localPath,
-      {String remotePath = '/'}) async {
+  Future<void> uploadFile(
+    String profileId,
+    String localPath, {
+    String remotePath = '/',
+  }) async {
     final profile = _profiles[profileId];
     if (profile == null) throw Exception('Profile not found: $profileId');
 
@@ -239,8 +248,11 @@ class NetworkService {
   }
 
   /// Download a remote file.
-  Future<void> downloadFile(String profileId, String remotePath,
-      String localDir) async {
+  Future<void> downloadFile(
+    String profileId,
+    String remotePath,
+    String localDir,
+  ) async {
     final profile = _profiles[profileId];
     if (profile == null) throw Exception('Profile not found: $profileId');
 
@@ -261,11 +273,15 @@ class NetworkService {
   // ─── WebDAV helpers ────────────────────────────────────────────────────────
 
   static Future<List<RemoteEntry>> _listWebdav(
-      NetworkProfile profile, String path) async {
-    final dio = Dio(BaseOptions(
-      baseUrl: '${profile.host}:${profile.port}',
-      connectTimeout: const Duration(seconds: 10),
-    ));
+    NetworkProfile profile,
+    String path,
+  ) async {
+    final dio = Dio(
+      BaseOptions(
+        baseUrl: '${profile.host}:${profile.port}',
+        connectTimeout: const Duration(seconds: 10),
+      ),
+    );
     dio.interceptors.add(
       LogInterceptor(requestBody: false, responseBody: false),
     );
@@ -292,11 +308,16 @@ class NetworkService {
   }
 
   static Future<void> _uploadWebdav(
-      NetworkProfile profile, String localPath, String remotePath) async {
-    final dio = Dio(BaseOptions(
-      baseUrl: '${profile.host}:${profile.port}$remotePath',
-      connectTimeout: const Duration(seconds: 30),
-    ));
+    NetworkProfile profile,
+    String localPath,
+    String remotePath,
+  ) async {
+    final dio = Dio(
+      BaseOptions(
+        baseUrl: '${profile.host}:${profile.port}$remotePath',
+        connectTimeout: const Duration(seconds: 30),
+      ),
+    );
     final auth =
         'Basic ${base64Encode('${profile.username}:${profile.password}'.codeUnits)}';
     dio.options.headers['Authorization'] = auth;
@@ -304,16 +325,23 @@ class NetworkService {
 
     final fileBytes = await _readFileBytes(localPath);
     final fileName = p.basename(localPath);
-    await dio.put('$_buildUrl(remotePath, profile.remotePath!)/$fileName',
-        data: fileBytes);
+    await dio.put(
+      '$_buildUrl(remotePath, profile.remotePath!)/$fileName',
+      data: fileBytes,
+    );
   }
 
   static Future<void> _downloadWebdav(
-      NetworkProfile profile, String remotePath, String localDir) async {
-    final dio = Dio(BaseOptions(
-      baseUrl: '${profile.host}:${profile.port}',
-      connectTimeout: const Duration(seconds: 30),
-    ));
+    NetworkProfile profile,
+    String remotePath,
+    String localDir,
+  ) async {
+    final dio = Dio(
+      BaseOptions(
+        baseUrl: '${profile.host}:${profile.port}',
+        connectTimeout: const Duration(seconds: 30),
+      ),
+    );
     final auth =
         'Basic ${base64Encode('${profile.username}:${profile.password}'.codeUnits)}';
     dio.options.headers['Authorization'] = auth;
@@ -329,7 +357,9 @@ class NetworkService {
   // ─── SFTP helpers (dartssh2) ────────────────────────────────────────────────
 
   static Future<List<RemoteEntry>> _listSftp(
-      NetworkProfile profile, String path) async {
+    NetworkProfile profile,
+    String path,
+  ) async {
     final socket = await SSHSocket.connect(profile.host, profile.port);
     final client = SSHClient(
       socket,
@@ -340,10 +370,12 @@ class NetworkService {
     final sftp = await client.sftp();
     try {
       final items = await sftp.listdir(path);
-      return items.map((item) => RemoteEntry(
-        name: item.filename,
-        isDir: item.attr.isDirectory,
-      )).toList();
+      return items
+          .map(
+            (item) =>
+                RemoteEntry(name: item.filename, isDir: item.attr.isDirectory),
+          )
+          .toList();
     } finally {
       await sftp.close();
       await client.close();
@@ -351,7 +383,10 @@ class NetworkService {
   }
 
   static Future<void> _uploadSftp(
-      NetworkProfile profile, String localPath, String remotePath) async {
+    NetworkProfile profile,
+    String localPath,
+    String remotePath,
+  ) async {
     final socket = await SSHSocket.connect(profile.host, profile.port);
     final client = SSHClient(
       socket,
@@ -374,7 +409,10 @@ class NetworkService {
   }
 
   static Future<void> _downloadSftp(
-      NetworkProfile profile, String remotePath, String localDir) async {
+    NetworkProfile profile,
+    String remotePath,
+    String localDir,
+  ) async {
     final socket = await SSHSocket.connect(profile.host, profile.port);
     final client = SSHClient(
       socket,
@@ -428,7 +466,10 @@ class NetworkService {
 
   /// Cancel a transfer by job ID.
   Future<void> cancelTransfer(String jobId) async {
-    final job = _transferQueue.firstWhere((j) => j.id == jobId, orElse: () => throw Exception('Not found'));
+    final job = _transferQueue.firstWhere(
+      (j) => j.id == jobId,
+      orElse: () => throw Exception('Not found'),
+    );
     job.status = TransferStatus.failed;
     job.error = 'Cancelled';
     _transferStream.add(List.from(_transferQueue));
@@ -443,7 +484,11 @@ class NetworkService {
     _transferring = true;
     try {
       if (job.isUpload) {
-        await uploadFile(job.profileId, job.localPath, remotePath: job.remotePath);
+        await uploadFile(
+          job.profileId,
+          job.localPath,
+          remotePath: job.remotePath,
+        );
       } else {
         await downloadFile(job.profileId, job.remotePath, job.localPath);
       }
@@ -464,7 +509,9 @@ class NetworkService {
   bool get isTransferring => _transferring;
 
   void addLog(String profileId, String message) {
-    _logs.add(ConnLog(profileId: profileId, message: message, ts: DateTime.now()));
+    _logs.add(
+      ConnLog(profileId: profileId, message: message, ts: DateTime.now()),
+    );
     if (_logs.length > 100) _logs.removeAt(0);
     _logController.add(List.from(_logs));
   }
@@ -477,9 +524,12 @@ class RemoteEntry {
 }
 
 class ConnLog {
-  const ConnLog({required this.profileId, required this.message, required this.ts});
+  const ConnLog({
+    required this.profileId,
+    required this.message,
+    required this.ts,
+  });
   final String profileId;
   final String message;
   final DateTime ts;
-
 }

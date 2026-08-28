@@ -107,7 +107,10 @@ class WebShareServer {
             if (path == '/' || path == '/index.html') {
               await _serveHomePage(request);
             } else if (path.startsWith('/download/')) {
-              await _serveDownload(request, path.substring(('/download/').length));
+              await _serveDownload(
+                request,
+                path.substring(('/download/').length),
+              );
             } else if (path.startsWith('/api/list')) {
               await _serveApiList(request, rawQuery);
             } else if (path == '/api/pin') {
@@ -201,7 +204,8 @@ class WebShareServer {
     // Reject dangerous substrings.
     if (name.contains('..') || name.contains(String.fromCharCode(0))) return '';
     if (name.isEmpty) return '';
-    if (name.length > _kMaxSafeNameLen) name = name.substring(0, _kMaxSafeNameLen);
+    if (name.length > _kMaxSafeNameLen)
+      name = name.substring(0, _kMaxSafeNameLen);
     return name;
   }
 
@@ -237,7 +241,8 @@ class WebShareServer {
   /// once authenticated the regular browser UI is returned.
   Future<void> _serveHomePage(HttpRequest request) async {
     final jsLoadFiles = _buildJsLoadFiles();
-    final html = '''<!DOCTYPE html>
+    final html =
+        '''<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -480,7 +485,11 @@ class WebShareServer {
           return (a['name'] as String).compareTo(b['name'] as String);
         });
       }
-      _sendJsonResponse(request, {'files': files, 'currentDir': subDir, 'pin': _pin});
+      _sendJsonResponse(request, {
+        'files': files,
+        'currentDir': subDir,
+        'pin': _pin,
+      });
     } catch (e) {
       _sendJsonResponse(request, {'files': <dynamic>[], 'currentDir': ''});
     }
@@ -508,7 +517,8 @@ class WebShareServer {
     final shareBase = _shareRoot.endsWith('/') ? _shareRoot : '$_shareRoot/';
     final filePath = '$shareBase$subDir$fileName';
     final file = File(filePath);
-    if (!await file.exists() || (await file.stat()).type != FileSystemEntityType.file) {
+    if (!await file.exists() ||
+        (await file.stat()).type != FileSystemEntityType.file) {
       _sendResponse(request, 404, 'File not found');
       return;
     }
@@ -561,7 +571,9 @@ class WebShareServer {
     }
     fileName = sanitizeName(fileName);
     if (fileName.isEmpty) {
-      _sendJsonResponse(request, {'error': 'Invalid filename'}, statusCode: 400);
+      _sendJsonResponse(request, {
+        'error': 'Invalid filename',
+      }, statusCode: 400);
       return;
     }
 
@@ -597,7 +609,9 @@ class WebShareServer {
       await sink.close();
       // Clean up partial file on error.
       if (await outFile.exists()) await outFile.delete();
-      _sendJsonResponse(request, {'error': 'Upload failed: $e'}, statusCode: 500);
+      _sendJsonResponse(request, {
+        'error': 'Upload failed: $e',
+      }, statusCode: 500);
     }
   }
 
@@ -605,7 +619,12 @@ class WebShareServer {
 
   void _logAccess(HttpRequest request, String path, String query) {
     final ip = request.connectionInfo?.remoteAddress.address ?? 'unknown';
-    _accessLog.add({'ip': ip, 'path': path, 'query': query, 'ts': DateTime.now()});
+    _accessLog.add({
+      'ip': ip,
+      'path': path,
+      'query': query,
+      'ts': DateTime.now(),
+    });
     if (_accessLog.length > _kMaxAccessLog) {
       _accessLog.removeAt(0);
     }
@@ -630,8 +649,8 @@ class WebShareServer {
       version: QrVersions.auto,
       size: 200.0,
       gapless: false,
-      eyeStyle: const QrEyeStyle(color: OneDarkColors.cyan),
-      dataModuleStyle: const QrDataModuleStyle(color: OneDarkColors.cyan),
+      eyeStyle: QrEyeStyle(color: OneDarkColors.cyan),
+      dataModuleStyle: QrDataModuleStyle(color: OneDarkColors.cyan),
     );
   }
 
@@ -645,7 +664,11 @@ class WebShareServer {
       ..close();
   }
 
-  void _sendJsonResponse(HttpRequest request, dynamic data, {int statusCode = 200}) {
+  void _sendJsonResponse(
+    HttpRequest request,
+    dynamic data, {
+    int statusCode = 200,
+  }) {
     request.response
       ..statusCode = statusCode
       ..headers.contentType = ContentType.json
@@ -656,13 +679,15 @@ class WebShareServer {
   String _formatSize(int size) {
     if (size < 1024) return '$size B';
     if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
-    if (size < 1024 * 1024 * 1024) return '${(size / 1024 / 1024).toStringAsFixed(1)} MB';
+    if (size < 1024 * 1024 * 1024)
+      return '${(size / 1024 / 1024).toStringAsFixed(1)} MB';
     return '${(size / 1024 / 1024 / 1024).toStringAsFixed(1)} GB';
   }
 
   String _iconForEntity(String path) {
     final ext = path.split('.').last.toLowerCase();
-    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].contains(ext)) return '🖼️';
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].contains(ext))
+      return '🖼️';
     if (['mp4', 'mkv', 'mov', 'avi'].contains(ext)) return '🎬';
     if (['mp3', 'flac', 'wav', 'ogg'].contains(ext)) return '🎵';
     if (ext == 'pdf') return '📄';

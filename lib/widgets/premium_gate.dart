@@ -26,10 +26,7 @@ class PremiumGate extends StatelessWidget {
 
   /// Shows the premium upsell dialog.
   static void showDonateDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => const _Donatedialog(),
-    );
+    showDialog(context: context, builder: (_) => const _Donatedialog());
   }
 }
 
@@ -56,7 +53,7 @@ class _DonatedialogState extends State<_Donatedialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: OneDarkColors.bg,
-      title: const Text(
+      title: Text(
         'Support SwordFM',
         style: TextStyle(color: OneDarkColors.cyan),
       ),
@@ -66,7 +63,7 @@ class _DonatedialogState extends State<_Donatedialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Premium unlocks unlimited file conversions and ad-free experience.',
               style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
             ),
@@ -91,7 +88,7 @@ class _DonatedialogState extends State<_Donatedialog> {
                 color: OneDarkColors.dim,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Text(
+              child: Text(
                 'After donating, email your UID/email to support@swordfm.app with your transaction ID. We\'ll activate your premium within 24 hours.',
                 style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
               ),
@@ -100,7 +97,10 @@ class _DonatedialogState extends State<_Donatedialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
         FilledButton(
           onPressed: () {
             Navigator.pop(context);
@@ -125,7 +125,13 @@ class _DonatedialogState extends State<_Donatedialog> {
           children: [
             Icon(icon, size: 18, color: OneDarkColors.amber),
             const SizedBox(width: 8),
-            Text(label, style: const TextStyle(color: OneDarkColors.fg, fontWeight: FontWeight.w600)),
+            Text(
+              label,
+              style: TextStyle(
+                color: OneDarkColors.fg,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const Spacer(),
             IconButton(
               icon: const Icon(Icons.copy, size: 18),
@@ -137,9 +143,13 @@ class _DonatedialogState extends State<_Donatedialog> {
         ),
         SelectableText(
           value,
-          style: const TextStyle(color: OneDarkColors.fg, fontFamily: 'monospace', fontSize: 12),
+          style: TextStyle(
+            color: OneDarkColors.fg,
+            fontFamily: 'monospace',
+            fontSize: 12,
+          ),
         ),
-        Text(hint, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+        Text(hint, style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
       ],
     );
   }

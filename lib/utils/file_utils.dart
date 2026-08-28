@@ -159,8 +159,19 @@ class FileItem {
   bool get _isExecutable {
     final ext = extension.toLowerCase();
     const executableExts = {
-      '.sh', '.bash', '.py', '.pl', '.rb', '.js', '.ts',
-      '.kt', '.java', '.c', '.cpp', '.go', '.rs',
+      '.sh',
+      '.bash',
+      '.py',
+      '.pl',
+      '.rb',
+      '.js',
+      '.ts',
+      '.kt',
+      '.java',
+      '.c',
+      '.cpp',
+      '.go',
+      '.rs',
     };
     return executableExts.contains(ext);
   }
@@ -539,8 +550,8 @@ class FileUtils {
   /// Returns a unique destination path by appending (1), (2), etc. if
   /// [destPath] already exists. Matches Linux SwordFM's uniqueDestPath().
   static Future<String> uniqueDestPath(String destPath) async {
-    if (await FileSystemEntity.type(destPath) ==
-        FileSystemEntityType.notFound) return destPath;
+    if (await FileSystemEntity.type(destPath) == FileSystemEntityType.notFound)
+      return destPath;
     final dir = p.dirname(destPath);
     final ext = p.extension(destPath);
     final base = p.basenameWithoutExtension(destPath);
@@ -548,7 +559,8 @@ class FileUtils {
     while (true) {
       final candidate = p.join(dir, '$base ($n)$ext');
       if (await FileSystemEntity.type(candidate) ==
-          FileSystemEntityType.notFound) return candidate;
+          FileSystemEntityType.notFound)
+        return candidate;
       n++;
     }
   }
@@ -675,7 +687,9 @@ class FileUtils {
   /// Opens the Android system share sheet for [path].
   static Future<bool> share(String path) async {
     try {
-      final result = await _shareChannel.invokeMethod<bool>('shareFile', {'path': path});
+      final result = await _shareChannel.invokeMethod<bool>('shareFile', {
+        'path': path,
+      });
       return result ?? false;
     } catch (_) {
       return false;

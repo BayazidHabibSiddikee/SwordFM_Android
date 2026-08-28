@@ -23,7 +23,7 @@ class DonationService {
   /// Copies the bKash number to clipboard.
   static Future<void> copyBkashNumber(BuildContext context) async {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
+      SnackBar(
         content: Text('bKash number copied'),
         backgroundColor: OneDarkColors.green,
       ),
@@ -33,7 +33,7 @@ class DonationService {
   /// Copies the BNB address to clipboard.
   static Future<void> copyBnbAddress(BuildContext context) async {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
+      SnackBar(
         content: Text('BNB address copied'),
         backgroundColor: OneDarkColors.green,
       ),
@@ -42,10 +42,7 @@ class DonationService {
 
   /// Shows the full donation dialog.
   static void showDonateDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => const _DonationDialog(),
-    );
+    showDialog(context: context, builder: (_) => const _DonationDialog());
   }
 }
 
@@ -61,7 +58,7 @@ class _DonationDialogState extends State<_DonationDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: OneDarkColors.bg,
-      title: const Text(
+      title: Text(
         'Support SwordFM',
         style: TextStyle(color: OneDarkColors.cyan),
       ),
@@ -70,7 +67,7 @@ class _DonationDialogState extends State<_DonationDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Your donations help keep SwordFM alive and growing. Thank you!',
               style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
             ),
@@ -97,7 +94,7 @@ class _DonationDialogState extends State<_DonationDialog> {
                 color: OneDarkColors.dim,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Text(
+              child: Text(
                 'After donating, email your UID/email to support@swordfm.app with your transaction ID. We\'ll activate your premium within 24 hours.',
                 style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
               ),
@@ -106,7 +103,10 @@ class _DonationDialogState extends State<_DonationDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
         FilledButton(
           onPressed: () async {
             Navigator.pop(context);
@@ -140,11 +140,24 @@ class _DonationDialogState extends State<_DonationDialog> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(color: OneDarkColors.fg, fontWeight: FontWeight.w600)),
-                Text(subtitle, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: OneDarkColors.fg,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+                ),
                 SelectableText(
                   value,
-                  style: const TextStyle(color: OneDarkColors.cyan, fontFamily: 'monospace', fontSize: 11),
+                  style: TextStyle(
+                    color: OneDarkColors.cyan,
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),

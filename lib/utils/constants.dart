@@ -13,19 +13,25 @@ class AppPaths {
     return Platform.environment['HOME'] ?? '/home/user';
   }
 
-  static String get desktop => Platform.isAndroid ? '$home/DCIM' : '$home/Desktop';
+  static String get desktop =>
+      Platform.isAndroid ? '$home/DCIM' : '$home/Desktop';
 
-  static String get documents => Platform.isAndroid ? '$home/Documents' : '$home/Documents';
+  static String get documents =>
+      Platform.isAndroid ? '$home/Documents' : '$home/Documents';
 
-  static String get downloads => Platform.isAndroid ? '$home/Download' : '$home/Downloads';
+  static String get downloads =>
+      Platform.isAndroid ? '$home/Download' : '$home/Downloads';
 
-  static String get pictures => Platform.isAndroid ? '$home/DCIM' : '$home/Pictures';
+  static String get pictures =>
+      Platform.isAndroid ? '$home/DCIM' : '$home/Pictures';
 
   static String get music => Platform.isAndroid ? '$home/Music' : '$home/Music';
 
-  static String get videos => Platform.isAndroid ? '$home/Videos' : '$home/Videos';
+  static String get videos =>
+      Platform.isAndroid ? '$home/Videos' : '$home/Videos';
 
-  static String get trash => Platform.isAndroid ? '' : '$home/.local/share/Trash';
+  static String get trash =>
+      Platform.isAndroid ? '' : '$home/.local/share/Trash';
 
   /// App-local trash directory — created on first use via path_provider.
   static Future<String> get trashDir async {
@@ -37,9 +43,8 @@ class AppPaths {
   }
 
   /// SwordFM-specific directories
-  static String get swordfmDownloads => Platform.isAndroid
-      ? '$downloads/SwordFM'
-      : '$downloads/SwordFM';
+  static String get swordfmDownloads =>
+      Platform.isAndroid ? '$downloads/SwordFM' : '$downloads/SwordFM';
 
   static const String bookmarksFile = '.swordfm_bookmarks';
 

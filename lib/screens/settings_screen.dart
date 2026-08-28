@@ -28,11 +28,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _sortBy = 'Name';
   bool _bluetoothAutoConnect = false;
   int _lanPort = 8080;
+  String _videoPlayerKey = 'default';
 
   @override
   void initState() {
     super.initState();
     _refreshAccount();
+    _loadVideoPlayerPref().then((key) {
+      if (mounted) setState(() => _videoPlayerKey = key);
+    });
   }
 
   Future<void> _refreshAccount() async {
@@ -57,16 +61,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: const Text('Sign Out', style: TextStyle(color: OneDarkColors.fg)),
-        content: const Text('Are you sure you want to sign out?',
-            style: TextStyle(color: OneDarkColors.fgDim)),
+        title: Text('Sign Out', style: TextStyle(color: OneDarkColors.fg)),
+        content: Text(
+          'Are you sure you want to sign out?',
+          style: TextStyle(color: OneDarkColors.fgDim),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
             style: FilledButton.styleFrom(
               foregroundColor: OneDarkColors.red,
-              backgroundColor: OneDarkColors.red.withOpacity(0.15),
+              backgroundColor: OneDarkColors.red.withValues(alpha: 0.15),
             ),
             child: const Text('Sign Out'),
           ),
@@ -81,7 +90,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _isPremium = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Signed out'), backgroundColor: OneDarkColors.green),
+        SnackBar(
+          content: Text('Signed out'),
+          backgroundColor: OneDarkColors.green,
+        ),
       );
     }
   }
@@ -93,15 +105,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Settings', style: TextStyle(color: OneDarkColors.cyan, fontSize: 20, fontWeight: FontWeight.bold)),
+          Text(
+            'Settings',
+            style: TextStyle(
+              color: OneDarkColors.cyan,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 16),
 
           // Account section
           _sectionTitle('Account'),
           if (_loading)
-            const ListTile(
+            ListTile(
               leading: Icon(Icons.person_outline, color: OneDarkColors.cyan),
-              title: Text('Loading…', style: TextStyle(color: OneDarkColors.fgDim)),
+              title: Text(
+                'Loading…',
+                style: TextStyle(color: OneDarkColors.fgDim),
+              ),
             )
           else if (_email != null)
             _accountCard()
@@ -133,9 +155,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ? 'Enjoy ad-free, unlimited conversions'
                 : 'Support development — remove limits',
             trailing: _isPremium
-                ? const Icon(Icons.check_circle, color: OneDarkColors.amber)
+                ? Icon(Icons.check_circle, color: OneDarkColors.amber)
                 : const Icon(Icons.chevron_right),
-            onTap: _isPremium ? null : () => DonationService.showDonateDialog(context),
+            onTap: _isPremium
+                ? null
+                : () => DonationService.showDonateDialog(context),
           ),
 
           const SizedBox(height: 16),
@@ -159,7 +183,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'Details',
             trailing: DropdownButton<String>(
               value: 'Details',
-              items: ['Details', 'Grid'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+              items: [
+                'Details',
+                'Grid',
+              ].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
               onChanged: (_) {},
             ),
           ),
@@ -233,7 +260,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Navigator.of(context).popUntil((route) => route.isFirst);
               // The caller needs to switch tabs — use a callback approach
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Tap the Storage tab in the bottom bar')),
+                const SnackBar(
+                  content: Text('Tap the Storage tab in the bottom bar'),
+                ),
               );
             },
           ),
@@ -243,9 +272,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Find Duplicates',
             subtitle: 'Scan for duplicate files by hash',
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const DuplicatesScreen()),
-            ),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const DuplicatesScreen())),
           ),
           const SizedBox(height: 8),
           _settingTile(
@@ -289,7 +318,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Card(
       color: OneDarkColors.bgDark,
       margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: OneDarkColors.dim)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: OneDarkColors.dim),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -298,10 +330,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 CircleAvatar(
                   radius: 24,
-                  backgroundColor: _isPremium ? OneDarkColors.amber : OneDarkColors.cyan,
+                  backgroundColor: _isPremium
+                      ? OneDarkColors.amber
+                      : OneDarkColors.cyan,
                   child: Text(
-                    (_email ?? '?')[0].toUpperCase(),
-                    style: const TextStyle(color: OneDarkColors.bg, fontSize: 22, fontWeight: FontWeight.bold),
+                    (_email != null && _email!.isNotEmpty)
+                        ? _email![0].toUpperCase()
+                        : '?',
+                    style: TextStyle(
+                      color: OneDarkColors.bg,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -311,12 +351,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     children: [
                       Row(
                         children: [
-                          Text(_email!, style: const TextStyle(color: OneDarkColors.fg, fontSize: 15, fontWeight: FontWeight.w600)),
+                          Text(
+                            _email!,
+                            style: TextStyle(
+                              color: OneDarkColors.fg,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                           const SizedBox(width: 6),
                           if (_emailVerified == true)
-                            const Icon(Icons.verified, size: 16, color: OneDarkColors.green)
+                            Icon(
+                              Icons.verified,
+                              size: 16,
+                              color: OneDarkColors.green,
+                            )
                           else if (_emailVerified == false)
-                            const Icon(Icons.error_outline, size: 16, color: OneDarkColors.amber),
+                            Icon(
+                              Icons.error_outline,
+                              size: 16,
+                              color: OneDarkColors.amber,
+                            ),
                         ],
                       ),
                       const SizedBox(height: 2),
@@ -324,14 +379,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         children: [
                           if (_isPremium) ...[
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(color: OneDarkColors.amber.withOpacity(0.2), borderRadius: BorderRadius.circular(4)),
-                              child: const Text('Premium', style: TextStyle(color: OneDarkColors.amber, fontSize: 11, fontWeight: FontWeight.w600)),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: OneDarkColors.amber.withValues(
+                                  alpha: 0.2,
+                                ),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'Premium',
+                                style: TextStyle(
+                                  color: OneDarkColors.amber,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
                             const SizedBox(width: 6),
                           ],
-                          Text(_emailVerified == true ? 'Email verified' : _emailVerified == false ? 'Verify email' : '',
-                              style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
+                          Text(
+                            _emailVerified == true
+                                ? 'Email verified'
+                                : _emailVerified == false
+                                ? 'Verify email'
+                                : '',
+                            style: TextStyle(
+                              color: OneDarkColors.fgDim,
+                              fontSize: 12,
+                            ),
+                          ),
                         ],
                       ),
                     ],
@@ -345,20 +424,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (!_isPremium)
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () => DonationService.showDonateDialog(context),
+                      onPressed: () =>
+                          DonationService.showDonateDialog(context),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: OneDarkColors.amber,
-                        side: const BorderSide(color: OneDarkColors.amber),
+                        side: BorderSide(color: OneDarkColors.amber),
                       ),
                       child: const Text('Support / Premium'),
                     ),
                   ),
-                if (_isPremium)
-                  const Spacer(),
+                if (_isPremium) const Spacer(),
                 Expanded(
                   child: OutlinedButton(
                     onPressed: _handleSignOut,
-                    style: OutlinedButton.styleFrom(foregroundColor: OneDarkColors.red, side: const BorderSide(color: OneDarkColors.red)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: OneDarkColors.red,
+                      side: BorderSide(color: OneDarkColors.red),
+                    ),
                     child: const Text('Sign Out'),
                   ),
                 ),
@@ -371,12 +453,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   await AuthService().sendEmailVerification();
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Verification email sent'), backgroundColor: OneDarkColors.green),
+                      SnackBar(
+                        content: Text('Verification email sent'),
+                        backgroundColor: OneDarkColors.green,
+                      ),
                     );
                   }
                 },
                 icon: const Icon(Icons.email_outlined, size: 16),
-                label: const Text('Resend Verification Email', style: TextStyle(fontSize: 12)),
+                label: const Text(
+                  'Resend Verification Email',
+                  style: TextStyle(fontSize: 12),
+                ),
               ),
             ],
           ],
@@ -388,7 +476,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _sectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Text(title, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12, fontWeight: FontWeight.w600)),
+      child: Text(
+        title,
+        style: TextStyle(
+          color: OneDarkColors.fgDim,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 
@@ -401,8 +496,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }) {
     return ListTile(
       leading: Icon(icon, color: OneDarkColors.cyan),
-      title: Text(title, style: const TextStyle(color: OneDarkColors.fg)),
-      subtitle: subtitle != null ? Text(subtitle, style: const TextStyle(color: OneDarkColors.fgDim)) : null,
+      title: Text(title, style: TextStyle(color: OneDarkColors.fg)),
+      subtitle: subtitle != null
+          ? Text(subtitle, style: TextStyle(color: OneDarkColors.fgDim))
+          : null,
       trailing: trailing,
       onTap: onTap ?? (trailing is Switch ? null : () {}),
     );
@@ -414,17 +511,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: const Text('Sort By', style: TextStyle(color: OneDarkColors.fg)),
+        title: Text('Sort By', style: TextStyle(color: OneDarkColors.fg)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          children: options.map((opt) => RadioListTile<String>(
-            value: opt,
-            groupValue: _sortBy,
-            title: Text(opt, style: const TextStyle(color: OneDarkColors.fg)),
-            activeColor: OneDarkColors.cyan,
-            dense: true,
-            onChanged: (v) => Navigator.pop(context, v),
-          )).toList(),
+          children: options
+              .map(
+                (opt) => RadioListTile<String>(
+                  value: opt,
+                  groupValue: _sortBy,
+                  title: Text(opt, style: TextStyle(color: OneDarkColors.fg)),
+                  activeColor: OneDarkColors.cyan,
+                  dense: true,
+                  onChanged: (v) => Navigator.pop(context, v),
+                ),
+              )
+              .toList(),
         ),
       ),
     );
@@ -437,22 +538,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: const Text('LAN Server Port', style: TextStyle(color: OneDarkColors.fg)),
+        title: Text(
+          'LAN Server Port',
+          style: TextStyle(color: OneDarkColors.fg),
+        ),
         content: TextField(
           controller: controller,
           keyboardType: TextInputType.number,
-          style: const TextStyle(color: OneDarkColors.fg),
+          style: TextStyle(color: OneDarkColors.fg),
           decoration: const InputDecoration(
             labelText: 'Port',
             border: OutlineInputBorder(),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () {
               final port = int.tryParse(controller.text);
-              if (port != null && port > 0 && port < 65536) Navigator.pop(context, port);
+              if (port != null && port > 0 && port < 65536)
+                Navigator.pop(context, port);
             },
             child: const Text('Save'),
           ),
@@ -466,7 +574,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// instructions if the scheme is unavailable.
   Future<void> _openRcloneBrowser() async {
     // Try opening rclone browser in Termux via URI scheme
-    final uri = Uri.parse('termux://com.termux.app?action=run_command&command=rclone%20browser');
+    final uri = Uri.parse(
+      'termux://com.termux.app?action=run_command&command=rclone%20browser',
+    );
     try {
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri);
@@ -477,29 +587,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
           context: context,
           builder: (_) => AlertDialog(
             backgroundColor: OneDarkColors.bg,
-            title: const Text('rclone Browser', style: TextStyle(color: OneDarkColors.fg)),
-            content: const Column(
+            title: Text(
+              'rclone Browser',
+              style: TextStyle(color: OneDarkColors.fg),
+            ),
+            content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Open Termux and run:', style: TextStyle(color: OneDarkColors.fg)),
+                Text(
+                  'Open Termux and run:',
+                  style: TextStyle(color: OneDarkColors.fg),
+                ),
                 SizedBox(height: 8),
-                Text('rclone browser', style: TextStyle(color: OneDarkColors.cyan, fontFamily: 'monospace')),
+                Text(
+                  'rclone browser',
+                  style: TextStyle(
+                    color: OneDarkColors.cyan,
+                    fontFamily: 'monospace',
+                  ),
+                ),
                 SizedBox(height: 12),
-                Text('Or browse a specific remote:', style: TextStyle(color: OneDarkColors.fgDim)),
+                Text(
+                  'Or browse a specific remote:',
+                  style: TextStyle(color: OneDarkColors.fgDim),
+                ),
                 SizedBox(height: 4),
-                Text('rclone browser remote:path', style: TextStyle(color: OneDarkColors.cyan, fontFamily: 'monospace')),
+                Text(
+                  'rclone browser remote:path',
+                  style: TextStyle(
+                    color: OneDarkColors.cyan,
+                    fontFamily: 'monospace',
+                  ),
+                ),
                 SizedBox(height: 12),
-                Text('Prerequisites: Termux + rclone installed.', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                Text(
+                  'Prerequisites: Termux + rclone installed.',
+                  style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+                ),
               ],
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
               FilledButton(
                 onPressed: () async {
                   if (!mounted) return;
                   Navigator.pop(context);
-                  final termuxUri = Uri.parse('https://f-droid.org/packages/com.termux/');
+                  final termuxUri = Uri.parse(
+                    'https://f-droid.org/packages/com.termux/',
+                  );
                   if (await canLaunchUrl(termuxUri)) {
                     await launchUrl(termuxUri);
                   }
@@ -513,7 +652,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open rclone: $e'), backgroundColor: OneDarkColors.red),
+        SnackBar(
+          content: Text('Could not open rclone: $e'),
+          backgroundColor: OneDarkColors.red,
+        ),
       );
     }
   }
@@ -525,9 +667,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const _kVideoPlayer = 'swordfm_preferred_video_player';
   static const _playerOptions = <String, String>{
     'default': 'Default (system)',
-    'vlc':   'VLC',
-    'mpv':   'MPV',
-    'MX':    'MX Player',
+    'vlc': 'VLC',
+    'mpv': 'MPV',
+    'MX': 'MX Player',
   };
 
   Future<String> _loadVideoPlayerPref() async {
@@ -541,9 +683,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   String _videoPlayerSubtitle() {
-    // Default to 'Default (system)' before the async pref is loaded — the
-    // setState in _showVideoPlayerPicker will update it afterwards.
-    return _playerOptions['default']!;
+    // Show the persisted preference once loaded, falling back to system.
+    return _playerOptions[_videoPlayerKey] ?? _playerOptions['default']!;
   }
 
   Future<void> _showVideoPlayerPicker() async {
@@ -553,7 +694,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: const Text('Preferred Video Player', style: TextStyle(color: OneDarkColors.fg)),
+        title: Text(
+          'Preferred Video Player',
+          style: TextStyle(color: OneDarkColors.fg),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: _playerOptions.entries.map((e) {
@@ -561,7 +705,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             return RadioListTile<String>(
               value: e.key,
               groupValue: selected ? e.key : '',
-              title: Text(e.value, style: const TextStyle(color: OneDarkColors.fg)),
+              title: Text(e.value, style: TextStyle(color: OneDarkColors.fg)),
               activeColor: OneDarkColors.cyan,
               dense: true,
               onChanged: (v) {
@@ -574,7 +718,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ).then((selected) async {
       if (selected != null && mounted) {
         await _saveVideoPlayerPref(selected);
-        setState(() {}); // refresh subtitle
+        setState(() => _videoPlayerKey = selected); // refresh subtitle
       }
     });
   }

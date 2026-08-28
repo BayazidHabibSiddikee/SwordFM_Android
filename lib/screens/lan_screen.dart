@@ -39,7 +39,10 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
         _statusMessage = 'Server running at http://$ip:${_server.port}';
       });
     } else {
-      setState(() => _statusMessage = 'Failed to start server. Check network permissions.');
+      setState(
+        () => _statusMessage =
+            'Failed to start server. Check network permissions.',
+      );
     }
   }
 
@@ -78,177 +81,230 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
     return Scaffold(
       backgroundColor: OneDarkColors.bg,
       body: SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Status card
-          Card(
-            color: OneDarkColors.bgDark,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        _server.isRunning ? Icons.wifi : Icons.wifi_off,
-                        color: _server.isRunning ? OneDarkColors.green : OneDarkColors.red,
-                        size: 28,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _server.isRunning ? 'Server Running' : 'Server Stopped',
-                              style: const TextStyle(color: OneDarkColors.fg, fontSize: 16, fontWeight: FontWeight.w600),
-                            ),
-                            if (_server.currentIp != null)
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Status card
+            Card(
+              color: OneDarkColors.bgDark,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          _server.isRunning ? Icons.wifi : Icons.wifi_off,
+                          color: _server.isRunning
+                              ? OneDarkColors.green
+                              : OneDarkColors.red,
+                          size: 28,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
                               Text(
-                                'http://${_server.currentIp}:${_server.port}',
-                                style: const TextStyle(color: OneDarkColors.cyan, fontSize: 13),
+                                _server.isRunning
+                                    ? 'Server Running'
+                                    : 'Server Stopped',
+                                style: TextStyle(
+                                  color: OneDarkColors.fg,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            if (_server.isRunning)
-                              Text(
-                                'PIN: ${_server.pin}  ·  Root: ${_server.shareRoot}',
-                                style: const TextStyle(color: OneDarkColors.amber, fontSize: 11),
-                              ),
-                          ],
+                              if (_server.currentIp != null)
+                                Text(
+                                  'http://${_server.currentIp}:${_server.port}',
+                                  style: TextStyle(
+                                    color: OneDarkColors.cyan,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              if (_server.isRunning)
+                                Text(
+                                  'PIN: ${_server.pin}  ·  Root: ${_server.shareRoot}',
+                                  style: TextStyle(
+                                    color: OneDarkColors.amber,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (_server.isRunning && _server.currentIp != null)
+                      Center(
+                        child: QrImageView(
+                          data: 'http://${_server.currentIp}:${_server.port}',
+                          version: QrVersions.auto,
+                          size: 180.0,
+                          gapless: false,
+                          eyeStyle: QrEyeStyle(color: OneDarkColors.cyan),
+                          dataModuleStyle: QrDataModuleStyle(
+                            color: OneDarkColors.cyan,
+                          ),
                         ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  if (_server.isRunning && _server.currentIp != null)
-                    Center(
-                      child: QrImageView(
-                        data: 'http://${_server.currentIp}:${_server.port}',
-                        version: QrVersions.auto,
-                        size: 180.0,
-                        gapless: false,
-                        eyeStyle: const QrEyeStyle(color: OneDarkColors.cyan),
-                        dataModuleStyle: const QrDataModuleStyle(color: OneDarkColors.cyan),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (!_server.isRunning)
+                          FilledButton(
+                            onPressed: _startServer,
+                            child: const Text('Start Server'),
+                          )
+                        else
+                          FilledButton(
+                            onPressed: _stopServer,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: OneDarkColors.red,
+                            ),
+                            child: const Text('Stop Server'),
+                          ),
+                        OutlinedButton.icon(
+                          onPressed: _server.isRunning ? _rotatePin : null,
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: const Text('Rotate PIN'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _server.isRunning ? _pickShareRoot : null,
+                          icon: const Icon(Icons.folder, size: 16),
+                          label: const Text('Change Root'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _server.isRunning ? _openAccessLog : null,
+                          icon: const Icon(Icons.history, size: 16),
+                          label: Text('Clients (${_server.accessLog.length})'),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final result = await Navigator.push<String>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const QRScannerScreen(),
+                              ),
+                            );
+                            if (result != null && mounted) {
+                              setState(
+                                () => _statusMessage = 'Connected to $result',
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.qr_code_scanner, size: 16),
+                          label: const Text('Scan QR'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Instructions
+            Card(
+              color: OneDarkColors.bgDark,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'How to Use',
+                      style: TextStyle(
+                        color: OneDarkColors.cyan,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      if (!_server.isRunning)
-                        FilledButton(
-                          onPressed: _startServer,
-                          child: const Text('Start Server'),
-                        )
-                      else
-                        FilledButton(
-                          onPressed: _stopServer,
-                          style: FilledButton.styleFrom(backgroundColor: OneDarkColors.red),
-                          child: const Text('Stop Server'),
-                        ),
-                      OutlinedButton.icon(
-                        onPressed: _server.isRunning ? _rotatePin : null,
-                        icon: const Icon(Icons.refresh, size: 16),
-                        label: const Text('Rotate PIN'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _server.isRunning ? _pickShareRoot : null,
-                        icon: const Icon(Icons.folder, size: 16),
-                        label: const Text('Change Root'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: _server.isRunning ? _openAccessLog : null,
-                        icon: const Icon(Icons.history, size: 16),
-                        label: Text('Clients (${_server.accessLog.length})'),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final result = await Navigator.push<String>(
-                            context,
-                            MaterialPageRoute(builder: (_) => const QRScannerScreen()),
-                          );
-                          if (result != null && mounted) {
-                            setState(() => _statusMessage = 'Connected to $result');
-                          }
-                        },
-                        icon: const Icon(Icons.qr_code_scanner, size: 16),
-                        label: const Text('Scan QR'),
-                      ),
-                    ],
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    _instructionStep('1. Start the server above'),
+                    _instructionStep(
+                      '2. Scan the QR code with another device on the same WiFi network',
+                    ),
+                    _instructionStep(
+                      '3. Enter the PIN shown here to authenticate in the browser',
+                    ),
+                    _instructionStep(
+                      '4. Browse, download, and upload files through the web interface',
+                    ),
+                    _instructionStep('5. Stop the server when done sharing'),
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-          // Instructions
-          Card(
-            color: OneDarkColors.bgDark,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'How to Use',
-                    style: TextStyle(color: OneDarkColors.cyan, fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  _instructionStep('1. Start the server above'),
-                  _instructionStep('2. Scan the QR code with another device on the same WiFi network'),
-                  _instructionStep('3. Enter the PIN shown here to authenticate in the browser'),
-                  _instructionStep('4. Browse, download, and upload files through the web interface'),
-                  _instructionStep('5. Stop the server when done sharing'),
-                ],
+            // Security notes
+            Card(
+              color: OneDarkColors.bgDark,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Security',
+                      style: TextStyle(
+                        color: OneDarkColors.green,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _securityNote(
+                      'PIN-gated sessions — all file endpoints require a valid cookie',
+                    ),
+                    _securityNote(
+                      'Upload filenames are sanitized: directory traversal rejected',
+                    ),
+                    _securityNote(
+                      'Downloads stream from disk — no full-file memory buffering',
+                    ),
+                    _securityNote(
+                      'Client IP access log available (tap "Clients" button)',
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-          // Security notes
-          Card(
-            color: OneDarkColors.bgDark,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Security',
-                    style: TextStyle(color: OneDarkColors.green, fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  _securityNote('PIN-gated sessions — all file endpoints require a valid cookie'),
-                  _securityNote('Upload filenames are sanitized: directory traversal rejected'),
-                  _securityNote('Downloads stream from disk — no full-file memory buffering'),
-                  _securityNote('Client IP access log available (tap "Clients" button)'),
-                ],
+            if (_statusMessage != null)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: OneDarkColors.dim,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: OneDarkColors.cyan,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _statusMessage!,
+                        style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          if (_statusMessage != null)
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: OneDarkColors.dim,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, color: OneDarkColors.cyan, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(_statusMessage!, style: const TextStyle(color: OneDarkColors.fg, fontSize: 12))),
-                ],
-              ),
-            ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }
@@ -261,7 +317,12 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
         children: [
           Icon(Icons.check_circle, size: 16, color: OneDarkColors.green),
           const SizedBox(width: 8),
-          Expanded(child: Text(text, style: const TextStyle(color: OneDarkColors.fg, fontSize: 13))),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
+            ),
+          ),
         ],
       ),
     );
@@ -275,7 +336,12 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
         children: [
           Icon(Icons.shield, size: 14, color: OneDarkColors.cyan),
           const SizedBox(width: 8),
-          Expanded(child: Text(text, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12))),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+            ),
+          ),
         ],
       ),
     );
@@ -314,9 +380,15 @@ class _ShareRootPickerScreenState extends State<ShareRootPickerScreen> {
   Widget _buildItem(String name, String path, {required bool isDir}) {
     final icon = isDir ? Icons.folder : Icons.insert_drive_file;
     return ListTile(
-      leading: Icon(icon, color: isDir ? OneDarkColors.amber : OneDarkColors.fg),
-      title: Text(name, style: const TextStyle(color: OneDarkColors.fg)),
-      subtitle: Text(path, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+      leading: Icon(
+        icon,
+        color: isDir ? OneDarkColors.amber : OneDarkColors.fg,
+      ),
+      title: Text(name, style: TextStyle(color: OneDarkColors.fg)),
+      subtitle: Text(
+        path,
+        style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+      ),
       onTap: () {
         if (isDir) _navigate(path);
       },
@@ -328,9 +400,7 @@ class _ShareRootPickerScreenState extends State<ShareRootPickerScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pick Share Root'),
-        actions: [
-          TextButton(onPressed: _confirm, child: const Text('Select')),
-        ],
+        actions: [TextButton(onPressed: _confirm, child: const Text('Select'))],
       ),
       body: Column(
         children: [
@@ -341,13 +411,14 @@ class _ShareRootPickerScreenState extends State<ShareRootPickerScreen> {
                 Expanded(
                   child: SelectableText(
                     _currentPath,
-                    style: const TextStyle(color: OneDarkColors.cyan, fontSize: 12),
+                    style: TextStyle(color: OneDarkColors.cyan, fontSize: 12),
                   ),
                 ),
                 if (_currentPath != '/')
                   IconButton(
                     icon: const Icon(Icons.arrow_upward, size: 18),
-                    onPressed: () => _navigate(Directory(_currentPath).parent.path),
+                    onPressed: () =>
+                        _navigate(Directory(_currentPath).parent.path),
                   ),
               ],
             ),
@@ -356,26 +427,44 @@ class _ShareRootPickerScreenState extends State<ShareRootPickerScreen> {
             child: FutureBuilder<Directory>(
               future: Future.value(Directory(_currentPath)),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                if (!snapshot.hasData)
+                  return const Center(child: CircularProgressIndicator());
                 final dir = snapshot.data!;
                 return FutureBuilder<List<DirEntry>>(
                   future: _listEntries(dir),
                   builder: (context, snap) {
-                    if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+                    if (!snap.hasData)
+                      return const Center(child: CircularProgressIndicator());
                     final entries = snap.data!;
                     // Sort: dirs first, then files alphabetically.
-                    entries.sort((a, b) => a.isDir == b.isDir
-                        ? a.name.compareTo(b.name)
-                        : a.isDir ? -1 : 1);
+                    entries.sort(
+                      (a, b) => a.isDir == b.isDir
+                          ? a.name.compareTo(b.name)
+                          : a.isDir
+                          ? -1
+                          : 1,
+                    );
                     return ListView.separated(
                       itemCount: entries.length + 1,
                       separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         if (index == 0) {
                           return ListTile(
-                            leading: const Icon(Icons.home, color: OneDarkColors.cyan),
-                            title: const Text('Home', style: TextStyle(color: OneDarkColors.fg)),
-                            subtitle: Text(AppPaths.home, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                            leading: Icon(
+                              Icons.home,
+                              color: OneDarkColors.cyan,
+                            ),
+                            title: Text(
+                              'Home',
+                              style: TextStyle(color: OneDarkColors.fg),
+                            ),
+                            subtitle: Text(
+                              AppPaths.home,
+                              style: TextStyle(
+                                color: OneDarkColors.fgDim,
+                                fontSize: 11,
+                              ),
+                            ),
                             onTap: () => _navigate(AppPaths.home),
                           );
                         }
@@ -396,11 +485,15 @@ class _ShareRootPickerScreenState extends State<ShareRootPickerScreen> {
   Future<List<DirEntry>> _listEntries(Directory dir) async {
     try {
       final entities = await dir.list().toList();
-      return entities.map((e) => DirEntry(
-        name: e.path.split('/').last,
-        path: e.path,
-        isDir: e is Directory,
-      )).toList();
+      return entities
+          .map(
+            (e) => DirEntry(
+              name: e.path.split('/').last,
+              path: e.path,
+              isDir: e is Directory,
+            ),
+          )
+          .toList();
     } catch (_) {
       return [];
     }
@@ -429,23 +522,45 @@ class _AccessLogDialog extends StatelessWidget {
       content: SizedBox(
         width: double.maxFinite,
         child: entries.isEmpty
-            ? const Text('No requests yet.', style: TextStyle(color: OneDarkColors.fgDim))
+            ? Text(
+                'No requests yet.',
+                style: TextStyle(color: OneDarkColors.fgDim),
+              )
             : ListView.builder(
                 shrinkWrap: true,
                 itemCount: entries.length,
                 itemBuilder: (_, i) {
-                  final e = entries[i];
-                  final ts = e.ts is DateTime ? (e.ts as DateTime).toString().substring(11, 19) : '?';
+                  final Map<String, dynamic> e =
+                      entries[i] as Map<String, dynamic>;
+                  final ip = (e['ip'] as String?) ?? 'unknown';
+                  final path = (e['path'] as String?) ?? '';
+                  final query = (e['query'] as String?) ?? '';
+                  final rawTs = e['ts'];
+                  final ts = rawTs is DateTime
+                      ? rawTs.toString().substring(11, 19)
+                      : '?';
                   return ListTile(
                     dense: true,
-                    title: Text('${e.ip}  →  ${e.path}', style: const TextStyle(color: OneDarkColors.fg, fontSize: 12)),
-                    subtitle: Text(e.query.isNotEmpty ? '${e.query}  $ts' : ts, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                    title: Text(
+                      '$ip  →  $path',
+                      style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
+                    ),
+                    subtitle: Text(
+                      query.isNotEmpty ? '$query  $ts' : ts,
+                      style: TextStyle(
+                        color: OneDarkColors.fgDim,
+                        fontSize: 11,
+                      ),
+                    ),
                   );
                 },
               ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
       ],
     );
   }

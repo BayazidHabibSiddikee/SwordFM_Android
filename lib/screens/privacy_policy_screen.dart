@@ -10,19 +10,32 @@ class PrivacyPolicyScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: OneDarkColors.bg,
       appBar: AppBar(
-        title: const Text('Privacy Policy', style: TextStyle(color: OneDarkColors.fg)),
+        title: Text(
+          'Privacy Policy',
+          style: TextStyle(color: OneDarkColors.fg),
+        ),
         backgroundColor: OneDarkColors.bgDark,
         foregroundColor: OneDarkColors.fg,
-        iconTheme: const IconThemeData(color: OneDarkColors.fg),
+        iconTheme: IconThemeData(color: OneDarkColors.fg),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('SwordFM Android', style: TextStyle(color: OneDarkColors.cyan, fontSize: 22, fontWeight: FontWeight.bold)),
+            Text(
+              'SwordFM Android',
+              style: TextStyle(
+                color: OneDarkColors.cyan,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 8),
-            const Text('Last updated: August 2026', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
+            Text(
+              'Last updated: August 2026',
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+            ),
             const SizedBox(height: 24),
             _section('1. Information We Collect', [
               'Local file access: Files you choose to browse or share are accessed locally on your device. We do not upload or transmit your personal files to any server.',
@@ -70,7 +83,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
             Center(
               child: Text(
                 'This privacy policy is subject to change. Please review it periodically.',
-                style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+                style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
                 textAlign: TextAlign.center,
               ),
             ),
@@ -84,18 +97,32 @@ class PrivacyPolicyScreen extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: const TextStyle(color: OneDarkColors.cyan, fontSize: 15, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 8),
-        ...bullets.map((b) => Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('• ', style: TextStyle(color: OneDarkColors.fgDim)),
-              Expanded(child: Text(b, style: const TextStyle(color: OneDarkColors.fg, fontSize: 13))),
-            ],
+        Text(
+          title,
+          style: TextStyle(
+            color: OneDarkColors.cyan,
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
           ),
-        )),
+        ),
+        const SizedBox(height: 8),
+        ...bullets.map(
+          (b) => Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('• ', style: TextStyle(color: OneDarkColors.fgDim)),
+                Expanded(
+                  child: Text(
+                    b,
+                    style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }

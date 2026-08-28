@@ -23,8 +23,8 @@ class GraphNode {
     required this.depth,
     Offset? position,
     Offset? velocity,
-  })  : position = position ?? Offset.zero,
-        velocity = velocity ?? Offset.zero;
+  }) : position = position ?? Offset.zero,
+       velocity = velocity ?? Offset.zero;
 }
 
 /// An edge connecting two [GraphNode]s.
@@ -84,17 +84,19 @@ class _FolderGraphScreenState extends State<FolderGraphScreen> {
       Future<void> walk(Directory dir, int depth) async {
         final parentPath = dir.path;
         final parentId = _stableId(parentPath);
-        nodes.add(GraphNode(
-          id: parentId,
-          label: parentPath.split(Platform.pathSeparator).last.isEmpty
-              ? parentPath
-              : parentPath.split(Platform.pathSeparator).last,
-          path: parentPath,
-          isDirectory: true,
-          size: 0,
-          depth: depth,
-          position: _initialPosition(nodes.length, depth),
-        ));
+        nodes.add(
+          GraphNode(
+            id: parentId,
+            label: parentPath.split(Platform.pathSeparator).last.isEmpty
+                ? parentPath
+                : parentPath.split(Platform.pathSeparator).last,
+            path: parentPath,
+            isDirectory: true,
+            size: 0,
+            depth: depth,
+            position: _initialPosition(nodes.length, depth),
+          ),
+        );
 
         try {
           await for (final entity in dir.list(followLinks: false)) {
@@ -198,18 +200,20 @@ class _FolderGraphScreenState extends State<FolderGraphScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? _buildError()
-              : _nodes.isEmpty
-                  ? const Center(
-                      child: Text('No folders found',
-                          style: TextStyle(color: OneDarkColors.fgDim)),
-                    )
-                  : Column(
-                      children: [
-                        _buildToolbar(),
-                        Expanded(child: _buildGraphCanvas()),
-                      ],
-                    ),
+          ? _buildError()
+          : _nodes.isEmpty
+          ? Center(
+              child: Text(
+                'No folders found',
+                style: TextStyle(color: OneDarkColors.fgDim),
+              ),
+            )
+          : Column(
+              children: [
+                _buildToolbar(),
+                Expanded(child: _buildGraphCanvas()),
+              ],
+            ),
     );
   }
 
@@ -218,13 +222,15 @@ class _FolderGraphScreenState extends State<FolderGraphScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.error, color: OneDarkColors.red, size: 56),
+          Icon(Icons.error, color: OneDarkColors.red, size: 56),
           const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Text(_error!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: OneDarkColors.fgDim)),
+            child: Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: OneDarkColors.fgDim),
+            ),
           ),
           const SizedBox(height: 16),
           FilledButton(onPressed: _buildGraph, child: const Text('Retry')),
@@ -244,8 +250,10 @@ class _FolderGraphScreenState extends State<FolderGraphScreen> {
             onPressed: () =>
                 setState(() => _zoom = (_zoom - 0.1).clamp(0.5, 3.0)),
           ),
-          Text('${(_zoom * 100).round()}%',
-              style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
+          Text(
+            '${(_zoom * 100).round()}%',
+            style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+          ),
           IconButton(
             icon: const Icon(Icons.zoom_in),
             tooltip: 'Zoom In',
@@ -255,7 +263,7 @@ class _FolderGraphScreenState extends State<FolderGraphScreen> {
           const Spacer(),
           Text(
             '${_nodes.length} folders · ${_selectedNodeId != null ? '1 selected' : 'tap a node'}',
-            style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+            style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
           ),
         ],
       ),

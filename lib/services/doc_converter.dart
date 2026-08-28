@@ -45,7 +45,6 @@ class DocConverter {
     return outPath;
   }
 
-
   /// Converts a file to plain text (Markdown stripped).
   static Future<String?> toText(String sourcePath) async {
     if (!canConvert(sourcePath)) return null;
@@ -87,7 +86,9 @@ class DocConverter {
 
     void flushCode() {
       if (codeBuffer.isEmpty) return;
-      out.add('<pre><code>${codeBuffer.map(_escapeHtml).join('\n')}</code></pre>');
+      out.add(
+        '<pre><code>${codeBuffer.map(_escapeHtml).join('\n')}</code></pre>',
+      );
       codeBuffer.clear();
     }
 
@@ -146,8 +147,7 @@ class DocConverter {
       if (RegExp(r'^\s*[-*+]\s+').hasMatch(line)) {
         flushCode();
         final buf = <String>[];
-        while (i < lines.length &&
-            RegExp(r'^\s*[-*+]\s+').hasMatch(lines[i])) {
+        while (i < lines.length && RegExp(r'^\s*[-*+]\s+').hasMatch(lines[i])) {
           final item = lines[i].replaceFirst(RegExp(r'^\s*[-*+]\s+'), '');
           buf.add('<li>${_inline(item)}</li>');
           i++;
@@ -160,8 +160,7 @@ class DocConverter {
       if (RegExp(r'^\s*\d+\.\s+').hasMatch(line)) {
         flushCode();
         final buf = <String>[];
-        while (i < lines.length &&
-            RegExp(r'^\s*\d+\.\s+').hasMatch(lines[i])) {
+        while (i < lines.length && RegExp(r'^\s*\d+\.\s+').hasMatch(lines[i])) {
           final item = lines[i].replaceFirst(RegExp(r'^\s*\d+\.\s+'), '');
           buf.add('<li>${_inline(item)}</li>');
           i++;
@@ -200,53 +199,70 @@ class DocConverter {
     // Remove fenced code blocks but keep content
     text = text.replaceAll(RegExp(r'```[\s\S]*?```'), '');
     // Headings
-    text = text.replaceAllMapped(RegExp(r'^#{1,6}\s+(.+)$', multiLine: true),
-        (m) => m.group(1)!);
+    text = text.replaceAllMapped(
+      RegExp(r'^#{1,6}\s+(.+)$', multiLine: true),
+      (m) => m.group(1)!,
+    );
     // Bold / italic
     text = text.replaceAllMapped(
-        RegExp(r'\*\*([^*]+)\*\*'), (m) => m.group(1)!);
-    text = text.replaceAllMapped(
-        RegExp(r'\*([^*]+)\*'), (m) => m.group(1)!);
-    text = text.replaceAllMapped(
-        RegExp(r'__([^_]+)__'), (m) => m.group(1)!);
-    text = text.replaceAllMapped(
-        RegExp(r'_([^_]+)_'), (m) => m.group(1)!);
+      RegExp(r'\*\*([^*]+)\*\*'),
+      (m) => m.group(1)!,
+    );
+    text = text.replaceAllMapped(RegExp(r'\*([^*]+)\*'), (m) => m.group(1)!);
+    text = text.replaceAllMapped(RegExp(r'__([^_]+)__'), (m) => m.group(1)!);
+    text = text.replaceAllMapped(RegExp(r'_([^_]+)_'), (m) => m.group(1)!);
     // Inline code
-    text = text.replaceAllMapped(
-        RegExp(r'`([^`]+)`'), (m) => m.group(1)!);
+    text = text.replaceAllMapped(RegExp(r'`([^`]+)`'), (m) => m.group(1)!);
     // Links [text](url) -> text (url)
-    text = text.replaceAllMapped(RegExp(r'\[([^\]]+)\]\(([^)]+)\)'),
-        (m) => '${m.group(1)} (${m.group(2)})');
+    text = text.replaceAllMapped(
+      RegExp(r'\[([^\]]+)\]\(([^)]+)\)'),
+      (m) => '${m.group(1)} (${m.group(2)})',
+    );
     // Images ![](url) -> url
-    text = text.replaceAllMapped(RegExp(r'!\[[^\]]*\]\(([^)]+)\)'),
-        (m) => m.group(1)!);
+    text = text.replaceAllMapped(
+      RegExp(r'!\[[^\]]*\]\(([^)]+)\)'),
+      (m) => m.group(1)!,
+    );
     // List markers
     text = text.replaceAll(RegExp(r'^\s*[-*+]\s+', multiLine: true), '• ');
     text = text.replaceAll(RegExp(r'^\s*\d+\.\s+', multiLine: true), '');
     // Blockquote
     text = text.replaceAll(RegExp(r'^>\s?', multiLine: true), '');
     // Horizontal rules
-    text = text.replaceAll(RegExp(r'^\s*(-{3,}|\*{3,}|_{3,})\s*$', multiLine: true), '');
+    text = text.replaceAll(
+      RegExp(r'^\s*(-{3,}|\*{3,}|_{3,})\s*$', multiLine: true),
+      '',
+    );
     return text.trim();
   }
 
   static String _inline(String text) {
     var out = _escapeHtml(text);
     // Images first
-    out = out.replaceAllMapped(RegExp(r'!\[([^\]]*)\]\(([^)]+)\)'),
-        (m) => '<img src="${m.group(2)}" alt="${m.group(1)}">');
+    out = out.replaceAllMapped(
+      RegExp(r'!\[([^\]]*)\]\(([^)]+)\)'),
+      (m) => '<img src="${m.group(2)}" alt="${m.group(1)}">',
+    );
     // Links
-    out = out.replaceAllMapped(RegExp(r'\[([^\]]+)\]\(([^)]+)\)'),
-        (m) => '<a href="${m.group(2)}">${m.group(1)}</a>');
+    out = out.replaceAllMapped(
+      RegExp(r'\[([^\]]+)\]\(([^)]+)\)'),
+      (m) => '<a href="${m.group(2)}">${m.group(1)}</a>',
+    );
     // Inline code
-    out = out.replaceAllMapped(RegExp(r'`([^`]+)`'),
-        (m) => '<code>${m.group(1)}</code>');
+    out = out.replaceAllMapped(
+      RegExp(r'`([^`]+)`'),
+      (m) => '<code>${m.group(1)}</code>',
+    );
     // Bold
-    out = out.replaceAllMapped(RegExp(r'\*\*([^*]+)\*\*'),
-        (m) => '<strong>${m.group(1)}</strong>');
+    out = out.replaceAllMapped(
+      RegExp(r'\*\*([^*]+)\*\*'),
+      (m) => '<strong>${m.group(1)}</strong>',
+    );
     // Italic
-    out = out.replaceAllMapped(RegExp(r'\*([^*]+)\*'),
-        (m) => '<em>${m.group(1)}</em>');
+    out = out.replaceAllMapped(
+      RegExp(r'\*([^*]+)\*'),
+      (m) => '<em>${m.group(1)}</em>',
+    );
     return out;
   }
 
@@ -264,7 +280,7 @@ class DocConverter {
     return ['.md', '.markdown', '.txt', '.html', '.csv', '.rst'].contains(ext);
   }
 
-    /// Lists available output formats for a given file.
+  /// Lists available output formats for a given file.
   static List<String> getAvailableFormats(String path) {
     if (!canConvert(path)) return [];
     return ['PDF', 'DOCX', 'HTML', 'TXT'];
@@ -301,7 +317,9 @@ class DocConverter {
 
     void flushCode() {
       if (codeBuf.isNotEmpty) {
-        nodes.add(_MdNode(kind: 'code', text: codeBuf.join('\n'), lang: codeLang));
+        nodes.add(
+          _MdNode(kind: 'code', text: codeBuf.join('\n'), lang: codeLang),
+        );
       }
       codeBuf.clear();
       codeLang = '';
@@ -335,11 +353,13 @@ class DocConverter {
       final h = RegExp(r'^(#{1,6})\s+(.+)$').firstMatch(line);
       if (h != null) {
         flushPara();
-        nodes.add(_MdNode(
-          kind: 'heading',
-          text: h.group(2)!,
-          level: h.group(1)!.length,
-        ));
+        nodes.add(
+          _MdNode(
+            kind: 'heading',
+            text: h.group(2)!,
+            level: h.group(1)!.length,
+          ),
+        );
         i++;
         continue;
       }
@@ -369,8 +389,7 @@ class DocConverter {
       if (RegExp(r'^\s*[-*+]\s+').hasMatch(line)) {
         flushPara();
         final buf = <String>[];
-        while (i < lines.length &&
-            RegExp(r'^\s*[-*+]\s+').hasMatch(lines[i])) {
+        while (i < lines.length && RegExp(r'^\s*[-*+]\s+').hasMatch(lines[i])) {
           buf.add(lines[i].replaceFirst(RegExp(r'^\s*[-*+]\s+'), '').trim());
           i++;
         }
@@ -382,8 +401,7 @@ class DocConverter {
       if (RegExp(r'^\s*\d+\.\s+').hasMatch(line)) {
         flushPara();
         final buf = <String>[];
-        while (i < lines.length &&
-            RegExp(r'^\s*\d+\.\s+').hasMatch(lines[i])) {
+        while (i < lines.length && RegExp(r'^\s*\d+\.\s+').hasMatch(lines[i])) {
           buf.add(lines[i].replaceFirst(RegExp(r'^\s*\d+\.\s+'), '').trim());
           i++;
         }
@@ -402,7 +420,7 @@ class DocConverter {
       paraBuf.add(line);
       i++;
     }
-        flushPara();
+    flushPara();
     flushCode();
     return nodes;
   }
@@ -483,10 +501,12 @@ class DocConverter {
           break;
       }
     }
-    doc.addPage(pw.MultiPage(
-      pageFormat: PdfPageFormat.a4,
-      build: (pw.Context context) => widgets,
-    ));
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) => widgets,
+      ),
+    );
     return doc.save();
   }
 
@@ -521,7 +541,9 @@ class DocConverter {
         var number = 0;
         for (final item in n.items) {
           number++;
-          buffer.write('<w:p><w:r><w:t>$number. ${esc(item)}</w:t></w:r></w:p>');
+          buffer.write(
+            '<w:p><w:r><w:t>$number. ${esc(item)}</w:t></w:r></w:p>',
+          );
         }
         break;
       case 'blockquote':
@@ -556,7 +578,10 @@ class DocConverter {
     );
     archive.addFile(ArchiveFile.bytes('_rels/.rels', utf8.encode(_kDocxRels)));
     archive.addFile(
-      ArchiveFile.bytes('word/_rels/document.xml.rels', utf8.encode(_kDocxDocRels)),
+      ArchiveFile.bytes(
+        'word/_rels/document.xml.rels',
+        utf8.encode(_kDocxDocRels),
+      ),
     );
     archive.addFile(
       ArchiveFile.bytes('word/document.xml', utf8.encode(buffer.toString())),
@@ -589,11 +614,14 @@ class _MdNode {
 // Minimal OOXML (DOCX) package parts. A .docx is a ZIP containing these XML
 // files; together they form a valid, openable Word document.
 // ---------------------------------------------------------------------------
-const String _kDocxContentTypes = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const String _kDocxContentTypes =
+    '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>''';
 
-const String _kDocxRels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const String _kDocxRels =
+    '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>''';
 
-const String _kDocxDocRels = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const String _kDocxDocRels =
+    '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>''';

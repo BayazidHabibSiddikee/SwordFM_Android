@@ -7,6 +7,7 @@ import '../services/archive_service.dart';
 import '../services/open_with_service.dart';
 import '../services/share_service.dart';
 import '../services/terminal_service.dart';
+import '../screens/lan_screen.dart';
 import 'convert_dialog.dart';
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
@@ -222,6 +223,10 @@ class FileBrowser extends StatefulWidget {
   /// Called when the mark count changes (for status bar indicator).
   final ValueChanged<int>? onMarksChanged;
 
+  /// Called when the number of items in the current directory changes
+  /// (for the sidebar item-count status).
+  final ValueChanged<int>? onItemCountChanged;
+
   const FileBrowser({
     super.key,
     required this.initialPath,
@@ -230,6 +235,7 @@ class FileBrowser extends StatefulWidget {
     this.onClipboardChanged,
     this.onPathChanged,
     this.onMarksChanged,
+    this.onItemCountChanged,
   });
 
   @override
@@ -376,7 +382,7 @@ class _FileBrowserState extends State<FileBrowser> {
       if (isBlockedPath(path)) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text('System directory — navigation blocked'),
               backgroundColor: OneDarkColors.amber,
             ),
@@ -430,6 +436,7 @@ class _FileBrowserState extends State<FileBrowser> {
         _isLoading = false;
       });
     }
+    widget.onItemCountChanged?.call(items.length);
   }
 
   Future<int> _computeFolderSize(FileItem folder) async {
@@ -828,29 +835,31 @@ class _FileBrowserState extends State<FileBrowser> {
 
   void _pasteToCurrent() {
     if (!FileUtils.hasClipboard) return;
-    FileUtils.paste(_currentPath).then((_) {
-      if (!mounted) return;
-      // A 'cut' paste consumes the clipboard; a 'copy' paste keeps it.
-      _setClipboardInfo(
-        FileUtils.hasClipboard
-            ? ClipboardInfo(
-                hasClipboard: true,
-                operation: FileUtils.clipboardOperation ?? 'copy',
-                count: FileUtils.clipboardCount,
-              )
-            : const ClipboardInfo.empty(),
-      );
-      _clearMarks(); // auto-clear marks after paste (matching Linux SwordFM)
-      _loadDirectory();
-    }).catchError((Object e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Paste failed: $e'),
-          backgroundColor: OneDarkColors.red,
-        ),
-      );
-    });
+    FileUtils.paste(_currentPath)
+        .then((_) {
+          if (!mounted) return;
+          // A 'cut' paste consumes the clipboard; a 'copy' paste keeps it.
+          _setClipboardInfo(
+            FileUtils.hasClipboard
+                ? ClipboardInfo(
+                    hasClipboard: true,
+                    operation: FileUtils.clipboardOperation ?? 'copy',
+                    count: FileUtils.clipboardCount,
+                  )
+                : const ClipboardInfo.empty(),
+          );
+          _clearMarks(); // auto-clear marks after paste (matching Linux SwordFM)
+          _loadDirectory();
+        })
+        .catchError((Object e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Paste failed: $e'),
+              backgroundColor: OneDarkColors.red,
+            ),
+          );
+        });
   }
 
   /// Opens a Termux session at [path] (Linux F4 equivalent). Shows install
@@ -862,28 +871,25 @@ class _FileBrowserState extends State<FileBrowser> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: const Text(
-          'Open Terminal',
-          style: TextStyle(color: OneDarkColors.fg),
-        ),
+        title: Text('Open Terminal', style: TextStyle(color: OneDarkColors.fg)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'This feature uses Termux. Open Termux and run:',
               style: TextStyle(color: OneDarkColors.fg),
             ),
             const SizedBox(height: 8),
             Text(
               "cd '$path' && bash",
-              style: const TextStyle(
+              style: TextStyle(
                 color: OneDarkColors.cyan,
                 fontFamily: 'monospace',
               ),
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Prerequisites: Termux installed with "Allow external apps" enabled.',
               style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
             ),
@@ -919,14 +925,11 @@ class _FileBrowserState extends State<FileBrowser> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: const Text(
-          'Go to path',
-          style: TextStyle(color: OneDarkColors.fg),
-        ),
+        title: Text('Go to path', style: TextStyle(color: OneDarkColors.fg)),
         content: TextField(
           controller: controller,
           autofocus: true,
-          style: const TextStyle(color: OneDarkColors.fg),
+          style: TextStyle(color: OneDarkColors.fg),
           decoration: const InputDecoration(
             labelText: 'Path',
             border: OutlineInputBorder(),
@@ -961,7 +964,7 @@ class _FileBrowserState extends State<FileBrowser> {
         backgroundColor: OneDarkColors.bg,
         title: Text(
           'Delete ${paths.length} items?',
-          style: const TextStyle(color: OneDarkColors.fg),
+          style: TextStyle(color: OneDarkColors.fg),
         ),
         actions: [
           TextButton(
@@ -974,10 +977,7 @@ class _FileBrowserState extends State<FileBrowser> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, 'delete'),
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: OneDarkColors.red),
-            ),
+            child: Text('Delete', style: TextStyle(color: OneDarkColors.red)),
           ),
         ],
       ),
@@ -995,7 +995,7 @@ class _FileBrowserState extends State<FileBrowser> {
       if (mounted) _loadDirectory();
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text('Moved to trash'),
             backgroundColor: OneDarkColors.amber,
           ),
@@ -1015,20 +1015,48 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   /// Shares [paths] (files only) through the Android share sheet.
+  /// Directories are filtered out — the share sheet cannot share a folder.
   Future<void> _sharePaths(List<String> paths) async {
-    final ok = await ShareService.share(paths);
+    final files = <String>[];
+    for (final path in paths) {
+      try {
+        if (await FileSystemEntity.type(path) == FileSystemEntityType.file) {
+          files.add(path);
+        }
+      } catch (_) {}
+    }
+    if (files.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Only files can be shared via the share sheet'),
+            backgroundColor: OneDarkColors.amber,
+          ),
+        );
+      }
+      return;
+    }
+    final ok = await ShareService.share(files);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          ok ? 'Sharing ${paths.length} item(s)…' : 'Share not available here',
+          ok ? 'Sharing ${files.length} item(s)…' : 'Share not available here',
         ),
         backgroundColor: ok ? OneDarkColors.cyan : OneDarkColors.red,
       ),
     );
   }
 
-  /// Shares a folder over LAN using the standard _sharePaths flow.
+  /// Shares a folder over LAN: opens the LAN screen with this folder as
+  /// the share root, so another device can browse/download it in a browser.
+  void _shareFolderViaLan(String path) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => LANSharingScreen(initialShareRoot: path),
+      ),
+    );
+  }
 
   void _copySelected() {
     final paths = _actionPaths;
@@ -1158,7 +1186,7 @@ class _FileBrowserState extends State<FileBrowser> {
 
           return AlertDialog(
             backgroundColor: OneDarkColors.bg,
-            title: const Text(
+            title: Text(
               'Compress Selection',
               style: TextStyle(color: OneDarkColors.fg),
             ),
@@ -1169,14 +1197,14 @@ class _FileBrowserState extends State<FileBrowser> {
                 TextField(
                   controller: controller,
                   autofocus: true,
-                  style: const TextStyle(color: OneDarkColors.fg),
+                  style: TextStyle(color: OneDarkColors.fg),
                   decoration: const InputDecoration(
                     labelText: 'Archive name',
                     border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   'Format',
                   style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
                 ),
@@ -1250,13 +1278,10 @@ class _FileBrowserState extends State<FileBrowser> {
         context: context,
         builder: (_) => AlertDialog(
           backgroundColor: OneDarkColors.bg,
-          title: const Text(
-            'Overwrite?',
-            style: TextStyle(color: OneDarkColors.fg),
-          ),
+          title: Text('Overwrite?', style: TextStyle(color: OneDarkColors.fg)),
           content: Text(
             '"$name" already exists. Overwrite?',
-            style: const TextStyle(color: OneDarkColors.fg),
+            style: TextStyle(color: OneDarkColors.fg),
           ),
           actions: [
             TextButton(
@@ -1330,7 +1355,7 @@ class _FileBrowserState extends State<FileBrowser> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: Text(item.name, style: const TextStyle(color: OneDarkColors.fg)),
+        title: Text(item.name, style: TextStyle(color: OneDarkColors.fg)),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1376,14 +1401,11 @@ class _FileBrowserState extends State<FileBrowser> {
                 width: 80,
                 child: Text(
                   'Size',
-                  style: const TextStyle(
-                    color: OneDarkColors.fgDim,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
                 ),
               ),
               Expanded(
-                child: const Row(
+                child: Row(
                   children: [
                     SizedBox(
                       width: 10,
@@ -1413,16 +1435,13 @@ class _FileBrowserState extends State<FileBrowser> {
               width: 80,
               child: Text(
                 'Size',
-                style: const TextStyle(
-                  color: OneDarkColors.fgDim,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
               ),
             ),
             Expanded(
               child: Text(
                 _formatBytes(size),
-                style: const TextStyle(color: OneDarkColors.fg, fontSize: 12),
+                style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
               ),
             ),
           ],
@@ -1449,13 +1468,13 @@ class _FileBrowserState extends State<FileBrowser> {
             width: 80,
             child: Text(
               label,
-              style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(color: OneDarkColors.fg, fontSize: 12),
+              style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
             ),
           ),
         ],
@@ -1498,7 +1517,7 @@ class _FileBrowserState extends State<FileBrowser> {
           _menuItem(
             'Share via LAN…',
             Icons.wifi,
-            () => _sharePaths([item.path]),
+            () => _shareFolderViaLan(item.path),
           )
         else
           _menuItem('Share…', Icons.share, () => _sharePaths([item.path])),
@@ -1511,11 +1530,7 @@ class _FileBrowserState extends State<FileBrowser> {
         _menuItem('Copy', Icons.copy, () {
           FileUtils.setClipboard(item.path, 'copy');
           _setClipboardInfo(
-            ClipboardInfo(
-              hasClipboard: true,
-              operation: 'copy',
-              count: 1,
-            ),
+            ClipboardInfo(hasClipboard: true, operation: 'copy', count: 1),
           );
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -1527,11 +1542,7 @@ class _FileBrowserState extends State<FileBrowser> {
         _menuItem('Cut', Icons.content_cut, () {
           FileUtils.setClipboard(item.path, 'cut');
           _setClipboardInfo(
-            ClipboardInfo(
-              hasClipboard: true,
-              operation: 'cut',
-              count: 1,
-            ),
+            ClipboardInfo(hasClipboard: true, operation: 'cut', count: 1),
           );
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -1545,7 +1556,19 @@ class _FileBrowserState extends State<FileBrowser> {
             final destDir = item.isDirectory ? item.path : p.dirname(item.path);
             try {
               await FileUtils.paste(destDir);
-              if (mounted) _loadDirectory();
+              if (mounted) {
+                // A 'cut' paste consumes the clipboard; 'copy' keeps it.
+                _setClipboardInfo(
+                  FileUtils.hasClipboard
+                      ? ClipboardInfo(
+                          hasClipboard: true,
+                          operation: FileUtils.clipboardOperation ?? 'copy',
+                          count: FileUtils.clipboardCount,
+                        )
+                      : const ClipboardInfo.empty(),
+                );
+                _loadDirectory();
+              }
             } catch (e) {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -1624,7 +1647,7 @@ class _FileBrowserState extends State<FileBrowser> {
         children: [
           Icon(icon, size: 18, color: OneDarkColors.fg),
           const SizedBox(width: 12),
-          Text(title, style: const TextStyle(color: OneDarkColors.fg)),
+          Text(title, style: TextStyle(color: OneDarkColors.fg)),
         ],
       ),
     );
@@ -1725,7 +1748,7 @@ class _FileBrowserState extends State<FileBrowser> {
             await Clipboard.setData(ClipboardData(text: item.path));
             if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
+              SnackBar(
                 content: Text('Path copied'),
                 backgroundColor: OneDarkColors.green,
               ),
@@ -1767,15 +1790,15 @@ class _FileBrowserState extends State<FileBrowser> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: const Text('Rename', style: TextStyle(color: OneDarkColors.fg)),
+        title: Text('Rename', style: TextStyle(color: OneDarkColors.fg)),
         content: TextField(
           controller: controller,
           focusNode: focusNode,
-          style: const TextStyle(color: OneDarkColors.fg),
+          style: TextStyle(color: OneDarkColors.fg),
           decoration: InputDecoration(
             border: const OutlineInputBorder(),
             suffixText: ext.isNotEmpty ? ext : null,
-            suffixStyle: const TextStyle(color: OneDarkColors.fgDim),
+            suffixStyle: TextStyle(color: OneDarkColors.fgDim),
           ),
         ),
         actions: [
@@ -1818,7 +1841,7 @@ class _FileBrowserState extends State<FileBrowser> {
         backgroundColor: OneDarkColors.bg,
         title: Text(
           'Delete "${item.name}"?',
-          style: const TextStyle(color: OneDarkColors.fg),
+          style: TextStyle(color: OneDarkColors.fg),
         ),
         actions: [
           TextButton(
@@ -1831,10 +1854,7 @@ class _FileBrowserState extends State<FileBrowser> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, 'delete'),
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: OneDarkColors.red),
-            ),
+            child: Text('Delete', style: TextStyle(color: OneDarkColors.red)),
           ),
         ],
       ),
@@ -1843,19 +1863,23 @@ class _FileBrowserState extends State<FileBrowser> {
       try {
         await FileUtils.moveToTrash(item.path);
       } catch (_) {}
+      _markedPaths.remove(item.path);
+      _notifyMarksChanged();
       if (mounted) {
         _loadDirectory();
         _exitSelectMode();
       }
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text('Moved to trash'),
             backgroundColor: OneDarkColors.amber,
           ),
         );
     } else if (choice == 'delete' && mounted) {
       await FileUtils.delete(item.path);
+      _markedPaths.remove(item.path);
+      _notifyMarksChanged();
       if (mounted) {
         _loadDirectory();
         _exitSelectMode();
@@ -1869,13 +1893,10 @@ class _FileBrowserState extends State<FileBrowser> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: const Text(
-          'New Folder',
-          style: TextStyle(color: OneDarkColors.fg),
-        ),
+        title: Text('New Folder', style: TextStyle(color: OneDarkColors.fg)),
         content: TextField(
           controller: controller,
-          style: const TextStyle(color: OneDarkColors.fg),
+          style: TextStyle(color: OneDarkColors.fg),
           autofocus: true,
           decoration: const InputDecoration(
             labelText: 'Folder name',
@@ -1920,13 +1941,10 @@ class _FileBrowserState extends State<FileBrowser> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: const Text(
-          'New File',
-          style: TextStyle(color: OneDarkColors.fg),
-        ),
+        title: Text('New File', style: TextStyle(color: OneDarkColors.fg)),
         content: TextField(
           controller: controller,
-          style: const TextStyle(color: OneDarkColors.fg),
+          style: TextStyle(color: OneDarkColors.fg),
           autofocus: true,
           decoration: const InputDecoration(
             labelText: 'File name (e.g. notes.txt)',
@@ -1974,17 +1992,17 @@ class _FileBrowserState extends State<FileBrowser> {
         child: Row(
           children: [
             IconButton(
-              icon: const Icon(Icons.arrow_back, color: OneDarkColors.fg),
+              icon: Icon(Icons.arrow_back, color: OneDarkColors.fg),
               onPressed: _historyIndex > 0 ? _goBack : null,
               tooltip: 'Back',
             ),
             IconButton(
-              icon: const Icon(Icons.arrow_upward, color: OneDarkColors.fg),
+              icon: Icon(Icons.arrow_upward, color: OneDarkColors.fg),
               onPressed: _currentPath != '/' ? _goUp : null,
               tooltip: 'Go up one level',
             ),
             IconButton(
-              icon: const Icon(Icons.arrow_forward, color: OneDarkColors.fg),
+              icon: Icon(Icons.arrow_forward, color: OneDarkColors.fg),
               onPressed: _historyIndex < _history.length - 1
                   ? _goForward
                   : null,
@@ -2014,7 +2032,7 @@ class _FileBrowserState extends State<FileBrowser> {
                     Expanded(
                       child: Text(
                         _currentPath,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: OneDarkColors.fg,
                           fontSize: 12,
                           fontFamily: 'monospace',
@@ -2029,78 +2047,72 @@ class _FileBrowserState extends State<FileBrowser> {
             const SizedBox(width: 4),
             if (!inSelectMode) ...[
               IconButton(
-                icon: const Icon(
-                  Icons.create_new_folder,
-                  color: OneDarkColors.fgDim,
-                ),
+                icon: Icon(Icons.create_new_folder, color: OneDarkColors.fgDim),
                 onPressed: _showNewFolderDialog,
                 tooltip: 'New Folder',
               ),
               IconButton(
-                icon: const Icon(Icons.note_add, color: OneDarkColors.fgDim),
+                icon: Icon(Icons.note_add, color: OneDarkColors.fgDim),
                 onPressed: _showNewFileDialog,
                 tooltip: 'New File',
               ),
               IconButton(
-                icon: const Icon(Icons.edit, color: OneDarkColors.cyan),
+                icon: Icon(Icons.edit, color: OneDarkColors.cyan),
                 onPressed: _startInPlaceRename,
                 tooltip: 'Rename (F2)',
               ),
             ],
             if (inSelectMode)
               IconButton(
-                icon: const Icon(Icons.check, color: OneDarkColors.green),
+                icon: Icon(Icons.check, color: OneDarkColors.green),
                 onPressed: _exitSelectMode,
                 tooltip: 'Done',
               )
             else
               IconButton(
-                icon: const Icon(Icons.select_all, color: OneDarkColors.fgDim),
+                icon: Icon(Icons.select_all, color: OneDarkColors.fgDim),
                 onPressed: _enterSelectMode,
                 tooltip: 'Select',
               ),
             if (inSelectMode)
               IconButton(
-                icon: const Icon(
-                  Icons.delete_outline,
-                  color: OneDarkColors.red,
-                ),
+                icon: Icon(Icons.delete_outline, color: OneDarkColors.red),
                 onPressed: _deleteSelected,
                 tooltip: 'Delete selected',
               ),
             if (inSelectMode)
               IconButton(
-                icon: const Icon(Icons.copy, color: OneDarkColors.cyan),
+                icon: Icon(Icons.copy, color: OneDarkColors.cyan),
                 onPressed: _copySelected,
                 tooltip: 'Copy selected',
               ),
             if (inSelectMode)
               IconButton(
-                icon: const Icon(Icons.content_cut, color: OneDarkColors.amber),
+                icon: Icon(Icons.content_cut, color: OneDarkColors.amber),
                 onPressed: _cutSelected,
                 tooltip: 'Cut selected',
               ),
             if (inSelectMode)
               IconButton(
-                icon: const Icon(Icons.edit_note, color: OneDarkColors.cyan),
+                icon: Icon(Icons.edit_note, color: OneDarkColors.cyan),
                 onPressed: _batchRename,
                 tooltip: 'Batch rename',
               ),
             if (inSelectMode)
               IconButton(
-                icon: const Icon(Icons.archive, color: OneDarkColors.green),
+                icon: Icon(Icons.archive, color: OneDarkColors.green),
                 onPressed: () => _compressSelection(_actionPaths),
                 tooltip: 'Compress…',
               ),
             if (inSelectMode)
               IconButton(
-                icon: const Icon(Icons.share, color: OneDarkColors.cyan),
+                icon: Icon(Icons.share, color: OneDarkColors.cyan),
                 onPressed: () => _sharePaths(_actionPaths),
                 tooltip: 'Share…',
               ),
             if (inSelectMode)
               PopupMenuButton<bool>(
-                icon: const Icon(Icons.tune, color: OneDarkColors.fgDim),
+                icon: Icon(Icons.tune, color: OneDarkColors.fgDim),
                 onSelected: (v) => v ? _selectAll() : _deselectAll(),
                 itemBuilder: (_) => [
                   PopupMenuItem(value: true, child: const Text('Select All')),
@@ -2112,10 +2124,7 @@ class _FileBrowserState extends State<FileBrowser> {
               ),
             if (!inSelectMode && FileUtils.hasClipboard)
               IconButton(
-                icon: const Icon(
-                  Icons.content_paste,
-                  color: OneDarkColors.green,
-                ),
+                icon: Icon(Icons.content_paste, color: OneDarkColors.green),
                 onPressed: _pasteToCurrent,
                 tooltip: 'Paste',
               ),
@@ -2188,7 +2197,7 @@ class _FileBrowserState extends State<FileBrowser> {
                 const SizedBox(width: 8),
                 Text(
                   '${labels[opt]!} ${_sortDir == SortDir.asc ? '↑' : '↓'}',
-                  style: const TextStyle(color: OneDarkColors.fg),
+                  style: TextStyle(color: OneDarkColors.fg),
                 ),
               ],
             ),
@@ -2198,7 +2207,7 @@ class _FileBrowserState extends State<FileBrowser> {
         PopupMenuItem(
           child: Text(
             _sortDir == SortDir.asc ? 'Descending' : 'Ascending',
-            style: const TextStyle(color: OneDarkColors.fg),
+            style: TextStyle(color: OneDarkColors.fg),
           ),
           onTap: () {
             setState(
@@ -2533,7 +2542,7 @@ class _FileBrowserState extends State<FileBrowser> {
                                   : 0;
                               return Text(
                                 _formatBytes(s),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: OneDarkColors.fgDim,
                                   fontSize: 12,
                                 ),
@@ -2550,7 +2559,7 @@ class _FileBrowserState extends State<FileBrowser> {
                     flex: 2,
                     child: Text(
                       item.formattedSize,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: OneDarkColors.fgDim,
                         fontSize: 12,
                       ),
@@ -2561,10 +2570,7 @@ class _FileBrowserState extends State<FileBrowser> {
                   flex: 3,
                   child: Text(
                     item.formattedDate,
-                    style: const TextStyle(
-                      color: OneDarkColors.fgDim,
-                      fontSize: 12,
-                    ),
+                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -2573,7 +2579,7 @@ class _FileBrowserState extends State<FileBrowser> {
                     flex: 1,
                     child: Text(
                       item.extension.isEmpty ? 'Folder' : item.extension,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: OneDarkColors.fgDim,
                         fontSize: 12,
                       ),
@@ -2592,26 +2598,28 @@ class _FileBrowserState extends State<FileBrowser> {
     final isMobile = MediaQuery.of(context).size.width < 600;
     return Row(
       children: [
-        SizedBox(width: _selectionMode == SelectionMode.multi ? 42 : 28),
+        // Matches the rows' leading: 8px container padding + checkbox (20)
+        // + item icon (18) + gap (6), or without checkbox on desktop.
+        SizedBox(width: _selectionMode == SelectionMode.multi ? 52 : 32),
         Expanded(
           flex: 4,
           child: Text(
             'Name',
-            style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+            style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
           ),
         ),
         Flexible(
           flex: 2,
           child: Text(
             'Size',
-            style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+            style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
           ),
         ),
         Flexible(
           flex: 3,
           child: Text(
             'Date Modified',
-            style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+            style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
           ),
         ),
         if (!isMobile)
@@ -2619,7 +2627,7 @@ class _FileBrowserState extends State<FileBrowser> {
             flex: 1,
             child: Text(
               'Type',
-              style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
             ),
           ),
       ],
@@ -2661,14 +2669,15 @@ class _FileBrowserState extends State<FileBrowser> {
           Icon(item.icon, size: 18, color: item.iconColor),
           const SizedBox(width: 6),
           Expanded(
+            flex: 4, // matches the name column in _buildDetailsView
             child: TextField(
               controller: _renameController,
               focusNode: _renameFocusNode,
-              style: const TextStyle(color: OneDarkColors.fg, fontSize: 13),
+              style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
               decoration: InputDecoration(
                 border: const OutlineInputBorder(),
                 suffixText: item.isDirectory ? null : p.extension(item.name),
-                suffixStyle: const TextStyle(color: OneDarkColors.fgDim),
+                suffixStyle: TextStyle(color: OneDarkColors.fgDim),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 8,
                   vertical: 4,
@@ -2699,7 +2708,7 @@ class _FileBrowserState extends State<FileBrowser> {
                             : 0;
                         return Text(
                           _formatBytes(s),
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: OneDarkColors.fgDim,
                             fontSize: 12,
                           ),
@@ -2716,10 +2725,7 @@ class _FileBrowserState extends State<FileBrowser> {
               flex: 2,
               child: Text(
                 item.formattedSize,
-                style: const TextStyle(
-                  color: OneDarkColors.fgDim,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -2727,7 +2733,7 @@ class _FileBrowserState extends State<FileBrowser> {
             flex: 3,
             child: Text(
               item.formattedDate,
-              style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -2736,10 +2742,7 @@ class _FileBrowserState extends State<FileBrowser> {
               flex: 1,
               child: Text(
                 item.extension.isEmpty ? 'Folder' : item.extension,
-                style: const TextStyle(
-                  color: OneDarkColors.fgDim,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -2750,70 +2753,34 @@ class _FileBrowserState extends State<FileBrowser> {
 
   @override
   Widget build(BuildContext context) {
-    return Shortcuts(
-      shortcuts: <ShortcutActivator, Intent>{
-        const SingleActivator(LogicalKeyboardKey.f2): const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.f4): const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.f5): const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.backspace):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.enter): const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.escape):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.delete):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyL, control: true):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyN, control: true):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyH, control: true):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyA, control: true):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyC, control: true):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyX, control: true):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.keyV, control: true):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.digit1, control: true):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.digit2, control: true):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true):
-            const ActivateIntent(),
-        const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true):
-            const ActivateIntent(),
+    // Keyboard handling happens in the Focus.onKeyEvent below; the old
+    // Shortcuts map was dead code (nothing consumed the intents).
+    return Focus(
+      focusNode: _focusNode,
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (_handleKeyboardShortcut(event)) return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
       },
-      child: Focus(
-        focusNode: _focusNode,
-        onKeyEvent: (node, event) {
-          if (event is KeyDownEvent) {
-            if (_handleKeyboardShortcut(event)) return KeyEventResult.handled;
-          }
-          return KeyEventResult.ignored;
-        },
-        child: Column(
-          children: [
-            _buildToolbar(),
-            if (_isLoading)
-              const Expanded(child: Center(child: CircularProgressIndicator()))
-            else
-              Expanded(
-                child: GestureDetector(
-                  onLongPressStart: (details) {
-                    // Only show if tap is on the background (not on an item)
-                    _showBackgroundContextMenu(details.globalPosition);
-                  },
-                  child: _viewMode == ViewMode.details
-                      ? _buildDetailsView()
-                      : _buildGridView(),
-                ),
+      child: Column(
+        children: [
+          _buildToolbar(),
+          if (_isLoading)
+            const Expanded(child: Center(child: CircularProgressIndicator()))
+          else
+            Expanded(
+              child: GestureDetector(
+                onLongPressStart: (details) {
+                  // Only show if tap is on the background (not on an item)
+                  _showBackgroundContextMenu(details.globalPosition);
+                },
+                child: _viewMode == ViewMode.details
+                    ? _buildDetailsView()
+                    : _buildGridView(),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -2845,8 +2812,31 @@ class _FileBrowserState extends State<FileBrowser> {
         const PopupMenuDivider(),
         if (FileUtils.hasClipboard)
           _menuItem('Paste', Icons.content_paste, () async {
-            await FileUtils.paste(_currentPath);
-            if (mounted) _loadDirectory();
+            try {
+              await FileUtils.paste(_currentPath);
+              if (mounted) {
+                // 'cut' paste consumes the clipboard; 'copy' keeps it.
+                _setClipboardInfo(
+                  FileUtils.hasClipboard
+                      ? ClipboardInfo(
+                          hasClipboard: true,
+                          operation: FileUtils.clipboardOperation ?? 'copy',
+                          count: FileUtils.clipboardCount,
+                        )
+                      : const ClipboardInfo.empty(),
+                );
+                _loadDirectory();
+              }
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Paste failed: $e'),
+                    backgroundColor: OneDarkColors.red,
+                  ),
+                );
+              }
+            }
           }),
         _menuItem('Select All', Icons.select_all, _selectAll),
         _menuItem('Refresh', Icons.refresh, () => _loadDirectory()),
@@ -2891,7 +2881,9 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
           newName = name;
         }
       }
-      return MapEntry(name, newName);
+      // MapEntry key = full source path (rename needs the path, not the
+      // bare basename); the preview below shows only the basename.
+      return MapEntry(path, newName);
     }).toList();
   }
 
@@ -2910,7 +2902,7 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
       backgroundColor: OneDarkColors.bg,
       title: Text(
         'Batch Rename (${widget.selectedPaths.length})',
-        style: const TextStyle(color: OneDarkColors.fg),
+        style: TextStyle(color: OneDarkColors.fg),
       ),
       content: SizedBox(
         width: 400,
@@ -2948,7 +2940,7 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
                     labelText: 'Prefix',
                     border: OutlineInputBorder(),
                   ),
-                  style: const TextStyle(color: OneDarkColors.fg),
+                  style: TextStyle(color: OneDarkColors.fg),
                 ),
               ] else if (_mode == 'suffix') ...[
                 TextField(
@@ -2957,7 +2949,7 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
                     labelText: 'Suffix',
                     border: OutlineInputBorder(),
                   ),
-                  style: const TextStyle(color: OneDarkColors.fg),
+                  style: TextStyle(color: OneDarkColors.fg),
                 ),
               ] else ...[
                 TextField(
@@ -2966,7 +2958,7 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
                     labelText: 'Regex pattern',
                     border: OutlineInputBorder(),
                   ),
-                  style: const TextStyle(color: OneDarkColors.fg),
+                  style: TextStyle(color: OneDarkColors.fg),
                 ),
                 const SizedBox(height: 8),
                 TextField(
@@ -2975,11 +2967,11 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
                     labelText: 'Replacement',
                     border: OutlineInputBorder(),
                   ),
-                  style: const TextStyle(color: OneDarkColors.fg),
+                  style: TextStyle(color: OneDarkColors.fg),
                 ),
               ],
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'Preview:',
                 style: TextStyle(color: OneDarkColors.cyan, fontSize: 12),
               ),
@@ -2991,14 +2983,15 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
                     children: [
                       Expanded(
                         child: Text(
-                          e.key,
-                          style: const TextStyle(
+                          p.basename(e.key),
+                          style: TextStyle(
                             color: OneDarkColors.fgDim,
                             fontSize: 11,
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      const Icon(
+                      Icon(
                         Icons.arrow_forward,
                         size: 14,
                         color: OneDarkColors.fgDim,
@@ -3006,7 +2999,7 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
                       Expanded(
                         child: Text(
                           e.value,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: OneDarkColors.green,
                             fontSize: 11,
                           ),
@@ -3028,7 +3021,7 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
         FilledButton(
           onPressed: () async {
             for (final entry in _previewEntries) {
-              if (entry.key != entry.value) {
+              if (p.basename(entry.key) != entry.value) {
                 try {
                   await FileUtils.rename(entry.key, entry.value);
                 } catch (_) {}

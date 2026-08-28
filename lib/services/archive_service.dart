@@ -60,9 +60,9 @@ class ArchiveService {
     '.txz',
     '.bz2',
     '.tbz2',
-    '.7z',   // (native) detected, extraction requires native binding
-    '.rar',  // (native) detected, extraction requires native binding
-    '.zst',  // (native) detected, extraction requires native binding
+    '.7z', // (native) detected, extraction requires native binding
+    '.rar', // (native) detected, extraction requires native binding
+    '.zst', // (native) detected, extraction requires native binding
     '.lz',
     '.lzma',
   };
@@ -71,7 +71,10 @@ class ArchiveService {
   static bool isArchive(String path) {
     final name = p.basename(path).toLowerCase();
     // Check multi-part extensions first (e.g. .tar.gz, .tar.xz, .tar.bz2)
-    if (name.endsWith('.tar.gz') || name.endsWith('.tar.bz2') || name.endsWith('.tar.xz') || name.endsWith('.tar.zst')) {
+    if (name.endsWith('.tar.gz') ||
+        name.endsWith('.tar.bz2') ||
+        name.endsWith('.tar.xz') ||
+        name.endsWith('.tar.zst')) {
       return true;
     }
     final ext = p.extension(path).toLowerCase();
@@ -137,12 +140,18 @@ class ArchiveService {
         files = TarDecoder().decodeBytes(bz2Decoded).files;
         break;
       case '.7z':
-        throw Exception('unsupported:7z extraction requires native bindings — install p7zip on your device');
+        throw Exception(
+          'unsupported:7z extraction requires native bindings — install p7zip on your device',
+        );
       case '.rar':
-        throw Exception('unsupported:RAR extraction requires native bindings — install unrar on your device');
+        throw Exception(
+          'unsupported:RAR extraction requires native bindings — install unrar on your device',
+        );
       case '.zst':
       case '.tar.zst':
-        throw Exception('unsupported:Zstandard extraction requires native bindings — install zstd on your device');
+        throw Exception(
+          'unsupported:Zstandard extraction requires native bindings — install zstd on your device',
+        );
       default:
         throw Exception('unsupported:unknown archive format $ext');
     }

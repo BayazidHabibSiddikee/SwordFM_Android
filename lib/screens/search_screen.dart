@@ -45,7 +45,11 @@ class _SearchScreenState extends State<SearchScreen> {
     final query = _controller.text.trim();
     _debounce = Timer(const Duration(milliseconds: 350), () {
       if (query.isEmpty) {
-        setState(() { _results = []; _resultCount = 0; _error = null; });
+        setState(() {
+          _results = [];
+          _resultCount = 0;
+          _error = null;
+        });
         return;
       }
       _runSearch(query);
@@ -53,10 +57,16 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<void> _runSearch(String query) async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final results = await SearchService.searchDirectory(
-        widget.startPath, query, includeHidden: false, limit: 300,
+        widget.startPath,
+        query,
+        includeHidden: false,
+        limit: 300,
       );
       if (mounted) {
         setState(() {
@@ -66,7 +76,11 @@ class _SearchScreenState extends State<SearchScreen> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() { _error = 'Search failed: $e'; _loading = false; });
+      if (mounted)
+        setState(() {
+          _error = 'Search failed: $e';
+          _loading = false;
+        });
     }
   }
 
@@ -78,7 +92,10 @@ class _SearchScreenState extends State<SearchScreen> {
       if (!mounted) return;
       if (result.type != ResultType.done) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Cannot open: ${result.message}'), backgroundColor: OneDarkColors.red),
+          SnackBar(
+            content: Text('Cannot open: ${result.message}'),
+            backgroundColor: OneDarkColors.red,
+          ),
         );
       }
     }
@@ -98,43 +115,76 @@ class _SearchScreenState extends State<SearchScreen> {
         _menuItem('Rename', Icons.edit, () => _showRenameDialog(item)),
         _menuItem('Copy', Icons.copy, () {
           FileUtils.setClipboard(item.path, 'copy');
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Copied: ${item.name}'), backgroundColor: OneDarkColors.cyan));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Copied: ${item.name}'),
+              backgroundColor: OneDarkColors.cyan,
+            ),
+          );
         }),
         _menuItem('Cut', Icons.content_cut, () {
           FileUtils.setClipboard(item.path, 'cut');
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Cut: ${item.name}'), backgroundColor: OneDarkColors.amber));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Cut: ${item.name}'),
+              backgroundColor: OneDarkColors.amber,
+            ),
+          );
         }),
         _menuItem('Delete', Icons.delete, () => _confirmDelete(item)),
         if (ArchiveService.isArchive(item.path))
           _menuItem('Extract', Icons.folder_open, () async {
-            final destDir = p.join(p.dirname(item.path), p.basenameWithoutExtension(item.path));
+            final destDir = p.join(
+              p.dirname(item.path),
+              p.basenameWithoutExtension(item.path),
+            );
             try {
               await ArchiveService.extract(item.path, destDir);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Extracted to ${p.basename(destDir)}'), backgroundColor: OneDarkColors.green),
+                  SnackBar(
+                    content: Text('Extracted to ${p.basename(destDir)}'),
+                    backgroundColor: OneDarkColors.green,
+                  ),
                 );
                 if (_results.any((r) => r.path == item.path)) {
                   _runSearch(_controller.text.trim());
                 }
               }
             } catch (e) {
-              if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Extract failed: $e'), backgroundColor: OneDarkColors.red),
-              );
+              if (mounted)
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Extract failed: $e'),
+                    backgroundColor: OneDarkColors.red,
+                  ),
+                );
             }
           }),
-        _menuItem('Properties', Icons.info_outline, () => _showProperties(item)),
+        _menuItem(
+          'Properties',
+          Icons.info_outline,
+          () => _showProperties(item),
+        ),
       ],
     );
   }
 
-  PopupMenuItem<Object?> _menuItem(String title, IconData icon, VoidCallback onTap) {
-    return PopupMenuItem<Object?>(onTap: onTap, child: Row(children: [
-      Icon(icon, size: 18, color: OneDarkColors.fg),
-      const SizedBox(width: 12),
-      Text(title, style: const TextStyle(color: OneDarkColors.fg)),
-    ]));
+  PopupMenuItem<Object?> _menuItem(
+    String title,
+    IconData icon,
+    VoidCallback onTap,
+  ) {
+    return PopupMenuItem<Object?>(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: OneDarkColors.fg),
+          const SizedBox(width: 12),
+          Text(title, style: TextStyle(color: OneDarkColors.fg)),
+        ],
+      ),
+    );
   }
 
   void _showRenameDialog(FileItem item) {
@@ -143,10 +193,17 @@ class _SearchScreenState extends State<SearchScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: const Text('Rename', style: TextStyle(color: OneDarkColors.fg)),
-        content: TextField(controller: controller, style: const TextStyle(color: OneDarkColors.fg), autofocus: true),
+        title: Text('Rename', style: TextStyle(color: OneDarkColors.fg)),
+        content: TextField(
+          controller: controller,
+          style: TextStyle(color: OneDarkColors.fg),
+          autofocus: true,
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () async {
               if (!mounted) return;
@@ -171,20 +228,42 @@ class _SearchScreenState extends State<SearchScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: Text('Delete "${item.name}"?', style: const TextStyle(color: OneDarkColors.fg)),
+        title: Text(
+          'Delete "${item.name}"?',
+          style: TextStyle(color: OneDarkColors.fg),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, 'cancel'), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, 'trash'), child: const Text('Move to Trash')),
-          TextButton(onPressed: () => Navigator.pop(context, 'delete'), child: const Text('Delete', style: TextStyle(color: OneDarkColors.red))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'cancel'),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'trash'),
+            child: const Text('Move to Trash'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'delete'),
+            child: Text('Delete', style: TextStyle(color: OneDarkColors.red)),
+          ),
         ],
       ),
     );
     if (choice == 'trash') {
-      try { await FileUtils.moveToTrash(item.path); } catch (_) {}
+      try {
+        await FileUtils.moveToTrash(item.path);
+      } catch (_) {}
       if (mounted) _runSearch(_controller.text.trim());
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Moved to trash'), backgroundColor: OneDarkColors.amber));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Moved to trash'),
+            backgroundColor: OneDarkColors.amber,
+          ),
+        );
     } else if (choice == 'delete') {
-      try { await FileUtils.delete(item.path); } catch (_) {}
+      try {
+        await FileUtils.delete(item.path);
+      } catch (_) {}
       if (mounted) _runSearch(_controller.text.trim());
     }
   }
@@ -194,21 +273,33 @@ class _SearchScreenState extends State<SearchScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: Text(item.name, style: const TextStyle(color: OneDarkColors.fg)),
+        title: Text(item.name, style: TextStyle(color: OneDarkColors.fg)),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _propRow('Name', item.name),
-              _propRow('Type', item.isDirectory ? 'Folder' : (item.extension.isNotEmpty ? item.extension.toUpperCase().replaceAll('.', '') : 'File')),
+              _propRow(
+                'Type',
+                item.isDirectory
+                    ? 'Folder'
+                    : (item.extension.isNotEmpty
+                          ? item.extension.toUpperCase().replaceAll('.', '')
+                          : 'File'),
+              ),
               _propRow('Size', item.formattedSize),
               _propRow('Modified', item.formattedDate),
               _propRow('Path', item.path),
             ],
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
@@ -216,10 +307,24 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _propRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SizedBox(width: 80, child: Text(label, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12))),
-        Expanded(child: Text(value, style: const TextStyle(color: OneDarkColors.fg, fontSize: 12))),
-      ]),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              label,
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -231,8 +336,8 @@ class _SearchScreenState extends State<SearchScreen> {
         title: TextField(
           controller: _controller,
           focusNode: _focusNode,
-          style: const TextStyle(color: OneDarkColors.fg),
-          decoration: const InputDecoration(
+          style: TextStyle(color: OneDarkColors.fg),
+          decoration: InputDecoration(
             hintText: 'Search files…',
             hintStyle: TextStyle(color: OneDarkColors.fgDim),
             border: InputBorder.none,
@@ -242,7 +347,7 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
         backgroundColor: OneDarkColors.bgDark,
         foregroundColor: OneDarkColors.fg,
-        iconTheme: const IconThemeData(color: OneDarkColors.fg),
+        iconTheme: IconThemeData(color: OneDarkColors.fg),
       ),
       body: Column(
         children: [
@@ -255,8 +360,10 @@ class _SearchScreenState extends State<SearchScreen> {
                   Icon(Icons.search, size: 16, color: OneDarkColors.cyan),
                   const SizedBox(width: 8),
                   Text(
-                    _loading ? 'Searching…' : '$_resultCount result${_resultCount != 1 ? 's' : ''}',
-                    style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                    _loading
+                        ? 'Searching…'
+                        : '$_resultCount result${_resultCount != 1 ? 's' : ''}',
+                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
                   ),
                 ],
               ),
@@ -264,43 +371,59 @@ class _SearchScreenState extends State<SearchScreen> {
           if (_error != null)
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(_error!, style: const TextStyle(color: OneDarkColors.red)),
+              child: Text(_error!, style: TextStyle(color: OneDarkColors.red)),
             ),
           Expanded(
             child: _loading && _results.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : _results.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.search_off, size: 48, color: OneDarkColors.fgDim),
-                            const SizedBox(height: 12),
-                            Text(
-                              _controller.text.trim().isEmpty ? 'Type to search' : 'No results found',
-                              style: TextStyle(color: OneDarkColors.fgDim),
-                            ),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.search_off,
+                          size: 48,
+                          color: OneDarkColors.fgDim,
                         ),
-                      )
-                    : ListView.separated(
-                        itemCount: _results.length,
-                        separatorBuilder: (_, index) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final item = _results[index];
-                          return ListTile(
-                            leading: Icon(item.icon, size: 24, color: item.iconColor),
-                            title: Text(item.name, style: const TextStyle(color: OneDarkColors.fg)),
-                            subtitle: Text(
-                              '${item.formattedSize} · ${p.dirname(item.path)}',
-                              style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            onTap: () => _openItem(item),
-                            onLongPress: () => _showContextMenu(item),
-                          );
-                        },
-                      ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _controller.text.trim().isEmpty
+                              ? 'Type to search'
+                              : 'No results found',
+                          style: TextStyle(color: OneDarkColors.fgDim),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: _results.length,
+                    separatorBuilder: (_, index) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final item = _results[index];
+                      return ListTile(
+                        leading: Icon(
+                          item.icon,
+                          size: 24,
+                          color: item.iconColor,
+                        ),
+                        title: Text(
+                          item.name,
+                          style: TextStyle(color: OneDarkColors.fg),
+                        ),
+                        subtitle: Text(
+                          '${item.formattedSize} · ${p.dirname(item.path)}',
+                          style: TextStyle(
+                            color: OneDarkColors.fgDim,
+                            fontSize: 11,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        onTap: () => _openItem(item),
+                        onLongPress: () => _showContextMenu(item),
+                      );
+                    },
+                  ),
           ),
         ],
       ),

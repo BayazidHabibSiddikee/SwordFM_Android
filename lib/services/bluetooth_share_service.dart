@@ -271,14 +271,18 @@ class BluetoothShareService {
         final savedPath = args['savedPath'] as String? ?? '';
         final sha256 = args['sha256'] as String? ?? '';
         final verified = args['verified'] as bool? ?? false;
-        _messageController.add(_buildTransferCompleteMessage(savedPath, sha256, verified));
+        _messageController.add(
+          _buildTransferCompleteMessage(savedPath, sha256, verified),
+        );
         _lastTransferSha256 = sha256.isNotEmpty ? sha256 : null;
         _lastTransferVerified = verified;
         _updateState(BluetoothState.connected);
         break;
       case 'onTransferError':
         final msg = call.arguments['message'] as String? ?? '';
-        _messageController.add(msg.isEmpty ? 'Transfer Error.' : 'Transfer Error: $msg');
+        _messageController.add(
+          msg.isEmpty ? 'Transfer Error.' : 'Transfer Error: $msg',
+        );
         _updateState(BluetoothState.connected);
         break;
       case 'onFilePicked':
@@ -300,7 +304,9 @@ class BluetoothShareService {
   /// Returns null on failure.
   static Future<String?> computeSha256(String filePath) async {
     try {
-      final result = await _channel.invokeMethod<String?>('computeSha256', {'path': filePath});
+      final result = await _channel.invokeMethod<String?>('computeSha256', {
+        'path': filePath,
+      });
       return result;
     } on PlatformException catch (_) {
       return null;
@@ -309,8 +315,14 @@ class BluetoothShareService {
 
   /// Builds a human-readable transfer-complete message, including the SHA-256
   /// checksum and verification status when available from the native side.
-  String _buildTransferCompleteMessage(String savedPath, String sha256, bool verified) {
-    var msg = savedPath.isEmpty ? 'Transfer Complete!' : 'Transfer Complete! Saved to $savedPath';
+  String _buildTransferCompleteMessage(
+    String savedPath,
+    String sha256,
+    bool verified,
+  ) {
+    var msg = savedPath.isEmpty
+        ? 'Transfer Complete!'
+        : 'Transfer Complete! Saved to $savedPath';
     if (sha256.isNotEmpty) {
       msg += '\nSHA-256: $sha256';
       msg += verified ? ' (verified)' : ' (not verified)';

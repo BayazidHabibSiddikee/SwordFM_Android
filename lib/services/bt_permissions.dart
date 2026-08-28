@@ -40,7 +40,8 @@ class BtPermissions {
     return {
       Permission.bluetoothScan: await Permission.bluetoothScan.request(),
       Permission.bluetoothConnect: await Permission.bluetoothConnect.request(),
-      Permission.bluetoothAdvertise: await Permission.bluetoothAdvertise.request(),
+      Permission.bluetoothAdvertise: await Permission.bluetoothAdvertise
+          .request(),
     };
   }
 

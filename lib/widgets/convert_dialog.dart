@@ -57,30 +57,41 @@ class _ConvertDialogState extends State<ConvertDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final baseName = widget.filePath.split('/').last.replaceAll(RegExp(r'\.[^.]+$'), '');
+    final baseName = widget.filePath
+        .split('/')
+        .last
+        .replaceAll(RegExp(r'\.[^.]+$'), '');
     return AlertDialog(
       backgroundColor: OneDarkColors.bg,
-      title: Text('Convert $baseName', style: const TextStyle(color: OneDarkColors.cyan)),
+      title: Text(
+        'Convert $baseName',
+        style: TextStyle(color: OneDarkColors.cyan),
+      ),
       content: SizedBox(
         width: double.maxFinite,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Choose output format:',
-                style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13)),
+            Text(
+              'Choose output format:',
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13),
+            ),
             const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: _converting ? null : () => _convert('PDF'),
-                    icon:
-                        const Icon(Icons.picture_as_pdf, size: 18, color: OneDarkColors.red),
+                    icon: Icon(
+                      Icons.picture_as_pdf,
+                      size: 18,
+                      color: OneDarkColors.red,
+                    ),
                     label: const Text('PDF'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: OneDarkColors.red,
-                      side: const BorderSide(color: OneDarkColors.red),
+                      side: BorderSide(color: OneDarkColors.red),
                     ),
                   ),
                 ),
@@ -88,12 +99,15 @@ class _ConvertDialogState extends State<ConvertDialog> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: _converting ? null : () => _convert('DOCX'),
-                    icon:
-                        const Icon(Icons.description, size: 18, color: OneDarkColors.cyan),
+                    icon: Icon(
+                      Icons.description,
+                      size: 18,
+                      color: OneDarkColors.cyan,
+                    ),
                     label: const Text('DOCX'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: OneDarkColors.cyan,
-                      side: const BorderSide(color: OneDarkColors.cyan),
+                      side: BorderSide(color: OneDarkColors.cyan),
                     ),
                   ),
                 ),
@@ -109,7 +123,7 @@ class _ConvertDialogState extends State<ConvertDialog> {
                 ),
                 child: Text(
                   _error!,
-                  style: const TextStyle(color: OneDarkColors.red, fontSize: 12),
+                  style: TextStyle(color: OneDarkColors.red, fontSize: 12),
                 ),
               ),
             ],
@@ -123,14 +137,19 @@ class _ConvertDialogState extends State<ConvertDialog> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.check_circle,
-                        size: 16, color: OneDarkColors.green),
+                    Icon(
+                      Icons.check_circle,
+                      size: 16,
+                      color: OneDarkColors.green,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Saved as ${_lastResultPath!.split('/').last}',
-                        style: const TextStyle(
-                            color: OneDarkColors.green, fontSize: 12),
+                        style: TextStyle(
+                          color: OneDarkColors.green,
+                          fontSize: 12,
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -139,7 +158,7 @@ class _ConvertDialogState extends State<ConvertDialog> {
                       onPressed: _openResult,
                       style: OutlinedButton.styleFrom(
                         foregroundColor: OneDarkColors.green,
-                        side: const BorderSide(color: OneDarkColors.green),
+                        side: BorderSide(color: OneDarkColors.green),
                       ),
                       child: const Text('Open'),
                     ),
@@ -152,8 +171,9 @@ class _ConvertDialogState extends State<ConvertDialog> {
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close')),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
       ],
     );
   }

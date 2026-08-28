@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import '../services/bluetooth_share_service.dart';
 import '../services/bt_permissions.dart';
 import '../theme/theme.dart';
@@ -23,7 +25,9 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
   // ignore: prefer_final_fields — mutated via setState
   bool _permissionsReady = false;
   // Tracks filenames currently queued for sending so we can show a queue indicator.
-  final List<String> _sendingFiles = [];
+  List<String> _sendingFiles = [];
+  // Active stream subscriptions — cancelled in dispose.
+  final List<StreamSubscription<dynamic>> _subscriptions = [];
 
   @override
   void initState() {
@@ -31,25 +35,47 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
     _listenStreams();
   }
 
+  @override
+  void dispose() {
+    for (final sub in _subscriptions) {
+      sub.cancel();
+    }
+    super.dispose();
+  }
+
   void _listenStreams() {
-    _service.stateStream.listen((state) {
-      setState(() {});
-    });
-    _service.progressStream.listen((progress) {
-      setState(() {
-        _statusMessage =
-            '${progress.filename}: ${(progress.percentage * 100).toStringAsFixed(0)}%';
-      });
-    });
-    _service.messageStream.listen((msg) {
-      setState(() {
-        _statusMessage = msg;
-        // Extract trailing SHA-256 hash (64 hex chars) if present
-        final match = RegExp(r'\b[0-9a-f]{64}\b').firstMatch(msg);
-        _lastSha256 = match?.group(0);
-        _lastVerified = _service.lastTransferVerified;
-      });
-    });
+    _subscriptions.add(
+      _service.stateStream.listen((state) {
+        setState(() {});
+      }),
+    );
+    _subscriptions.add(
+      _service.progressStream.listen((progress) {
+        setState(() {
+          _lastProgress = progress;
+          _statusMessage =
+              '${progress.filename}: ${(progress.percentage * 100).toStringAsFixed(0)}%';
+        });
+      }),
+    );
+    _subscriptions.add(
+      _service.messageStream.listen((msg) {
+        setState(() {
+          _statusMessage = msg;
+          // Extract trailing SHA-256 hash (64 hex chars) if present
+          final match = RegExp(r'\b[0-9a-f]{64}\b').firstMatch(msg);
+          _lastSha256 = match?.group(0);
+          _lastVerified = _service.lastTransferVerified;
+        });
+      }),
+    );
+    _subscriptions.add(
+      _service.filePickedStream.listen((paths) {
+        setState(() {
+          _sendingFiles = paths.map((path) => p.basename(path)).toList();
+        });
+      }),
+    );
   }
 
   Future<void> _requestPermissions() async {
@@ -177,13 +203,16 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                             fontSize: 11,
                           ),
                         ),
-                      if (_lastSha256 != null && state != BluetoothState.disconnected)
+                      if (_lastSha256 != null &&
+                          state != BluetoothState.disconnected)
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: Text(
                             'SHA-256: ${_lastSha256!}${_lastVerified ? ' ✓ verified' : ' (not verified)'}',
                             style: TextStyle(
-                              color: _lastVerified ? Colors.greenAccent : Colors.amberAccent,
+                              color: _lastVerified
+                                  ? Colors.greenAccent
+                                  : Colors.amberAccent,
                               fontSize: 10,
                               fontFamily: 'monospace',
                             ),
@@ -215,7 +244,8 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
           const SizedBox(height: 12),
 
           // Progress bar during transfer
-          if (state == BluetoothState.sending || state == BluetoothState.receiving)
+          if (state == BluetoothState.sending ||
+              state == BluetoothState.receiving)
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -225,7 +255,9 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                   borderRadius: BorderRadius.circular(4),
                   backgroundColor: OneDarkColors.dim,
                   valueColor: AlwaysStoppedAnimation<Color>(
-                    state == BluetoothState.sending ? OneDarkColors.purple : OneDarkColors.cyan,
+                    state == BluetoothState.sending
+                        ? OneDarkColors.purple
+                        : OneDarkColors.cyan,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -235,13 +267,20 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                     children: [
                       Text(
                         _lastProgress!.filename,
-                        style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+                        style: TextStyle(
+                          color: OneDarkColors.fgDim,
+                          fontSize: 11,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
                         '${(_lastProgress!.percentage * 100).toStringAsFixed(0)}%',
-                        style: const TextStyle(color: OneDarkColors.fg, fontSize: 11, fontWeight: FontWeight.w500),
+                        style: TextStyle(
+                          color: OneDarkColors.fg,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ],
                   ),
@@ -272,21 +311,35 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                       onPressed: _requestPermissions,
                       icon: const Icon(Icons.privacy_tip),
                       label: const Text('Request Permissions'),
-                      style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                      style: FilledButton.styleFrom(
+                        minimumSize: Size.fromHeight(44),
+                      ),
                     ),
                     const SizedBox(height: 8),
                     FilledButton.icon(
-                      onPressed: _permissionsReady && state == BluetoothState.disconnected ? _startServer : null,
+                      onPressed:
+                          _permissionsReady &&
+                              state == BluetoothState.disconnected
+                          ? _startServer
+                          : null,
                       icon: const Icon(Icons.bluetooth_connected),
                       label: const Text('Start Listening'),
-                      style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                      style: FilledButton.styleFrom(
+                        minimumSize: Size.fromHeight(44),
+                      ),
                     ),
                     const SizedBox(height: 8),
                     FilledButton.icon(
-                      onPressed: state == BluetoothState.connected && !_service.isSending ? _pickAndSendFiles : null,
+                      onPressed:
+                          state == BluetoothState.connected &&
+                              !_service.isSending
+                          ? _pickAndSendFiles
+                          : null,
                       icon: const Icon(Icons.upload_file),
                       label: const Text('Send Files'),
-                      style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                      style: FilledButton.styleFrom(
+                        minimumSize: Size.fromHeight(44),
+                      ),
                     ),
                   ] else ...[
                     // Side-by-side on wider screens
@@ -297,26 +350,40 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                             onPressed: _requestPermissions,
                             icon: const Icon(Icons.privacy_tip),
                             label: const Text('Request Permissions'),
-                            style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                            style: FilledButton.styleFrom(
+                              minimumSize: Size.fromHeight(44),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: FilledButton.icon(
-                            onPressed: _permissionsReady && state == BluetoothState.disconnected ? _startServer : null,
+                            onPressed:
+                                _permissionsReady &&
+                                    state == BluetoothState.disconnected
+                                ? _startServer
+                                : null,
                             icon: const Icon(Icons.bluetooth_connected),
                             label: const Text('Start Listening'),
-                            style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                            style: FilledButton.styleFrom(
+                              minimumSize: Size.fromHeight(44),
+                            ),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     FilledButton.icon(
-                      onPressed: state == BluetoothState.connected && !_service.isSending ? _pickAndSendFiles : null,
+                      onPressed:
+                          state == BluetoothState.connected &&
+                              !_service.isSending
+                          ? _pickAndSendFiles
+                          : null,
                       icon: const Icon(Icons.upload_file),
                       label: const Text('Send Files'),
-                      style: FilledButton.styleFrom(minimumSize: Size.fromHeight(44)),
+                      style: FilledButton.styleFrom(
+                        minimumSize: Size.fromHeight(44),
+                      ),
                     ),
                   ],
                 ],
@@ -326,7 +393,7 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
           const SizedBox(height: 16),
 
           // Device list
-          const Text(
+          Text(
             'Paired Devices',
             style: TextStyle(
               color: OneDarkColors.cyan,
@@ -351,18 +418,18 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
                       return ListTile(
                         leading: CircleAvatar(
                           backgroundColor: OneDarkColors.dim,
-                          child: const Icon(
+                          child: Icon(
                             Icons.bluetooth,
                             color: OneDarkColors.cyan,
                           ),
                         ),
                         title: Text(
                           device.name,
-                          style: const TextStyle(color: OneDarkColors.fg),
+                          style: TextStyle(color: OneDarkColors.fg),
                         ),
                         subtitle: Text(
                           device.address,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: OneDarkColors.fgDim,
                             fontSize: 11,
                           ),

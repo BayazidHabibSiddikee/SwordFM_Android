@@ -24,7 +24,7 @@ class _NetworkScreenState extends State<NetworkScreen> {
   @override
   void initState() {
     super.initState();
-    _service.logStream.listen((List<ConnLog> logs) {
+    _logSub = _service.logStream.listen((List<ConnLog> logs) {
       if (mounted) _logController.add(logs);
     });
     // Load persisted profiles on startup
@@ -40,8 +40,11 @@ class _NetworkScreenState extends State<NetworkScreen> {
     });
   }
 
+  StreamSubscription<dynamic>? _logSub;
+
   @override
   void dispose() {
+    _logSub?.cancel();
     _logController.close();
     super.dispose();
   }
@@ -86,10 +89,11 @@ class _NetworkScreenState extends State<NetworkScreen> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      if (mounted)
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
     }
   }
 
@@ -99,10 +103,13 @@ class _NetworkScreenState extends State<NetworkScreen> {
     return Scaffold(
       backgroundColor: OneDarkColors.bg,
       appBar: AppBar(
-        title: const Text('Network Connections', style: TextStyle(color: OneDarkColors.fg)),
+        title: Text(
+          'Network Connections',
+          style: TextStyle(color: OneDarkColors.fg),
+        ),
         backgroundColor: OneDarkColors.bgDark,
         foregroundColor: OneDarkColors.fg,
-        iconTheme: const IconThemeData(color: OneDarkColors.fg),
+        iconTheme: IconThemeData(color: OneDarkColors.fg),
         actions: [
           if (isMobile)
             IconButton(
@@ -110,7 +117,11 @@ class _NetworkScreenState extends State<NetworkScreen> {
               onPressed: () => setState(() => _showProfiles = !_showProfiles),
               tooltip: _showProfiles ? 'Show Files' : 'Show Profiles',
             ),
-          IconButton(icon: const Icon(Icons.add), onPressed: _addProfile, tooltip: 'Add Profile'),
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: _addProfile,
+            tooltip: 'Add Profile',
+          ),
         ],
       ),
       body: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
@@ -127,9 +138,15 @@ class _NetworkScreenState extends State<NetworkScreen> {
                 children: [
                   Icon(Icons.cloud_off, size: 48, color: OneDarkColors.fgDim),
                   const SizedBox(height: 12),
-                  Text('No profiles', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 16)),
+                  Text(
+                    'No profiles',
+                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 16),
+                  ),
                   const SizedBox(height: 8),
-                  Text('Tap + to add a WebDAV or SFTP connection', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
+                  Text(
+                    'Tap + to add a WebDAV or SFTP connection',
+                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                  ),
                 ],
               ),
             )
@@ -141,11 +158,21 @@ class _NetworkScreenState extends State<NetworkScreen> {
                 final isActive = _currentProfileId == profile.profile.id;
                 return ListTile(
                   leading: Icon(
-                    profile.profile.type == 'webdav' ? Icons.cloud : Icons.storage,
+                    profile.profile.type == 'webdav'
+                        ? Icons.cloud
+                        : Icons.storage,
                     color: isActive ? OneDarkColors.cyan : OneDarkColors.fgDim,
                   ),
-                  title: Text(profile.profile.name, style: TextStyle(color: isActive ? OneDarkColors.cyan : OneDarkColors.fg)),
-                  subtitle: Text('${profile.profile.host}:${profile.profile.port}', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                  title: Text(
+                    profile.profile.name,
+                    style: TextStyle(
+                      color: isActive ? OneDarkColors.cyan : OneDarkColors.fg,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${profile.profile.host}:${profile.profile.port}',
+                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+                  ),
                   trailing: IconButton(
                     icon: const Icon(Icons.delete, size: 18),
                     color: OneDarkColors.red,
@@ -163,19 +190,27 @@ class _NetworkScreenState extends State<NetworkScreen> {
     return _loading
         ? const Center(child: CircularProgressIndicator())
         : _error != null
-            ? Center(child: Text(_error!, style: const TextStyle(color: OneDarkColors.red)))
-            : _currentProfileId == null
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.cloud_queue, size: 48, color: OneDarkColors.fgDim),
-                        const SizedBox(height: 12),
-                        Text('Select a profile to connect', style: TextStyle(color: OneDarkColors.fgDim)),
-                      ],
-                    ),
-                  )
-                : _RemoteFileView(profileId: _currentProfileId!, entries: _remoteEntries);
+        ? Center(
+            child: Text(_error!, style: TextStyle(color: OneDarkColors.red)),
+          )
+        : _currentProfileId == null
+        ? Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.cloud_queue, size: 48, color: OneDarkColors.fgDim),
+                const SizedBox(height: 12),
+                Text(
+                  'Select a profile to connect',
+                  style: TextStyle(color: OneDarkColors.fgDim),
+                ),
+              ],
+            ),
+          )
+        : _RemoteFileView(
+            profileId: _currentProfileId!,
+            entries: _remoteEntries,
+          );
   }
 
   Widget _buildDesktopLayout() {
@@ -189,29 +224,59 @@ class _NetworkScreenState extends State<NetworkScreen> {
               children: [
                 Padding(
                   padding: const EdgeInsets.all(12),
-                  child: Text('Profiles', style: TextStyle(color: OneDarkColors.cyan, fontWeight: FontWeight.w600)),
+                  child: Text(
+                    'Profiles',
+                    style: TextStyle(
+                      color: OneDarkColors.cyan,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
                 const Divider(height: 1),
                 Expanded(
                   child: _profiles.isEmpty
-                      ? Center(child: Text('No profiles', style: TextStyle(color: OneDarkColors.fgDim)))
+                      ? Center(
+                          child: Text(
+                            'No profiles',
+                            style: TextStyle(color: OneDarkColors.fgDim),
+                          ),
+                        )
                       : ListView.separated(
                           itemCount: _profiles.length,
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (context, i) {
                             final profile = _profiles[i];
-                            final isActive = _currentProfileId == profile.profile.id;
+                            final isActive =
+                                _currentProfileId == profile.profile.id;
                             return ListTile(
                               leading: Icon(
-                                profile.profile.type == 'webdav' ? Icons.cloud : Icons.storage,
-                                color: isActive ? OneDarkColors.cyan : OneDarkColors.fgDim,
+                                profile.profile.type == 'webdav'
+                                    ? Icons.cloud
+                                    : Icons.storage,
+                                color: isActive
+                                    ? OneDarkColors.cyan
+                                    : OneDarkColors.fgDim,
                               ),
-                              title: Text(profile.profile.name, style: TextStyle(color: isActive ? OneDarkColors.cyan : OneDarkColors.fg)),
-                              subtitle: Text('${profile.profile.host}:${profile.profile.port}', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+                              title: Text(
+                                profile.profile.name,
+                                style: TextStyle(
+                                  color: isActive
+                                      ? OneDarkColors.cyan
+                                      : OneDarkColors.fg,
+                                ),
+                              ),
+                              subtitle: Text(
+                                '${profile.profile.host}:${profile.profile.port}',
+                                style: TextStyle(
+                                  color: OneDarkColors.fgDim,
+                                  fontSize: 11,
+                                ),
+                              ),
                               trailing: IconButton(
                                 icon: const Icon(Icons.delete, size: 18),
                                 color: OneDarkColors.red,
-                                onPressed: () => _removeProfile(profile.profile.id),
+                                onPressed: () =>
+                                    _removeProfile(profile.profile.id),
                               ),
                               onTap: () => _connect(profile.profile.id),
                             );
@@ -227,10 +292,23 @@ class _NetworkScreenState extends State<NetworkScreen> {
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : _error != null
-                  ? Center(child: Text(_error!, style: const TextStyle(color: OneDarkColors.red)))
-                  : _currentProfileId == null
-                      ? const Center(child: Text('Select a profile to connect', style: TextStyle(color: OneDarkColors.fgDim)))
-                      : _RemoteFileView(profileId: _currentProfileId!, entries: _remoteEntries),
+              ? Center(
+                  child: Text(
+                    _error!,
+                    style: TextStyle(color: OneDarkColors.red),
+                  ),
+                )
+              : _currentProfileId == null
+              ? Center(
+                  child: Text(
+                    'Select a profile to connect',
+                    style: TextStyle(color: OneDarkColors.fgDim),
+                  ),
+                )
+              : _RemoteFileView(
+                  profileId: _currentProfileId!,
+                  entries: _remoteEntries,
+                ),
         ),
       ],
     );
@@ -273,7 +351,7 @@ class _AddProfileDialogState extends State<_AddProfileDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: OneDarkColors.bg,
-      title: const Text('Add Connection', style: TextStyle(color: OneDarkColors.fg)),
+      title: Text('Add Connection', style: TextStyle(color: OneDarkColors.fg)),
       content: Form(
         key: _form,
         child: SingleChildScrollView(
@@ -282,8 +360,11 @@ class _AddProfileDialogState extends State<_AddProfileDialog> {
             children: [
               DropdownButtonFormField<String>(
                 value: _type,
-                decoration: const InputDecoration(labelText: 'Type', border: OutlineInputBorder()),
-                style: const TextStyle(color: OneDarkColors.fg),
+                decoration: const InputDecoration(
+                  labelText: 'Type',
+                  border: OutlineInputBorder(),
+                ),
+                style: TextStyle(color: OneDarkColors.fg),
                 items: const [
                   DropdownMenuItem(value: 'webdav', child: Text('WebDAV')),
                   DropdownMenuItem(value: 'sftp', child: Text('SFTP')),
@@ -291,21 +372,61 @@ class _AddProfileDialogState extends State<_AddProfileDialog> {
                 onChanged: (v) => setState(() => _type = v!),
               ),
               const SizedBox(height: 8),
-              TextFormField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Name', border: OutlineInputBorder()), style: const TextStyle(color: OneDarkColors.fg)),
+              TextFormField(
+                controller: _nameCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Name',
+                  border: OutlineInputBorder(),
+                ),
+                style: TextStyle(color: OneDarkColors.fg),
+              ),
               const SizedBox(height: 8),
-              TextFormField(controller: _hostCtrl, decoration: const InputDecoration(labelText: 'Host', border: OutlineInputBorder()), style: const TextStyle(color: OneDarkColors.fg)),
+              TextFormField(
+                controller: _hostCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Host',
+                  border: OutlineInputBorder(),
+                ),
+                style: TextStyle(color: OneDarkColors.fg),
+              ),
               const SizedBox(height: 8),
-              TextFormField(controller: _portCtrl, decoration: const InputDecoration(labelText: 'Port', border: OutlineInputBorder()), style: const TextStyle(color: OneDarkColors.fg), keyboardType: TextInputType.number),
+              TextFormField(
+                controller: _portCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Port',
+                  border: OutlineInputBorder(),
+                ),
+                style: TextStyle(color: OneDarkColors.fg),
+                keyboardType: TextInputType.number,
+              ),
               const SizedBox(height: 8),
-              TextFormField(controller: _userCtrl, decoration: const InputDecoration(labelText: 'Username', border: OutlineInputBorder()), style: const TextStyle(color: OneDarkColors.fg)),
+              TextFormField(
+                controller: _userCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Username',
+                  border: OutlineInputBorder(),
+                ),
+                style: TextStyle(color: OneDarkColors.fg),
+              ),
               const SizedBox(height: 8),
-              TextFormField(controller: _passCtrl, decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder()), obscureText: true, style: const TextStyle(color: OneDarkColors.fg)),
+              TextFormField(
+                controller: _passCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  border: OutlineInputBorder(),
+                ),
+                obscureText: true,
+                style: TextStyle(color: OneDarkColors.fg),
+              ),
             ],
           ),
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
         FilledButton(
           onPressed: () {
             if (_form.currentState!.validate() && mounted) {
@@ -344,9 +465,15 @@ class _RemoteFileView extends StatelessWidget {
       itemBuilder: (context, i) {
         final e = entries[i];
         return ListTile(
-          leading: Icon(e.isDir ? Icons.folder : Icons.insert_drive_file, color: e.isDir ? OneDarkColors.amber : OneDarkColors.fg),
-          title: Text(e.name, style: const TextStyle(color: OneDarkColors.fg)),
-          subtitle: Text(e.isDir ? 'Folder' : 'File', style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+          leading: Icon(
+            e.isDir ? Icons.folder : Icons.insert_drive_file,
+            color: e.isDir ? OneDarkColors.amber : OneDarkColors.fg,
+          ),
+          title: Text(e.name, style: TextStyle(color: OneDarkColors.fg)),
+          subtitle: Text(
+            e.isDir ? 'Folder' : 'File',
+            style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+          ),
         );
       },
     );

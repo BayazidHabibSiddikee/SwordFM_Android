@@ -10,14 +10,8 @@ import '../theme/theme.dart';
 class PreviewPanel extends StatefulWidget {
   final FileItem? item;
   final double width;
-  final bool isVisible;
 
-  const PreviewPanel({
-    super.key,
-    required this.item,
-    required this.width,
-    required this.isVisible,
-  });
+  const PreviewPanel({super.key, required this.item, required this.width});
 
   @override
   State<PreviewPanel> createState() => _PreviewPanelState();
@@ -35,18 +29,28 @@ class _PreviewPanelState extends State<PreviewPanel> {
   @override
   void didUpdateWidget(covariant PreviewPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.item?.path != widget.item?.path ||
-        !oldWidget.isVisible && widget.isVisible) {
+    if (oldWidget.item?.path != widget.item?.path) {
       _loadContent();
     }
   }
 
   Future<void> _loadContent() async {
     if (widget.item == null) {
-      setState(() { _content = ''; _error = null; _pdfDocument = null; _pdfPageBytes = null; });
+      setState(() {
+        _content = '';
+        _error = null;
+        _pdfDocument = null;
+        _pdfPageBytes = null;
+      });
       return;
     }
-    setState(() { _loading = true; _content = ''; _error = null; _pdfDocument = null; _pdfPageBytes = null; });
+    setState(() {
+      _loading = true;
+      _content = '';
+      _error = null;
+      _pdfDocument = null;
+      _pdfPageBytes = null;
+    });
 
     try {
       final path = widget.item!.path;
@@ -74,9 +78,14 @@ class _PreviewPanelState extends State<PreviewPanel> {
         }
       }
     } catch (e) {
-      setState(() { _error = 'Failed to load preview: $e'; });
+      setState(() {
+        _error = 'Failed to load preview: $e';
+      });
     } finally {
-      if (mounted) setState(() { _loading = false; });
+      if (mounted)
+        setState(() {
+          _loading = false;
+        });
     }
   }
 
@@ -102,7 +111,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    if (!widget.isVisible || item == null) {
+    if (item == null) {
       return const SizedBox.shrink();
     }
 
@@ -124,7 +133,11 @@ class _PreviewPanelState extends State<PreviewPanel> {
                   Expanded(
                     child: Text(
                       item.name,
-                      style: const TextStyle(color: OneDarkColors.fg, fontSize: 13, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        color: OneDarkColors.fg,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -143,11 +156,16 @@ class _PreviewPanelState extends State<PreviewPanel> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _error != null
-                      ? Center(child: Text(_error!, style: const TextStyle(color: OneDarkColors.red)))
-                      : SingleChildScrollView(
-                          padding: const EdgeInsets.all(12),
-                          child: _buildPreview(),
-                        ),
+                  ? Center(
+                      child: Text(
+                        _error!,
+                        style: TextStyle(color: OneDarkColors.red),
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      padding: const EdgeInsets.all(12),
+                      child: _buildPreview(),
+                    ),
             ),
           ],
         ),
@@ -166,7 +184,8 @@ class _PreviewPanelState extends State<PreviewPanel> {
         child: Image.file(
           File(item.path),
           fit: BoxFit.contain,
-          errorBuilder: (_, _, _) => const Icon(Icons.broken_image, size: 48, color: OneDarkColors.fgDim),
+          errorBuilder: (_, _, _) =>
+              Icon(Icons.broken_image, size: 48, color: OneDarkColors.fgDim),
         ),
       );
     }
@@ -174,16 +193,24 @@ class _PreviewPanelState extends State<PreviewPanel> {
       return MarkdownBody(
         data: _content,
         styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-          p: const TextStyle(color: OneDarkColors.fg, fontSize: 13),
-          code: const TextStyle(color: OneDarkColors.amber, fontFamily: 'monospace', fontSize: 12),
-          codeblockDecoration: const BoxDecoration(color: OneDarkColors.dim),
+          p: TextStyle(color: OneDarkColors.fg, fontSize: 13),
+          code: TextStyle(
+            color: OneDarkColors.amber,
+            fontFamily: 'monospace',
+            fontSize: 12,
+          ),
+          codeblockDecoration: BoxDecoration(color: OneDarkColors.dim),
         ),
       );
     }
     if (item.isText) {
       return SelectableText(
         _content,
-        style: const TextStyle(color: OneDarkColors.fg, fontSize: 12, fontFamily: 'monospace'),
+        style: TextStyle(
+          color: OneDarkColors.fg,
+          fontSize: 12,
+          fontFamily: 'monospace',
+        ),
       );
     }
     if (item.isDirectory) {
@@ -207,14 +234,21 @@ class _PreviewPanelState extends State<PreviewPanel> {
                     ? () async {
                         final doc = _pdfDocument!;
                         await doc.close();
-                        final newDoc = await PdfDocument.openFile(widget.item!.path);
-                        setState(() { _pdfDocument = newDoc; _currentPdfPage--; });
+                        final newDoc = await PdfDocument.openFile(
+                          widget.item!.path,
+                        );
+                        setState(() {
+                          _pdfDocument = newDoc;
+                          _currentPdfPage--;
+                        });
                         await _renderPdfPage(newDoc, _currentPdfPage);
                       }
                     : null,
               ),
-              Text('Page $_currentPdfPage / $_pdfPageCount',
-                  style: const TextStyle(color: OneDarkColors.fg, fontSize: 12)),
+              Text(
+                'Page $_currentPdfPage / $_pdfPageCount',
+                style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
+              ),
               IconButton(
                 icon: const Icon(Icons.chevron_right, size: 20),
                 onPressed: _currentPdfPage < _pdfPageCount
@@ -234,8 +268,11 @@ class _PreviewPanelState extends State<PreviewPanel> {
                 child: Image.memory(
                   _pdfPageBytes!,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) =>
-                      const Icon(Icons.picture_as_pdf, size: 48, color: OneDarkColors.fgDim),
+                  errorBuilder: (_, _, _) => Icon(
+                    Icons.picture_as_pdf,
+                    size: 48,
+                    color: OneDarkColors.fgDim,
+                  ),
                 ),
               )
             : const Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -250,8 +287,12 @@ class _PreviewPanelState extends State<PreviewPanel> {
       children: [
         _metaRow('Size', item.formattedSize),
         _metaRow('Modified', item.formattedDate),
-        _metaRow('Type',
-            item.extension.isEmpty ? 'Folder' : item.extension.toUpperCase().replaceAll('.', '')),
+        _metaRow(
+          'Type',
+          item.extension.isEmpty
+              ? 'Folder'
+              : item.extension.toUpperCase().replaceAll('.', ''),
+        ),
         _metaRow('Path', item.path),
       ],
     );
@@ -265,7 +306,10 @@ class _PreviewPanelState extends State<PreviewPanel> {
         children: [
           const SizedBox(width: 70),
           Expanded(
-            child: Text(value, style: const TextStyle(color: OneDarkColors.fg, fontSize: 12)),
+            child: Text(
+              value,
+              style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
+            ),
           ),
         ],
       ),

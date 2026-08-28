@@ -44,9 +44,10 @@ void main() {
       await tester.pumpWidget(const SwordFM());
       await tester.pump(const Duration(milliseconds: 200));
 
-      // Sidebar places tiles are rendered; no overflow exception thrown.
-      expect(find.text('Downloads'), findsOneWidget);
-      expect(find.text('Documents'), findsOneWidget);
+      // Sidebar tiles are rendered within the 160px drawer; no overflow
+      // exception thrown.
+      expect(find.text('Home'), findsOneWidget);
+      expect(find.text('Places'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 

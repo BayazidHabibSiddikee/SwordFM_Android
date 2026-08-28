@@ -19,8 +19,8 @@ class TerminalService {
   /// Returns true if a terminal session was launched.
   static Future<bool> openTerminalAt(String path) async {
     try {
-      final ok = await _channel
-              .invokeMethod<bool>('openTerminalAt', {'path': path}) ??
+      final ok =
+          await _channel.invokeMethod<bool>('openTerminalAt', {'path': path}) ??
           false;
       if (ok) return true;
     } on PlatformException {

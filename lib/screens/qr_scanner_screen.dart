@@ -32,7 +32,10 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
       Navigator.pop(context, code);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid QR code format'), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('Invalid QR code format'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -55,10 +58,10 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Scan QR Code', style: TextStyle(color: OneDarkColors.fg)),
+        title: Text('Scan QR Code', style: TextStyle(color: OneDarkColors.fg)),
         backgroundColor: OneDarkColors.bgDark,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: OneDarkColors.fg),
+          icon: Icon(Icons.arrow_back, color: OneDarkColors.fg),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -77,7 +80,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                   child: _buildCameraView(),
                 ),
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   'Point camera at a SwordFM QR code',
                   style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13),
                 ),
@@ -91,12 +94,19 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.check_circle, color: OneDarkColors.green, size: 20),
+                        Icon(
+                          Icons.check_circle,
+                          color: OneDarkColors.green,
+                          size: 20,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             _lastResult!,
-                            style: const TextStyle(color: OneDarkColors.cyan, fontSize: 12),
+                            style: TextStyle(
+                              color: OneDarkColors.cyan,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
                       ],

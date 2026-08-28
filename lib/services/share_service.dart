@@ -6,9 +6,7 @@ import 'package:flutter/services.dart';
 /// Returns false when sharing is unavailable (non-Android embedder, no channel,
 /// or no shareable files) so the caller can surface a fallback message.
 class ShareService {
-  static const MethodChannel _channel = MethodChannel(
-    'com.swordfm/share',
-  );
+  static const MethodChannel _channel = MethodChannel('com.swordfm/share');
 
   /// Shares [paths] via the system share sheet.
   ///
@@ -18,8 +16,9 @@ class ShareService {
     final files = paths.where((p) => !p.endsWith('/')).toList();
     if (files.isEmpty) return false;
     try {
-      return await _channel
-              .invokeMethod<bool>('shareFiles', {'paths': files}) ??
+      return await _channel.invokeMethod<bool>('shareFiles', {
+            'paths': files,
+          }) ??
           false;
     } on PlatformException {
       return false;

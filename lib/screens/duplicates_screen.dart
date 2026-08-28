@@ -9,7 +9,9 @@ import '../services/archive_service.dart';
 /// Screen that scans directories for duplicate files based on SHA-256 hash.
 class DuplicatesScreen extends StatefulWidget {
   final List<String> scanPaths;
-  const DuplicatesScreen({super.key, this.scanPaths = const ['/home', '/home/user/Downloads']});
+  // Empty means "scan the app home directory" (resolved at scan time so the
+  // platform-aware AppPaths values are used on Android).
+  const DuplicatesScreen({super.key, this.scanPaths = const []});
 
   @override
   State<DuplicatesScreen> createState() => _DupsState();
@@ -22,10 +24,16 @@ class _DupsState extends State<DuplicatesScreen> {
   int _totalWastedBytes = 0;
 
   Future<void> _scan() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
+      final roots = widget.scanPaths.isNotEmpty
+          ? widget.scanPaths
+          : <String>[AppPaths.home];
       final allPaths = <String>[];
-      for (final root in widget.scanPaths) {
+      for (final root in roots) {
         final dir = Directory(root);
         if (!await dir.exists()) continue;
         await for (final entity in dir.list(recursive: true)) {
@@ -34,9 +42,21 @@ class _DupsState extends State<DuplicatesScreen> {
       }
       final result = await ArchiveService.findDuplicates(allPaths);
       if (mounted) {
+        // Wasted bytes = sum of every duplicate except the largest one kept.
         int wasted = 0;
         for (final group in result.values) {
-          wasted += group.length > 1 ? group.length - 1 : 0;
+          if (group.length < 2) continue;
+          int groupBytes = 0;
+          int largest = 0;
+          for (final path in group) {
+            int size = 0;
+            try {
+              size = await File(path).length();
+            } catch (_) {}
+            groupBytes += size;
+            if (size > largest) largest = size;
+          }
+          wasted += groupBytes - largest;
         }
         setState(() {
           _duplicates = result;
@@ -45,7 +65,11 @@ class _DupsState extends State<DuplicatesScreen> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() { _error = 'Scan failed: $e'; _loading = false; });
+      if (mounted)
+        setState(() {
+          _error = 'Scan failed: $e';
+          _loading = false;
+        });
     }
   }
 
@@ -67,17 +91,30 @@ class _DupsState extends State<DuplicatesScreen> {
       items: [
         _menuItem('Rename', Icons.edit, () => _showRenameDialog(path)),
         _menuItem('Delete', Icons.delete, () => _deleteFile(path)),
-        _menuItem('Properties', Icons.info_outline, () => _showProperties(path)),
+        _menuItem(
+          'Properties',
+          Icons.info_outline,
+          () => _showProperties(path),
+        ),
       ],
     );
   }
 
-  PopupMenuItem<Object?> _menuItem(String title, IconData icon, VoidCallback onTap) {
-    return PopupMenuItem<Object?>(onTap: onTap, child: Row(children: [
-      Icon(icon, size: 18, color: OneDarkColors.fg),
-      const SizedBox(width: 12),
-      Text(title, style: const TextStyle(color: OneDarkColors.fg)),
-    ]));
+  PopupMenuItem<Object?> _menuItem(
+    String title,
+    IconData icon,
+    VoidCallback onTap,
+  ) {
+    return PopupMenuItem<Object?>(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: OneDarkColors.fg),
+          const SizedBox(width: 12),
+          Text(title, style: TextStyle(color: OneDarkColors.fg)),
+        ],
+      ),
+    );
   }
 
   void _showRenameDialog(String path) {
@@ -86,17 +123,27 @@ class _DupsState extends State<DuplicatesScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: const Text('Rename', style: TextStyle(color: OneDarkColors.fg)),
-        content: TextField(controller: controller, style: const TextStyle(color: OneDarkColors.fg), autofocus: true),
+        title: Text('Rename', style: TextStyle(color: OneDarkColors.fg)),
+        content: TextField(
+          controller: controller,
+          style: TextStyle(color: OneDarkColors.fg),
+          autofocus: true,
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () async {
               if (!mounted) return;
               final newName = controller.text.trim();
               if (newName.isNotEmpty && newName != p.basename(path)) {
                 try {
-                  await FileUtils.rename(path, p.join(p.dirname(path), newName));
+                  await FileUtils.rename(
+                    path,
+                    p.join(p.dirname(path), newName),
+                  );
                   if (mounted) _scan();
                 } catch (_) {}
               }
@@ -114,10 +161,19 @@ class _DupsState extends State<DuplicatesScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: Text('Delete "${p.basename(path)}"?', style: const TextStyle(color: OneDarkColors.fg)),
+        title: Text(
+          'Delete "${p.basename(path)}"?',
+          style: TextStyle(color: OneDarkColors.fg),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete', style: TextStyle(color: OneDarkColors.red))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Delete', style: TextStyle(color: OneDarkColors.red)),
+          ),
         ],
       ),
     );
@@ -135,7 +191,10 @@ class _DupsState extends State<DuplicatesScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
-        title: Text(p.basename(path), style: const TextStyle(color: OneDarkColors.fg)),
+        title: Text(
+          p.basename(path),
+          style: TextStyle(color: OneDarkColors.fg),
+        ),
         content: FutureBuilder<FileStat>(
           future: file.stat(),
           builder: (context, snapshot) {
@@ -148,14 +207,22 @@ class _DupsState extends State<DuplicatesScreen> {
                 children: [
                   _propRow('Name', p.basename(path)),
                   _propRow('Size', _formatBytes(stat.size)),
-                  _propRow('Modified', DateFormat('yyyy-MM-dd HH:mm').format(stat.modified)),
+                  _propRow(
+                    'Modified',
+                    DateFormat('yyyy-MM-dd HH:mm').format(stat.modified),
+                  ),
                   _propRow('Path', path),
                 ],
               ),
             );
           },
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
@@ -163,17 +230,32 @@ class _DupsState extends State<DuplicatesScreen> {
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+    if (bytes < 1024 * 1024 * 1024)
+      return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
     return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(1)} GB';
   }
 
   Widget _propRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SizedBox(width: 80, child: Text(label, style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 12))),
-        Expanded(child: Text(value, style: const TextStyle(color: OneDarkColors.fg, fontSize: 12))),
-      ]),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              label,
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -182,80 +264,120 @@ class _DupsState extends State<DuplicatesScreen> {
     return Scaffold(
       backgroundColor: OneDarkColors.bg,
       appBar: AppBar(
-        title: const Text('Duplicate Files', style: TextStyle(color: OneDarkColors.fg)),
+        title: Text(
+          'Duplicate Files',
+          style: TextStyle(color: OneDarkColors.fg),
+        ),
         backgroundColor: OneDarkColors.bgDark,
         foregroundColor: OneDarkColors.fg,
-        iconTheme: const IconThemeData(color: OneDarkColors.fg),
+        iconTheme: IconThemeData(color: OneDarkColors.fg),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _scan, tooltip: 'Rescan'),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _scan,
+            tooltip: 'Rescan',
+          ),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: OneDarkColors.red)))
-              : _duplicates.isEmpty
-                  ? const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.check_circle, size: 64, color: OneDarkColors.green),
-                          SizedBox(height: 16),
-                          Text('No duplicates found', style: TextStyle(color: OneDarkColors.fg, fontSize: 18)),
-                        ],
+          ? Center(
+              child: Text(_error!, style: TextStyle(color: OneDarkColors.red)),
+            )
+          : _duplicates.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.check_circle,
+                    size: 64,
+                    color: OneDarkColors.green,
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'No duplicates found',
+                    style: TextStyle(color: OneDarkColors.fg, fontSize: 18),
+                  ),
+                ],
+              ),
+            )
+          : Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  color: OneDarkColors.bgDark,
+                  child: Row(
+                    children: [
+                      Icon(Icons.info, color: OneDarkColors.amber, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${_duplicates.length} duplicate group(s) — '
+                        'up to ${_formatBytes(_totalWastedBytes)} could be freed',
+                        style: TextStyle(color: OneDarkColors.fg),
                       ),
-                    )
-                  : Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          color: OneDarkColors.bgDark,
-                          child: Row(
-                            children: [
-                              Icon(Icons.info, color: OneDarkColors.amber, size: 20),
-                              const SizedBox(width: 8),
-                              Text(
-                                '${_duplicates.length} duplicate group(s) — '
-                                'up to ${_formatBytes(_totalWastedBytes)} could be freed',
-                                style: const TextStyle(color: OneDarkColors.fg),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: _duplicates.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final entry = _duplicates.entries.elementAt(index);
+                      return ExpansionTile(
+                        leading: Icon(
+                          Icons.error_outline,
+                          color: OneDarkColors.red,
+                        ),
+                        title: Text(
+                          '${entry.value.length} files (${_formatBytes(entry.value.first.length)})',
+                          style: TextStyle(color: OneDarkColors.fg),
+                        ),
+                        subtitle: Text(
+                          p.basename(entry.value.first),
+                          style: TextStyle(color: OneDarkColors.fgDim),
+                        ),
+                        children: entry.value.map((path) {
+                          return ListTile(
+                            dense: true,
+                            leading: Icon(
+                              Icons.insert_drive_file,
+                              size: 16,
+                              color: OneDarkColors.fgDim,
+                            ),
+                            title: Text(
+                              path,
+                              style: TextStyle(
+                                color: OneDarkColors.fg,
+                                fontSize: 12,
                               ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: ListView.separated(
-                            itemCount: _duplicates.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final entry = _duplicates.entries.elementAt(index);
-                              return ExpansionTile(
-                                leading: Icon(Icons.error_outline, color: OneDarkColors.red),
-                                title: Text(
-                                  '${entry.value.length} files (${_formatBytes(entry.value.first.length)})',
-                                  style: const TextStyle(color: OneDarkColors.fg),
-                                ),
-                                subtitle: Text(p.basename(entry.value.first),
-                                    style: const TextStyle(color: OneDarkColors.fgDim)),
-                                children: entry.value.map((path) {
-                                  return ListTile(
-                                    dense: true,
-                                    leading: const Icon(Icons.insert_drive_file, size: 16, color: OneDarkColors.fgDim),
-                                    title: Text(path, style: const TextStyle(color: OneDarkColors.fg, fontSize: 12)),
-                                    subtitle: Text(p.dirname(path), style: const TextStyle(color: OneDarkColors.fgDim, fontSize: 10)),
-                                    trailing: IconButton(
-                                      icon: const Icon(Icons.delete_outline, color: OneDarkColors.red),
-                                      onPressed: () => _deleteFile(path),
-                                      tooltip: 'Delete',
-                                    ),
-                                    onLongPress: () => _showContextMenu(path),
-                                  );
-                                }).toList(),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
+                            ),
+                            subtitle: Text(
+                              p.dirname(path),
+                              style: TextStyle(
+                                color: OneDarkColors.fgDim,
+                                fontSize: 10,
+                              ),
+                            ),
+                            trailing: IconButton(
+                              icon: Icon(
+                                Icons.delete_outline,
+                                color: OneDarkColors.red,
+                              ),
+                              onPressed: () => _deleteFile(path),
+                              tooltip: 'Delete',
+                            ),
+                            onLongPress: () => _showContextMenu(path),
+                          );
+                        }).toList(),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }

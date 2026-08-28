@@ -4,7 +4,6 @@
 /// - Local volumes are queried via a native Kotlin method that calls
 ///   [Environment.getExternalStorageDirectories()].
 /// - Rclone mounts are listed from the user's config file (~/.config/rclone/rclone.conf).
-import 'dart:async';
 import 'package:flutter/services.dart';
 
 class StorageVolume {
@@ -29,7 +28,10 @@ Future<List<StorageVolume>> getStorageVolumes() async {
   try {
     final raw = await _channel.invokeMethod<List<dynamic>>('getStorageVolumes');
     if (raw == null) return [];
-    return raw.whereType<Map<dynamic, dynamic>>().map((m) => StorageVolume.fromJson(m)).toList();
+    return raw
+        .whereType<Map<dynamic, dynamic>>()
+        .map((m) => StorageVolume.fromJson(m))
+        .toList();
   } on PlatformException {
     return [];
   } catch (_) {

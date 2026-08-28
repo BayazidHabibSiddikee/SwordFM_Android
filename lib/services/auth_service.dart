@@ -20,8 +20,7 @@ class AuthService {
   bool get isEmailVerified => currentUser?.emailVerified ?? false;
 
   /// Returns true if the user is signed in AND has verified their email.
-  bool get isAuthenticated =>
-      currentUser != null && currentUser!.emailVerified;
+  bool get isAuthenticated => currentUser != null && currentUser!.emailVerified;
 
   // ─── Sign Up ────────────────────────────────────────────────────────────────
 
@@ -121,16 +120,22 @@ class AuthService {
   /// Converts a Firebase auth exception into a user-friendly message.
   static String errorMessage(Exception e) {
     final msg = e.toString().toLowerCase();
-    if (msg.contains('weak-password')) return 'Password should be at least 6 characters';
-    if (msg.contains('email-already-in-use')) return 'This email is already registered';
-    if (msg.contains('invalid-email')) return 'Please enter a valid email address';
-    if (msg.contains('user-not-found')) return 'No account found with this email';
+    if (msg.contains('weak-password'))
+      return 'Password should be at least 6 characters';
+    if (msg.contains('email-already-in-use'))
+      return 'This email is already registered';
+    if (msg.contains('invalid-email'))
+      return 'Please enter a valid email address';
+    if (msg.contains('user-not-found'))
+      return 'No account found with this email';
     if (msg.contains('wrong-password')) return 'Incorrect password';
     if (msg.contains('invalid-credential') || msg.contains('user-disabled')) {
       return 'This account has been disabled';
     }
-    if (msg.contains('too-many-requests')) return 'Too many attempts. Please try again later';
-    if (msg.contains('network-request-failed')) return 'Network error. Check your connection';
+    if (msg.contains('too-many-requests'))
+      return 'Too many attempts. Please try again later';
+    if (msg.contains('network-request-failed'))
+      return 'Network error. Check your connection';
     return 'Authentication failed. Please try again';
   }
 }
