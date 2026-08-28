@@ -8,6 +8,7 @@ import '../services/open_with_service.dart';
 import '../services/share_service.dart';
 import '../services/terminal_service.dart';
 import '../screens/lan_screen.dart';
+import 'preview_panel.dart';
 import 'convert_dialog.dart';
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
@@ -502,6 +503,42 @@ class _FileBrowserState extends State<FileBrowser> {
       } catch (e) {
         _openFailed(e);
       }
+    }
+  }
+
+  /// Single-tap on a file: select it for the preview panel. On phones the
+  /// side panel is hidden, so open the preview in a bottom sheet instead.
+  Future<void> _showFile(FileItem item) async {
+    widget.onItemSelected(item);
+    if (MediaQuery.of(context).size.width < 600) {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: OneDarkColors.bgDark,
+        isScrollControlled: true,
+        builder: (sheetContext) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(sheetContext).size.height * 0.6,
+            child: PreviewPanel(item: item, width: double.infinity),
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Shared tap handling for list/grid items: multi-select toggles the
+  /// checkbox; folders keep select-then-open; a single tap on a file opens
+  /// the preview (side panel on desktop, bottom sheet on phones).
+  void _handleItemTap(FileItem item, bool isSelected) {
+    if (_selectionMode == SelectionMode.multi) {
+      _toggleSelection(item.path);
+    } else if (item.isDirectory) {
+      if (isSelected) {
+        _openItem(item);
+      } else {
+        _toggleSelection(item.path);
+      }
+    } else {
+      _showFile(item);
     }
   }
 
@@ -2349,15 +2386,7 @@ class _FileBrowserState extends State<FileBrowser> {
                   _showContextMenu(item, details.globalPosition),
               onSecondaryTapDown: (details) =>
                   _showContextMenu(item, details.globalPosition),
-              onTap: () {
-                if (_selectionMode == SelectionMode.multi) {
-                  _toggleSelection(item.path);
-                } else if (isSelected) {
-                  _openItem(item);
-                } else {
-                  _toggleSelection(item.path);
-                }
-              },
+              onTap: () => _handleItemTap(item, isSelected),
               child: Stack(
                 children: [
                   Container(
@@ -2459,10 +2488,14 @@ class _FileBrowserState extends State<FileBrowser> {
           onTap: () {
             if (_selectionMode == SelectionMode.multi) {
               _toggleSelection(item.path);
-            } else if (isSelected) {
-              _openItem(item);
+            } else if (item.isDirectory) {
+              if (isSelected) {
+                _openItem(item);
+              } else {
+                _toggleSelection(item.path);
+              }
             } else {
-              _toggleSelection(item.path);
+              _showFile(item);
             }
           },
           child: Container(
