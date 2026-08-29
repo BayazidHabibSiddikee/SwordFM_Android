@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fa;
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/theme.dart';
+import '../utils/file_utils.dart';
 import '../services/auth_service.dart';
 import '../services/entitlement_service.dart';
 import '../services/donation_service.dart';
@@ -28,11 +29,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _sortBy = 'Name';
   bool _bluetoothAutoConnect = false;
   int _lanPort = 8080;
+  int _trashAutoEmpty = 0;
 
   @override
   void initState() {
     super.initState();
     _refreshAccount();
+    _loadTrashAutoEmpty();
+  }
+
+  Future<void> _loadTrashAutoEmpty() async {
+    final policy = await FileUtils.loadTrashAutoEmpty();
+    if (mounted) setState(() => _trashAutoEmpty = policy);
   }
 
   Future<void> _refreshAccount() async {
@@ -232,6 +240,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'Ask before deleting',
             trailing: Switch(value: true, onChanged: (_) {}),
           ),
+          _trashAutoEmptyTile(),
 
           const SizedBox(height: 16),
 
@@ -666,5 +675,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
     }
+  }
+
+  Widget _trashAutoEmptyTile() {
+    final labels = {0: 'Never', 1: 'After 7 days', 2: 'After 30 days'};
+    return _settingTile(
+      icon: Icons.auto_delete,
+      title: 'Auto-Empty Trash',
+      subtitle: labels[_trashAutoEmpty] ?? 'Never',
+      trailing: DropdownButton<int>(
+        value: _trashAutoEmpty,
+        dropdownColor: OneDarkColors.bgDark,
+        items: const [
+          DropdownMenuItem(value: 0, child: Text('Never')),
+          DropdownMenuItem(value: 1, child: Text('7 days')),
+          DropdownMenuItem(value: 2, child: Text('30 days')),
+        ],
+        onChanged: (v) async {
+          if (v == null) return;
+          await FileUtils.saveTrashAutoEmpty(v);
+          setState(() => _trashAutoEmpty = v);
+        },
+      ),
+    );
   }
 }

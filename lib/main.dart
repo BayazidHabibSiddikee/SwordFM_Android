@@ -8,7 +8,7 @@ import 'theme/theme.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'utils/app_paths.dart' show StoragePermissions;
 import 'widgets/file_browser.dart';
-import 'utils/file_utils.dart' show FileItem;
+import 'utils/file_utils.dart' show FileItem, FileUtils;
 import 'widgets/preview_panel.dart';
 import 'screens/search_screen.dart';
 import 'screens/trash_screen.dart';
@@ -136,6 +136,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       _loadBookmarks();
       _loadHomeDirs();
       _ensureStorageAccess();
+      FileUtils.autoEmptyTrashFromPrefs();
     });
   }
 

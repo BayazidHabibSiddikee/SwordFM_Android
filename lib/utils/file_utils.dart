@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'constants.dart' show AppPaths;
 export 'constants.dart';
@@ -628,6 +629,19 @@ class FileUtils {
     await Directory(path).create(recursive: true);
   }
 
+  /// Applies POSIX permission bits via `chmod`. Best-effort on Android —
+  /// shared/emulated storage (FAT) ignores mode bits; works on app-internal
+  /// files and Linux desktop. Returns true when chmod reported success.
+  static Future<bool> setPermissions(String path, int mode) async {
+    try {
+      final octal = mode.toRadixString(8);
+      final result = await Process.run('chmod', [octal, path]);
+      return result.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // --- Clipboard ---
 
   static String? _clipboardOp = 'none'; // 'copy' | 'cut'
@@ -730,5 +744,53 @@ class FileUtils {
       await dir.delete(recursive: true);
       await dir.create(recursive: true);
     }
+  }
+
+  // --- Trash auto-empty ---
+
+  /// Trash age policy: 0 = never, 1 = 7 days, 2 = 30 days.
+  static const _kTrashAutoEmptyKey = 'trash_auto_empty';
+
+  /// Loads the current trash auto-empty policy (0/1/2).
+  static Future<int> loadTrashAutoEmpty() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_kTrashAutoEmptyKey) ?? 0;
+  }
+
+  /// Saves the trash auto-empty policy.
+  static Future<void> saveTrashAutoEmpty(int policy) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kTrashAutoEmptyKey, policy);
+  }
+
+  /// Deletes trash items older than the current policy threshold.
+  /// Call this on app startup.
+  static Future<void> autoEmptyTrashFromPrefs() async {
+    final policy = await loadTrashAutoEmpty();
+    if (policy == 0) return; // 'never'
+    final maxAge = Duration(days: policy == 1 ? 7 : 30);
+    await autoEmptyTrash(olderThan: maxAge);
+  }
+
+  /// Permanently deletes trashed items older than [olderThan]. Trash entries
+  /// are stored as `<epochMs>_<originalName>`, so the age is parsed from the
+  /// numeric prefix. No-op when the trash is empty or the folder is missing.
+  static Future<void> autoEmptyTrash({required Duration olderThan}) async {
+    final trashDir = await AppPaths.trashDir;
+    final dir = Directory(trashDir);
+    if (!await dir.exists()) return;
+    final cutoffMs =
+        DateTime.now().subtract(olderThan).millisecondsSinceEpoch;
+    try {
+      await for (final entity in dir.list()) {
+        final name = p.basename(entity.path);
+        final ts = int.tryParse(name.split('_').first);
+        if (ts != null && ts < cutoffMs) {
+          try {
+            await entity.delete(recursive: true);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
   }
 }
