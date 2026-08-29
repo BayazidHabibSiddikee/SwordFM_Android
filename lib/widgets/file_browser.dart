@@ -262,6 +262,10 @@ class FileBrowser extends StatefulWidget {
   /// (for the sidebar item-count status).
   final ValueChanged<int>? onItemCountChanged;
 
+  /// Called when the user bookmarks the current folder (toolbar star /
+  /// context-menu "Bookmark This Folder"). Receives the folder path.
+  final ValueChanged<String>? onBookmarkCurrentPath;
+
   const FileBrowser({
     super.key,
     required this.initialPath,
@@ -271,6 +275,7 @@ class FileBrowser extends StatefulWidget {
     this.onPathChanged,
     this.onMarksChanged,
     this.onItemCountChanged,
+    this.onBookmarkCurrentPath,
   });
 
   @override
@@ -1144,13 +1149,16 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   void _batchRename() {
-    if (_selectedPaths.isEmpty) return;
+    final paths = _actionPaths;
+    if (paths.isEmpty) return;
     showDialog(
       context: context,
-      builder: (_) =>
-          _BatchRenameDialog(selectedPaths: _selectedPaths.toList()),
+      builder: (_) => _BatchRenameDialog(selectedPaths: paths),
     ).then((_) {
-      if (mounted) _loadDirectory();
+      if (mounted) {
+        _clearMarks();
+        _loadDirectory();
+      }
     });
   }
 
@@ -1439,13 +1447,7 @@ class _FileBrowserState extends State<FileBrowser> {
               _propRow('Size', item.formattedSize),
               _propRow('Modified', item.formattedDate),
               _propRow('Path', item.path),
-              FutureBuilder<String>(
-                future: item.permissions,
-                builder: (ctx, snap) {
-                  if (!snap.hasData) return const SizedBox.shrink();
-                  return _propRow('Permissions', snap.data!);
-                },
-              ),
+              _buildPermissionsEditor(item),
               if (item.isDirectory) ...[
                 const SizedBox(height: 4),
                 _buildFolderSizeFutureBuilder(item),
@@ -1460,6 +1462,60 @@ class _FileBrowserState extends State<FileBrowser> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Properties-dialog row: shows the rwx/permission string plus quick chmod
+  /// presets (644 / 755 / 777). Best-effort on Android shared storage.
+  Widget _buildPermissionsEditor(FileItem item) {
+    return StatefulBuilder(
+      builder: (ctx, setDialogState) {
+        return FutureBuilder<String>(
+          future: item.permissions,
+          builder: (context, snap) {
+            final perms = snap.data ?? '';
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _propRow('Permissions', perms),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8, left: 80),
+                  child: Wrap(
+                    spacing: 8,
+                    children: [644, 755, 777].map((mode) {
+                      return ActionChip(
+                        label: Text('chmod $mode'),
+                        labelStyle: const TextStyle(fontSize: 11),
+                        backgroundColor: OneDarkColors.dim,
+                        onPressed: () async {
+                          final ok = await FileUtils.setPermissions(
+                            item.path,
+                            mode,
+                          );
+                          if (!context.mounted) return;
+                          setDialogState(() {});
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                ok
+                                    ? 'Permissions set to $mode'
+                                    : 'chmod failed (read-only or FAT storage)',
+                              ),
+                              backgroundColor: ok
+                                  ? OneDarkColors.green
+                                  : OneDarkColors.amber,
+                            ),
+                          );
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -1670,6 +1726,12 @@ class _FileBrowserState extends State<FileBrowser> {
             Icons.clear_all,
             _clearMarks,
           ),
+        if (_markedPaths.length > 1)
+          _menuItem(
+            'Batch Rename (${_markedPaths.length})',
+            Icons.drive_file_rename_outline,
+            _batchRename,
+          ),
         const PopupMenuDivider(),
         _menuItem('Rename', Icons.edit, () => _showRenameDialog(item)),
         _menuItem('Delete', Icons.delete, () => _confirmDelete(item)),
@@ -1691,7 +1753,7 @@ class _FileBrowserState extends State<FileBrowser> {
           () => _compressSelection([item.path]),
         ),
         const PopupMenuDivider(),
-        if (item.isMarkdown)
+        if (item.isText)
           _menuItem('Convert…', Icons.transform, () {
             Navigator.push(
               context,
@@ -2192,6 +2254,13 @@ class _FileBrowserState extends State<FileBrowser> {
               icon: Icon(Icons.terminal, color: OneDarkColors.fgDim),
               onPressed: () => _openTerminalHere(_currentPath),
               tooltip: 'Open Terminal',
+            ),
+            // Bookmark the current folder.
+            IconButton(
+              icon: Icon(Icons.bookmark_add, color: OneDarkColors.fgDim),
+              onPressed: () =>
+                  widget.onBookmarkCurrentPath?.call(_currentPath),
+              tooltip: 'Bookmark This Folder',
             ),
             // Folder graph — same feature as Linux SwordFM F3.
             IconButton(
@@ -2870,6 +2939,11 @@ class _FileBrowserState extends State<FileBrowser> {
           Icons.terminal,
           () => _openTerminalHere(_currentPath),
         ),
+        _menuItem(
+          'Bookmark This Folder',
+          Icons.bookmark_add,
+          () => widget.onBookmarkCurrentPath?.call(_currentPath),
+        ),
         const PopupMenuDivider(),
         _menuItem('New Folder', Icons.create_new_folder, _showNewFolderDialog),
         _menuItem('New File', Icons.note_add, _showNewFileDialog),
@@ -2923,18 +2997,29 @@ class _BatchRenameDialog extends StatefulWidget {
 class _BatchRenameDialogState extends State<_BatchRenameDialog> {
   final _prefixController = TextEditingController();
   final _suffixController = TextEditingController();
-  String _mode = 'prefix'; // 'prefix', 'suffix', or 'regex'
+  String _mode = 'prefix'; // 'prefix', 'suffix', 'regex', 'number'
   final _regexController = TextEditingController();
   final _replacementController = TextEditingController();
+  final _numberStartController = TextEditingController(text: '1');
+  final _numberPadController = TextEditingController(text: '2');
+  bool _numberBeforeExt = true;
 
   List<MapEntry<String, String>> get _previewEntries {
-    return widget.selectedPaths.map((path) {
+    final start = int.tryParse(_numberStartController.text) ?? 1;
+    final pad = int.tryParse(_numberPadController.text) ?? 2;
+    return widget.selectedPaths.asMap().entries.map((entry) {
+      final path = entry.value;
       final name = p.basename(path);
+      final ext = p.extension(name);
+      final base = p.basenameWithoutExtension(name);
       String newName;
       if (_mode == 'prefix') {
         newName = '${_prefixController.text}$name';
       } else if (_mode == 'suffix') {
         newName = '$name${_suffixController.text}';
+      } else if (_mode == 'number') {
+        final num = (start + entry.key).toString().padLeft(pad, '0');
+        newName = _numberBeforeExt ? '$num\_$name' : '${base}_$num$ext';
       } else {
         try {
           newName = name.replaceAll(
@@ -2945,8 +3030,6 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
           newName = name;
         }
       }
-      // MapEntry key = full source path (rename needs the path, not the
-      // bare basename); the preview below shows only the basename.
       return MapEntry(path, newName);
     }).toList();
   }
@@ -2957,6 +3040,8 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
     _suffixController.dispose();
     _regexController.dispose();
     _replacementController.dispose();
+    _numberStartController.dispose();
+    _numberPadController.dispose();
     super.dispose();
   }
 
@@ -2992,6 +3077,11 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
                     label: Text('Regex'),
                     icon: Icon(Icons.functions, size: 16),
                   ),
+                  ButtonSegment(
+                    value: 'number',
+                    label: Text('Number'),
+                    icon: Icon(Icons.pin, size: 16),
+                  ),
                 ],
                 selected: {_mode},
                 onSelectionChanged: (v) => setState(() => _mode = v.first),
@@ -3014,6 +3104,45 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
                     border: OutlineInputBorder(),
                   ),
                   style: TextStyle(color: OneDarkColors.fg),
+                ),
+              ] else if (_mode == 'number') ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _numberStartController,
+                        decoration: const InputDecoration(
+                          labelText: 'Start at',
+                          border: OutlineInputBorder(),
+                        ),
+                        style: TextStyle(color: OneDarkColors.fg),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _numberPadController,
+                        decoration: const InputDecoration(
+                          labelText: 'Pad to',
+                          border: OutlineInputBorder(),
+                        ),
+                        style: TextStyle(color: OneDarkColors.fg),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _numberBeforeExt,
+                      onChanged: (v) =>
+                          setState(() => _numberBeforeExt = v ?? true),
+                    ),
+                    const Text('Number before original name'),
+                  ],
                 ),
               ] else ...[
                 TextField(
