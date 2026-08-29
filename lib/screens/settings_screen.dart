@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fa;
 import 'package:url_launcher/url_launcher.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/theme.dart';
 import '../services/auth_service.dart';
 import '../services/entitlement_service.dart';
 import '../services/donation_service.dart';
+import '../widgets/file_browser.dart'
+    show ViewMode, viewModeNotifier, savePersistedViewMode, showHiddenNotifier;
 import 'privacy_policy_screen.dart';
 import 'auth_screen.dart';
 import 'duplicates_screen.dart';
@@ -24,19 +25,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool? _emailVerified;
   bool _isPremium = false;
   bool _loading = true;
-  bool _showHiddenFiles = false;
   String _sortBy = 'Name';
   bool _bluetoothAutoConnect = false;
   int _lanPort = 8080;
-  String _videoPlayerKey = 'default';
 
   @override
   void initState() {
     super.initState();
     _refreshAccount();
-    _loadVideoPlayerPref().then((key) {
-      if (mounted) setState(() => _videoPlayerKey = key);
-    });
   }
 
   Future<void> _refreshAccount() async {
@@ -177,32 +173,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
               themeNotifier.value++;
             },
           ),
-          _settingTile(
-            icon: Icons.grid_view,
-            title: 'Default View',
-            subtitle: 'Details',
-            trailing: DropdownButton<String>(
-              value: 'Details',
-              items: [
-                'Details',
-                'Grid',
-              ].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
-              onChanged: (_) {},
-            ),
+          ValueListenableBuilder<ViewMode>(
+            valueListenable: viewModeNotifier,
+            builder: (context, viewMode, _) {
+              return _settingTile(
+                icon: Icons.grid_view,
+                title: 'Default View',
+                subtitle: viewMode == ViewMode.grid ? 'Grid' : 'Details',
+                trailing: DropdownButton<ViewMode>(
+                  value: viewMode,
+                  dropdownColor: OneDarkColors.bgDark,
+                  items: const [
+                    DropdownMenuItem(
+                      value: ViewMode.details,
+                      child: Text('Details'),
+                    ),
+                    DropdownMenuItem(
+                      value: ViewMode.grid,
+                      child: Text('Grid'),
+                    ),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) savePersistedViewMode(v);
+                  },
+                ),
+              );
+            },
           ),
 
           const SizedBox(height: 16),
 
           // File Management
           _sectionTitle('File Management'),
-          _settingTile(
-            icon: Icons.visibility,
-            title: 'Show Hidden Files',
-            subtitle: 'Toggle to show dotfiles',
-            trailing: Switch(
-              value: _showHiddenFiles,
-              onChanged: (v) => setState(() => _showHiddenFiles = v),
-            ),
+          ValueListenableBuilder<bool>(
+            valueListenable: showHiddenNotifier,
+            builder: (context, showHidden, _) {
+              return _settingTile(
+                icon: Icons.visibility,
+                title: 'Show Hidden Files',
+                subtitle: 'Toggle to show dotfiles',
+                trailing: Switch(
+                  value: showHidden,
+                  onChanged: (v) => showHiddenNotifier.value = v,
+                ),
+              );
+            },
           ),
           _settingTile(
             icon: Icons.sort,
@@ -216,13 +231,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Delete Confirmation',
             subtitle: 'Ask before deleting',
             trailing: Switch(value: true, onChanged: (_) {}),
-          ),
-          _settingTile(
-            icon: Icons.play_arrow,
-            title: 'Preferred Video Player',
-            subtitle: _videoPlayerSubtitle(),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: _showVideoPlayerPicker,
           ),
 
           const SizedBox(height: 16),
@@ -501,7 +509,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? Text(subtitle, style: TextStyle(color: OneDarkColors.fgDim))
           : null,
       trailing: trailing,
-      onTap: onTap ?? (trailing is Switch ? null : () {}),
+            onTap: onTap,
     );
   }
 
@@ -658,68 +666,5 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Video player preference (persisted via shared_preferences)
-  // ---------------------------------------------------------------------------
-
-  static const _kVideoPlayer = 'swordfm_preferred_video_player';
-  static const _playerOptions = <String, String>{
-    'default': 'Default (system)',
-    'vlc': 'VLC',
-    'mpv': 'MPV',
-    'MX': 'MX Player',
-  };
-
-  Future<String> _loadVideoPlayerPref() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_kVideoPlayer) ?? 'default';
-  }
-
-  Future<void> _saveVideoPlayerPref(String key) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kVideoPlayer, key);
-  }
-
-  String _videoPlayerSubtitle() {
-    // Show the persisted preference once loaded, falling back to system.
-    return _playerOptions[_videoPlayerKey] ?? _playerOptions['default']!;
-  }
-
-  Future<void> _showVideoPlayerPicker() async {
-    final current = await _loadVideoPlayerPref();
-    if (!mounted) return;
-    await showDialog<String>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: OneDarkColors.bg,
-        title: Text(
-          'Preferred Video Player',
-          style: TextStyle(color: OneDarkColors.fg),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: _playerOptions.entries.map((e) {
-            final selected = e.key == current;
-            return RadioListTile<String>(
-              value: e.key,
-              groupValue: selected ? e.key : '',
-              title: Text(e.value, style: TextStyle(color: OneDarkColors.fg)),
-              activeColor: OneDarkColors.cyan,
-              dense: true,
-              onChanged: (v) {
-                if (v != null) Navigator.pop(context, v);
-              },
-            );
-          }).toList(),
-        ),
-      ),
-    ).then((selected) async {
-      if (selected != null && mounted) {
-        await _saveVideoPlayerPref(selected);
-        setState(() => _videoPlayerKey = selected); // refresh subtitle
-      }
-    });
   }
 }

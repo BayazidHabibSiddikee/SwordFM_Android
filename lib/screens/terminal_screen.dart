@@ -41,14 +41,18 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   Future<void> _startShell() async {
     // Prefer the requested directory; fall back to home, never '/' — root is
-    // read-only/locked on Android and makes the shell unusable.
+    // read-only/locked on Android and makes the shell unusable. Home is only
+    // used when it is actually writable (needs "All files access"), otherwise
+    // the shell lands in the app's own writable temp dir.
     var cwd = widget.startPath;
     if (cwd.isEmpty ||
         cwd == '/' ||
         !Directory(cwd).existsSync() ||
         !_canWrite(cwd)) {
-      cwd = AppPaths.home;
-      if (!Directory(cwd).existsSync()) cwd = Directory.systemTemp.path;
+      final home = AppPaths.home;
+      cwd = (Directory(home).existsSync() && _canWrite(home))
+          ? home
+          : Directory.systemTemp.path;
     }
     // /system/bin/sh always exists on Android; try the fuller shells first.
     final candidates = ['/system/bin/sh', '/bin/sh'];
@@ -115,16 +119,27 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
       backgroundColor: OneDarkColors.bgDark,
       appBar: AppBar(
         backgroundColor: OneDarkColors.bgDark,
-        foregroundColor: OneDarkColors.fg,
+        foregroundColor: cs.onSurface,
         title: Text(
           'Terminal — ${widget.startPath}',
-          style: TextStyle(color: OneDarkColors.fg, fontSize: 14),
+          style: TextStyle(color: cs.onSurface, fontSize: 14),
           overflow: TextOverflow.ellipsis,
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, size: 20),
+            onPressed: () {
+              _pty?.kill();
+              _startShell();
+            },
+            tooltip: 'Restart shell',
+          ),
+        ],
       ),
       body: _spawnError != null
           ? Center(

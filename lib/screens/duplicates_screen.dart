@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 import '../services/archive_service.dart';
+import '../services/device_service.dart';
 
 /// Screen that scans directories for duplicate files based on SHA-256 hash.
 class DuplicatesScreen extends StatefulWidget {
@@ -28,6 +29,41 @@ class _DupsState extends State<DuplicatesScreen> {
       _loading = true;
       _error = null;
     });
+    // Check full-storage permission first — without it the scan sees
+    // only the small scoped sandbox (~1.5 GB) instead of the real 120 GB.
+    try {
+      final granted = await allFilesAccessGranted();
+      if (!granted && mounted) {
+        final go = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: OneDarkColors.bg,
+            title: Text('Storage access needed',
+                style: TextStyle(color: OneDarkColors.fg)),
+            content: Text(
+              'To scan all files for duplicates, grant "All files access" '
+              'in the system screen, then come back and tap Rescan.',
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Not now'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Grant Access'),
+              ),
+            ],
+          ),
+        );
+        if (go == true) await requestAllFilesAccess();
+        if (mounted) {
+          setState(() => _loading = false);
+          return;
+        }
+      }
+    } catch (_) {}
     try {
       final roots = widget.scanPaths.isNotEmpty
           ? widget.scanPaths
@@ -36,9 +72,7 @@ class _DupsState extends State<DuplicatesScreen> {
       for (final root in roots) {
         final dir = Directory(root);
         if (!await dir.exists()) continue;
-        await for (final entity in dir.list(recursive: true)) {
-          if (entity is File) allPaths.add(entity.path);
-        }
+        await _collectFiles(dir, allPaths);
       }
       final result = await ArchiveService.findDuplicates(allPaths);
       if (mounted) {
@@ -70,6 +104,28 @@ class _DupsState extends State<DuplicatesScreen> {
           _error = 'Scan failed: $e';
           _loading = false;
         });
+    }
+  }
+
+  /// Recursively collects file paths under [dir] into [out], skipping
+  /// unreadable subdirectories instead of aborting the whole scan with a
+  /// permission error (Android blocks e.g. Android/data and Android/obb).
+  Future<void> _collectFiles(
+    Directory dir,
+    List<String> out,
+  ) async {
+    List<FileSystemEntity> entities;
+    try {
+      entities = await dir.list().toList();
+    } catch (_) {
+      return;
+    }
+    for (final entity in entities) {
+      if (entity is Directory) {
+        await _collectFiles(entity, out);
+      } else if (entity is File) {
+        out.add(entity.path);
+      }
     }
   }
 

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -16,8 +17,8 @@ import 'screens/bluetooth_screen.dart';
 import 'screens/lan_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
-import 'screens/network_screen.dart';
 import 'screens/recent_files_screen.dart';
+import 'screens/terminal_screen.dart';
 import 'services/entitlement_service.dart';
 import 'services/device_service.dart';
 import 'services/bookmarks_service.dart';
@@ -36,8 +37,9 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('Permission request failed: $e');
   }
-  // Load saved theme mode
+    // Load saved theme mode and view mode
   await loadThemeMode();
+  await loadPersistedViewMode();
   runApp(const SwordFM());
 }
 
@@ -95,7 +97,7 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   bool _sidebarVisible = true;
   bool _previewVisible = true;
@@ -103,6 +105,10 @@ class _MainScreenState extends State<MainScreen> {
   FileItem? _selectedItem;
 
   int _itemCount = 0; // item count in the current directory
+
+  // The Terminal tab is built lazily on first visit (the IndexedStack builds
+  // all children eagerly, and spawning a PTY at app start would be wasteful).
+  bool _terminalVisited = false;
 
   // ignore: prefer_final_fields — mutated via setState
   List<String> _bookmarks =
@@ -119,13 +125,82 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // On Android, resolve the actual storage root synchronously after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _currentPath = AppPaths.home);
       _loadVolumes();
       _loadBookmarks();
       _loadHomeDirs();
+      _ensureStorageAccess();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // After the user returns from the system "All files access" settings
+    // screen, re-check the grant and refresh storage volumes / home dirs so
+    // the real (e.g. 120GB) storage shows instead of the scoped sandbox.
+    if (state == AppLifecycleState.resumed) {
+      _ensureStorageAccess();
+      _loadVolumes();
+      _loadHomeDirs();
+    }
+  }
+
+  /// On Android, "All files access" unlocks the phone's real storage
+  /// (120GB in the user's case) instead of the ~1.5GB scoped sandbox.
+  /// Fire-and-forget: surface the system grant screen only once per launch.
+  Future<void> _ensureStorageAccess() async {
+    if (kIsWeb) return;
+    try {
+      final granted = await allFilesAccessGranted();
+      if (!granted) {
+        // Ask the user (non-blocking) so they can grant full storage access
+        // once, which also fixes paste / duplicate-scan permission errors.
+        final go = await _promptAllFilesAccess();
+        if (go) await requestAllFilesAccess();
+        if (mounted) _loadVolumes();
+      }
+    } catch (_) {}
+  }
+
+  Future<bool> _promptAllFilesAccess() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: Text(
+          'Allow full storage access?',
+          style: TextStyle(color: OneDarkColors.fg, fontSize: 16),
+        ),
+        content: Text(
+          'To browse all folders, view your real storage capacity, paste files '
+          'and scan duplicates, SwordFM needs "Files & media → All files access". '
+          'You can grant it in the next screen.',
+          style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Allow'),
+          ),
+        ],
+      ),
+    );
+    if (messenger.mounted) messenger.hideCurrentSnackBar();
+    return ok ?? false;
   }
 
   Future<void> _loadBookmarks() async {
@@ -214,6 +289,8 @@ class _MainScreenState extends State<MainScreen> {
                             color: surfaceHighest,
                             elevation: 0,
                             margin: EdgeInsets.zero,
+                            // Square corners — no angular radius.
+                            shape: const RoundedRectangleBorder(),
                             child: Column(
                               children: [
                                 // Sidebar header
@@ -248,6 +325,31 @@ class _MainScreenState extends State<MainScreen> {
                                         Icons.home,
                                         'Home',
                                         AppPaths.home,
+                                      ),
+                                      // Folder graph (available on phone too).
+                                      ListTile(
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                            ),
+                                        minLeadingWidth: 0,
+                                        horizontalTitleGap: 6,
+                                        leading: const Icon(
+                                          Icons.account_tree,
+                                          size: 18,
+                                        ),
+                                        title: const Text(
+                                          'Folder Graph',
+                                          style: TextStyle(fontSize: 13),
+                                        ),
+                                        onTap: () => Navigator.of(context)
+                                            .push(
+                                          MaterialPageRoute(
+                                            builder: (_) => FolderGraphScreen(
+                                              startPath: _currentPath,
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                       ListTile(
                                         contentPadding:
@@ -638,24 +740,28 @@ class _MainScreenState extends State<MainScreen> {
                 ),
 
                 // ── Preview panel (collapsible) ──────────────────────────
-                if (_previewVisible && !isMobile)
-                  PreviewPanel(
-                    item: _selectedItem,
-                    width: 280,
-                    onClose: () => setState(() => _previewVisible = false),
+                                if (_previewVisible && !isMobile)
+                  GestureDetector(
+                    // Tapping anywhere in the right-preview area closes it.
+                    onTap: () => setState(() => _previewVisible = false),
+                    behavior: HitTestBehavior.opaque,
+                    child: PreviewPanel(
+                      item: _selectedItem,
+                      width: 280,
+                      onClose: () => setState(() => _previewVisible = false),
+                    ),
                   ),
               ],
             ),
             // Tab 1-4: Full-screen screens.
-            // NOTE: deliberately NOT const — these use OneDarkColors getters in
-            // their build methods, and const instances are skipped when the
-            // parent rebuilds (themeNotifier fires), leaving stale light colors
-            // until the next app start.
             BluetoothScreen(),
             LANSharingScreen(),
             SettingsScreen(),
             StorageAnalysisScreen(rootPath: AppPaths.home),
-            NetworkScreen(),
+            // Terminal — lazy: only spawns the PTY shell after first visit.
+            _terminalVisited
+                ? TerminalScreen(startPath: AppPaths.home)
+                : const SizedBox.shrink(),
           ],
         ),
       ),
@@ -664,6 +770,7 @@ class _MainScreenState extends State<MainScreen> {
         onDestinationSelected: (index) => setState(() {
           _selectedIndex = index;
           if (index == 0) _previewVisible = true;
+          if (index == 5) _terminalVisited = true;
         }),
         backgroundColor: surface,
         indicatorColor: cs.primaryContainer,
@@ -671,12 +778,12 @@ class _MainScreenState extends State<MainScreen> {
           NavigationDestination(icon: Icon(Icons.folder), label: 'Files'),
           NavigationDestination(
             icon: Icon(Icons.bluetooth),
-            label: 'Bluetooth',
+            label: 'BT',
           ),
           NavigationDestination(icon: Icon(Icons.wifi), label: 'LAN'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Storage'),
-          NavigationDestination(icon: Icon(Icons.cloud), label: 'Network'),
+          NavigationDestination(icon: Icon(Icons.terminal), label: 'Terminal'),
         ],
       ),
     );

@@ -21,6 +21,10 @@ final ValueNotifier<ViewMode> viewModeNotifier = ValueNotifier<ViewMode>(
   ViewMode.details,
 );
 
+/// Shared toggle for showing hidden (dotfile) entries — the toolbar button
+/// and the Settings screen both write to this notifier.
+final ValueNotifier<bool> showHiddenNotifier = ValueNotifier<bool>(false);
+
 const String kViewModePref = 'swordfm_default_view';
 
 Future<void> loadPersistedViewMode() async {
@@ -318,8 +322,10 @@ class _FileBrowserState extends State<FileBrowser> {
   void initState() {
     super.initState();
     _viewMode = viewModeNotifier.value;
+    _showHidden = showHiddenNotifier.value;
     // Follow the persisted "Default View" setting live.
     viewModeNotifier.addListener(_onViewModeNotifier);
+    showHiddenNotifier.addListener(_onShowHiddenNotifier);
     // Start at root; didUpdateWidget will navigate to initialPath if non-empty.
     _history.add(_currentPath);
     _historyIndex = 0;
@@ -350,6 +356,7 @@ class _FileBrowserState extends State<FileBrowser> {
   @override
   void dispose() {
     viewModeNotifier.removeListener(_onViewModeNotifier);
+    showHiddenNotifier.removeListener(_onShowHiddenNotifier);
     _renameController.dispose();
     _renameFocusNode.dispose();
     _focusNode.dispose();
@@ -359,6 +366,14 @@ class _FileBrowserState extends State<FileBrowser> {
   void _onViewModeNotifier() {
     final mode = viewModeNotifier.value;
     if (mode != _viewMode) setState(() => _viewMode = mode);
+  }
+
+  void _onShowHiddenNotifier() {
+    final val = showHiddenNotifier.value;
+    if (val != _showHidden) {
+      setState(() => _showHidden = val);
+      _loadDirectory();
+    }
   }
 
   /// Returns [_items] filtered by the active type filter, date range, and junk filter.
@@ -826,7 +841,8 @@ class _FileBrowserState extends State<FileBrowser> {
         _showNewFolderDialog();
         return true;
       case LogicalKeyboardKey.keyH:
-        setState(() => _showHidden = !_showHidden);
+        _showHidden = !_showHidden;
+        showHiddenNotifier.value = _showHidden;
         _loadDirectory();
         return true;
       case LogicalKeyboardKey.digit1:
@@ -937,10 +953,14 @@ class _FileBrowserState extends State<FileBrowser> {
         })
         .catchError((Object e) {
           if (!mounted) return;
+          final msg = e.toString().contains('Permission denied')
+              ? 'Permission denied — grant "All files access" in Settings'
+              : 'Paste failed: $e';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Paste failed: $e'),
+              content: Text(msg),
               backgroundColor: OneDarkColors.red,
+              duration: const Duration(seconds: 3),
             ),
           );
         });
@@ -1322,14 +1342,16 @@ class _FileBrowserState extends State<FileBrowser> {
       if (overwrite != true) return;
     }
 
-    // Show a loading overlay while compressing
+        // Show a loading overlay while compressing
     if (!mounted) return;
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(
+      useRootNavigator: true,
+      builder: (_) => Center(
         child: Card(
-          child: Padding(
+          color: OneDarkColors.bgDark,
+          child: const Padding(
             padding: EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1377,8 +1399,8 @@ class _FileBrowserState extends State<FileBrowser> {
           );
           break;
       }
-      if (mounted) {
-        Navigator.pop(context); // dismiss loading overlay
+            if (mounted) {
+                Navigator.of(context, rootNavigator: true).pop(); // dismiss loading overlay
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Created $name'),
@@ -1389,7 +1411,7 @@ class _FileBrowserState extends State<FileBrowser> {
       }
     } catch (e) {
       if (mounted) {
-        Navigator.pop(context); // dismiss loading overlay
+        Navigator.of(context, rootNavigator: true).pop(); // dismiss loading overlay
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Compression failed: $e'),
@@ -2159,7 +2181,8 @@ class _FileBrowserState extends State<FileBrowser> {
                 color: _showHidden ? OneDarkColors.cyan : OneDarkColors.fgDim,
               ),
               onPressed: () {
-                setState(() => _showHidden = !_showHidden);
+                _showHidden = !_showHidden;
+                showHiddenNotifier.value = _showHidden;
                 _loadDirectory();
               },
             ),
@@ -2599,12 +2622,13 @@ class _FileBrowserState extends State<FileBrowser> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                Flexible(
+                                Flexible(
                   flex: 3,
                   child: Text(
                     item.formattedDate,
                     style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
                     overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
                   ),
                 ),
               ],
@@ -2644,11 +2668,12 @@ class _FileBrowserState extends State<FileBrowser> {
               style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
             ),
           ),
-        Flexible(
+                                        Flexible(
           flex: 3,
           child: Text(
             'Date Modified',
             style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+            textAlign: TextAlign.right,
           ),
         ),
       ],

@@ -36,6 +36,10 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
   }
 
   Future<void> _loadDiskInfo() async {
+    // 'df /storage/emulated/0' is Android-only; on desktop it would spawn a
+    // pointless failing process (and block widget tests, whose fake-async
+    // clock can never complete a real Process.run).
+    if (!Platform.isAndroid) return;
     try {
       final result = await Process.run('df', ['/storage/emulated/0']);
       final lines = (result.stdout as String).split('\n');
