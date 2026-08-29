@@ -273,8 +273,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final surface = cs.surfaceContainer;
     final onSurface = cs.onSurface;
     final onSurfaceDim = cs.onSurfaceVariant;
-    return Scaffold(
-      body: SafeArea(
+    return PopScope(
+      canPop: _selectedIndex == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _selectedIndex != 0) {
+          setState(() => _selectedIndex = 0);
+        }
+      },
+      child: Scaffold(
+        body: SafeArea(
         child: IndexedStack(
           index: _selectedIndex,
           children: [
@@ -695,6 +702,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                           }),
                           onItemCountChanged: (count) =>
                               setState(() => _itemCount = count),
+                          onBookmarkCurrentPath: (path) => _addBookmark(path),
                         ),
                       ),
                     ],
@@ -750,7 +758,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           NavigationDestination(icon: Icon(Icons.terminal), label: 'Terminal'),
         ],
       ),
-    );
+    ),
+    ); // PopScope
   }
 
   List<Widget> _buildBreadcrumbs() {
@@ -833,8 +842,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _addBookmark() {
-    final controller = TextEditingController(text: _currentPath);
+  void _addBookmark([String? path]) {
+    final target = path ?? _currentPath;
+    final controller = TextEditingController(text: target);
     final cs = Theme.of(context).colorScheme;
     showDialog(
       context: context,

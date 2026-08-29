@@ -4,25 +4,39 @@ import 'dart:isolate';
 import 'package:path/path.dart' as p;
 import '../utils/file_utils.dart';
 
+/// Search modes for filename matching.
+enum SearchMode { substring, regex, glob }
+
 /// Search service that runs recursive directory search on a background Isolate
 /// with batched streaming results and extension pre-filtering.
-///
-/// Improvements over the previous single-shot isolate:
-///   - Results stream in batches of [batchSize] for progressive UI updates.
-///   - Extension pre-filtering skips `stat()` for non-matching entries.
-///   - Default limit raised from 200 to 500.
 class SearchService {
   static const int _batchSize = 100;
 
-  /// Searches [root] recursively for entries whose name contains [query].
+  /// Searches [root] recursively for entries whose name matches [query].
   /// Returns results via a stream that yields batches for progressive display.
   static Stream<List<FileItem>> searchDirectoryStream(
     String root,
     String query, {
     bool includeHidden = false,
     int limit = 500,
+    SearchMode mode = SearchMode.substring,
+    int minSize = 0,
+    int maxSize = 0, // 0 = no limit
   }) async* {
     if (!await Directory(root).exists()) return;
+
+    // Pre-compile regex/glob if needed (done on main isolate, sent to worker).
+    String? regexPattern;
+    if (mode == SearchMode.regex) {
+      try {
+        RegExp(query, caseSensitive: false);
+        regexPattern = query;
+      } catch (_) {
+        return; // invalid regex, no results
+      }
+    } else if (mode == SearchMode.glob) {
+      regexPattern = _globToRegex(query);
+    }
 
     final receivePort = ReceivePort();
 
@@ -35,10 +49,13 @@ class SearchService {
         limit: limit,
         batchSize: _batchSize,
         sendPort: receivePort.sendPort,
+        mode: mode,
+        regexPattern: regexPattern,
+        minSize: minSize,
+        maxSize: maxSize,
       ),
     );
 
-    // Consume batched results from the isolate.
     await for (final message in receivePort) {
       if (message is _SearchBatch) {
         if (message.isError) {
@@ -75,6 +92,9 @@ class SearchService {
     String query, {
     bool includeHidden = false,
     int limit = 500,
+    SearchMode mode = SearchMode.substring,
+    int minSize = 0,
+    int maxSize = 0,
   }) async {
     final all = <FileItem>[];
     await for (final batch in searchDirectoryStream(
@@ -82,10 +102,45 @@ class SearchService {
       query,
       includeHidden: includeHidden,
       limit: limit,
+      mode: mode,
+      minSize: minSize,
+      maxSize: maxSize,
     )) {
       all.addAll(batch);
     }
     return all;
+  }
+
+  /// Converts a simple glob pattern (e.g. `*.jpg`, `photo*`, `*test?.txt`)
+  /// to a regex string.
+  static String _globToRegex(String glob) {
+    var out = '';
+    for (var i = 0; i < glob.length; i++) {
+      final c = glob[i];
+      switch (c) {
+        case '*':
+          out += '.*';
+        case '?':
+          out += '.';
+        case '.':
+          out += '\\.';
+        case '[':
+        case ']':
+        case '(':
+        case ')':
+        case '{':
+        case '}':
+        case '+':
+        case '^':
+        case r'$':
+        case '|':
+        case '\\':
+          out += '\\$c';
+        default:
+          out += c;
+      }
+    }
+    return '^$out\$';
   }
 }
 
@@ -105,6 +160,10 @@ class _SearchArgs {
   final int limit;
   final int batchSize;
   final SendPort sendPort;
+  final SearchMode mode;
+  final String? regexPattern;
+  final int minSize;
+  final int maxSize;
   _SearchArgs({
     required this.root,
     required this.query,
@@ -112,6 +171,10 @@ class _SearchArgs {
     required this.limit,
     required this.batchSize,
     required this.sendPort,
+    this.mode = SearchMode.substring,
+    this.regexPattern,
+    this.minSize = 0,
+    this.maxSize = 0,
   });
 }
 
@@ -119,6 +182,13 @@ class _SearchArgs {
 void _searchEntry(_SearchArgs args) {
   try {
     final results = <Map<String, dynamic>>[];
+    // Pre-compile the regex on the isolate if a pattern was provided.
+    RegExp? regex;
+    if (args.regexPattern != null) {
+      try {
+        regex = RegExp(args.regexPattern!, caseSensitive: false);
+      } catch (_) {}
+    }
     _searchInDirSync(
       Directory(args.root),
       args.query,
@@ -127,6 +197,10 @@ void _searchEntry(_SearchArgs args) {
       args.limit,
       args.batchSize,
       args.sendPort,
+      args.mode,
+      regex,
+      args.minSize,
+      args.maxSize,
     );
     // Flush remaining results.
     if (results.isNotEmpty) {
@@ -148,6 +222,10 @@ void _searchInDirSync(
   int limit,
   int batchSize,
   SendPort sendPort,
+  SearchMode mode,
+  RegExp? regex,
+  int minSize,
+  int maxSize,
 ) {
   if (results.length >= limit) return;
   try {
@@ -157,12 +235,25 @@ void _searchInDirSync(
       final name = p.basename(entity.path);
       if (!includeHidden && name.startsWith('.')) continue;
 
-      // Extension pre-filter: if the query looks like an extension search
-      // (contains a dot), skip entries that clearly won't match.
       final nameLower = name.toLowerCase();
-      if (nameLower.contains(query)) {
+
+      // Match based on mode.
+      bool matched = false;
+      switch (mode) {
+        case SearchMode.substring:
+          matched = nameLower.contains(query);
+        case SearchMode.regex:
+          matched = regex?.hasMatch(name) ?? false;
+        case SearchMode.glob:
+          matched = regex?.hasMatch(nameLower) ?? false;
+      }
+
+      if (matched) {
         try {
           final stat = entity.statSync();
+          // Size filter.
+          if (minSize > 0 && stat.size < minSize) continue;
+          if (maxSize > 0 && stat.size > maxSize) continue;
           results.add({
             'name': name,
             'path': entity.path,
@@ -170,7 +261,6 @@ void _searchInDirSync(
             'size': stat.size,
             'modified': stat.modified.toIso8601String(),
           });
-          // Send batch when threshold reached.
           if (results.length >= batchSize) {
             sendPort.send(_SearchBatch(List.from(results)));
             results.clear();
@@ -186,6 +276,10 @@ void _searchInDirSync(
           limit,
           batchSize,
           sendPort,
+          mode,
+          regex,
+          minSize,
+          maxSize,
         );
       }
     }

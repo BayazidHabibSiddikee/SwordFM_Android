@@ -25,7 +25,14 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _loading = false;
   String? _error;
   int _resultCount = 0;
-  FileItem? _previewItem; // shown in the bottom preview panel on selection
+  FileItem? _previewItem;
+
+  SearchMode _searchMode = SearchMode.substring;
+  int _minSize = 0;
+  int _maxSize = 0;
+  final _minSizeController = TextEditingController();
+  final _maxSizeController = TextEditingController();
+  bool _showFilters = false;
 
   @override
   void initState() {
@@ -38,6 +45,8 @@ class _SearchScreenState extends State<SearchScreen> {
     _controller.removeListener(_onSearchChanged);
     _controller.dispose();
     _focusNode.dispose();
+    _minSizeController.dispose();
+    _maxSizeController.dispose();
     super.dispose();
   }
 
@@ -54,6 +63,7 @@ class _SearchScreenState extends State<SearchScreen> {
         });
         return;
       }
+      _parseSizeFilters();
       _runSearch(query);
     });
   }
@@ -69,6 +79,9 @@ class _SearchScreenState extends State<SearchScreen> {
         query,
         includeHidden: false,
         limit: 300,
+        mode: _searchMode,
+        minSize: _minSize,
+        maxSize: _maxSize,
       );
       if (mounted) {
         setState(() {
@@ -83,6 +96,27 @@ class _SearchScreenState extends State<SearchScreen> {
           _error = 'Search failed: $e';
           _loading = false;
         });
+    }
+  }
+
+  void _parseSizeFilters() {
+    _minSize = _parseSize(_minSizeController.text);
+    _maxSize = _parseSize(_maxSizeController.text);
+  }
+
+  int _parseSize(String text) {
+    text = text.trim().toLowerCase();
+    if (text.isEmpty) return 0;
+    final match = RegExp(r'^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)?$').firstMatch(text);
+    if (match == null) return 0;
+    final value = double.parse(match.group(1)!);
+    final unit = match.group(2) ?? 'b';
+    switch (unit) {
+      case 'kb': return (value * 1024).round();
+      case 'mb': return (value * 1024 * 1024).round();
+      case 'gb': return (value * 1024 * 1024 * 1024).round();
+      case 'tb': return (value * 1024 * 1024 * 1024 * 1024).round();
+      default: return value.round();
     }
   }
 
@@ -197,6 +231,36 @@ class _SearchScreenState extends State<SearchScreen> {
           const SizedBox(width: 12),
           Text(title, style: TextStyle(color: OneDarkColors.fg)),
         ],
+      ),
+    );
+  }
+
+  Widget _modeChip(String label, SearchMode mode) {
+    final selected = _searchMode == mode;
+    return GestureDetector(
+      onTap: () {
+        setState(() => _searchMode = mode);
+        final q = _controller.text.trim();
+        if (q.isNotEmpty) _runSearch(q);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: selected
+              ? OneDarkColors.cyan.withValues(alpha: 0.2)
+              : OneDarkColors.bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? OneDarkColors.cyan : OneDarkColors.border,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? OneDarkColors.cyan : OneDarkColors.fgDim,
+            fontSize: 11,
+          ),
+        ),
       ),
     );
   }
@@ -352,7 +416,11 @@ class _SearchScreenState extends State<SearchScreen> {
           focusNode: _focusNode,
           style: TextStyle(color: OneDarkColors.fg),
           decoration: InputDecoration(
-            hintText: 'Search files…',
+            hintText: _searchMode == SearchMode.regex
+                ? 'Regex pattern…'
+                : _searchMode == SearchMode.glob
+                    ? 'Glob pattern (e.g. *.jpg)…'
+                    : 'Search files…',
             hintStyle: TextStyle(color: OneDarkColors.fgDim),
             border: InputBorder.none,
           ),
@@ -362,9 +430,113 @@ class _SearchScreenState extends State<SearchScreen> {
         backgroundColor: OneDarkColors.bgDark,
         foregroundColor: OneDarkColors.fg,
         iconTheme: IconThemeData(color: OneDarkColors.fg),
+        actions: [
+          IconButton(
+            icon: Icon(
+              _showFilters ? Icons.filter_list_off : Icons.filter_list,
+              size: 20,
+              color: _showFilters ? OneDarkColors.cyan : OneDarkColors.fgDim,
+            ),
+            tooltip: 'Filters',
+            onPressed: () => setState(() => _showFilters = !_showFilters),
+          ),
+        ],
       ),
       body: Column(
         children: [
+          // Search mode chips
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            color: OneDarkColors.bgDark,
+            child: Row(
+              children: [
+                _modeChip('Text', SearchMode.substring),
+                const SizedBox(width: 6),
+                _modeChip('Regex', SearchMode.regex),
+                const SizedBox(width: 6),
+                _modeChip('Glob', SearchMode.glob),
+              ],
+            ),
+          ),
+          // Size filter row
+          if (_showFilters)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              color: OneDarkColors.bgDark,
+              child: Row(
+                children: [
+                  Icon(Icons.format_size, size: 16, color: OneDarkColors.fgDim),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 70,
+                    child: TextField(
+                      controller: _minSizeController,
+                      style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
+                      decoration: InputDecoration(
+                        hintText: 'Min',
+                        hintStyle: TextStyle(
+                          color: OneDarkColors.fgDim,
+                          fontSize: 11,
+                        ),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 6,
+                        ),
+                        border: OutlineInputBorder(
+                          borderSide: BorderSide(color: OneDarkColors.border),
+                        ),
+                      ),
+                      keyboardType: TextInputType.text,
+                      onSubmitted: (_) {
+                        _parseSizeFilters();
+                        final q = _controller.text.trim();
+                        if (q.isNotEmpty) _runSearch(q);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text('–', style: TextStyle(color: OneDarkColors.fgDim)),
+                  const SizedBox(width: 4),
+                  SizedBox(
+                    width: 70,
+                    child: TextField(
+                      controller: _maxSizeController,
+                      style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
+                      decoration: InputDecoration(
+                        hintText: 'Max',
+                        hintStyle: TextStyle(
+                          color: OneDarkColors.fgDim,
+                          fontSize: 11,
+                        ),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 6,
+                        ),
+                        border: OutlineInputBorder(
+                          borderSide: BorderSide(color: OneDarkColors.border),
+                        ),
+                      ),
+                      keyboardType: TextInputType.text,
+                      onSubmitted: (_) {
+                        _parseSizeFilters();
+                        final q = _controller.text.trim();
+                        if (q.isNotEmpty) _runSearch(q);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'KB/MB/GB',
+                    style: TextStyle(
+                      color: OneDarkColors.fgDim,
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (_resultCount > 0 || _loading)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
