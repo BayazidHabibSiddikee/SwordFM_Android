@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 
@@ -25,23 +26,65 @@ class ArchiveService {
     }
   }
 
-  /// Find potential duplicates in [paths] by SHA-256 hash.
-  /// Returns map: hash -> list of paths with that hash.
+  /// Fast three-pass duplicate detection.
+  ///
+  /// Pass 1 — group by file size (cheap stat, no reads).
+  /// Pass 2 — for each size group with 2+ members, read only the first 64 KB
+  ///          and re-group by (size + head hash).  Eliminates most false
+  ///          positive size collisions without reading full files.
+  /// Pass 3 — full SHA-256 only on surviving candidates.
   static Future<Map<String, List<String>>> findDuplicates(
     List<String> paths,
   ) async {
-    final Map<String, List<String>> groups = {};
-    for (final p in paths) {
-      final h = await sha256OfFile(p);
-      if (h != null) {
-        groups.putIfAbsent(h, () => []).add(p);
+    // Pass 1: size -> paths (cheap stat).
+    final bySize = <int, List<String>>{};
+    for (final path in paths) {
+      try {
+        final size = await File(path).length();
+        bySize.putIfAbsent(size, () => []).add(path);
+      } catch (_) {}
+    }
+
+    // Pass 2: head-hash on size-collision groups.
+    final Map<String, List<String>> headGroups = {};
+    for (final entry in bySize.entries) {
+      if (entry.value.length < 2) continue;
+      for (final path in entry.value) {
+        try {
+          final head = await _readHead(File(path), 65536); // 64 KB
+          final key = '${entry.key}|${sha256.convert(head)}';
+          headGroups.putIfAbsent(key, () => []).add(path);
+        } catch (_) {}
       }
     }
-    // Only keep groups with more than one entry
+
+    // Only head-groups with 2+ candidates need full hashing.
+    final candidates =
+        headGroups.values.where((g) => g.length > 1).expand((g) => g).toList();
+    if (candidates.isEmpty) return {};
+
+    // Pass 3: full SHA-256 on candidates only.
+    final Map<String, List<String>> fullGroups = {};
+    for (final path in candidates) {
+      final h = await sha256OfFile(path);
+      if (h != null) {
+        fullGroups.putIfAbsent(h, () => []).add(path);
+      }
+    }
     return {
-      for (final e in groups.entries)
+      for (final e in fullGroups.entries)
         if (e.value.length > 1) e.key: e.value,
     };
+  }
+
+  /// Reads the first [n] bytes of [file].
+  static Future<List<int>> _readHead(File file, int n) async {
+    final raf = await file.open(mode: FileMode.read);
+    try {
+      return await raf.read(n);
+    } finally {
+      await raf.close();
+    }
   }
 
   /// Supported extensions mapped to their operation type.
@@ -191,33 +234,37 @@ class ArchiveService {
 
   /// Creates a ZIP archive at [outputPath] containing the given [sources].
   /// Each source can be a file or directory (directories are recursed).
+  ///
+  /// Runs in a background isolate so large archives don't freeze the UI.
   static Future<String> createZip({
     required String outputPath,
     required List<String> sources,
-  }) async {
-    final archive = Archive();
-    for (final source in sources) {
-      await _addPathsToArchive(source, archive, prefix: '');
-    }
-
-    final bytes = ZipEncoder().encode(archive);
-    await File(outputPath).writeAsBytes(bytes);
-    return outputPath;
+  }) {
+    return Isolate.run(() {
+      final archive = Archive();
+      for (final source in sources) {
+        _addPathSync(source, archive, '');
+      }
+      final bytes = ZipEncoder().encode(archive);
+      File(outputPath).writeAsBytesSync(bytes);
+      return outputPath;
+    });
   }
 
   /// Creates a TAR archive at [outputPath] containing the given [sources].
   static Future<String> createTar({
     required String outputPath,
     required List<String> sources,
-  }) async {
-    final archive = Archive();
-    for (final source in sources) {
-      await _addPathsToArchive(source, archive, prefix: '');
-    }
-
-    final bytes = TarEncoder().encode(archive);
-    await File(outputPath).writeAsBytes(bytes);
-    return outputPath;
+  }) {
+    return Isolate.run(() {
+      final archive = Archive();
+      for (final source in sources) {
+        _addPathSync(source, archive, '');
+      }
+      final bytes = TarEncoder().encode(archive);
+      File(outputPath).writeAsBytesSync(bytes);
+      return outputPath;
+    });
   }
 
   /// Creates a GZip-compressed TAR archive (`*.tar.gz`) at [outputPath]
@@ -225,70 +272,69 @@ class ArchiveService {
   static Future<String> createTarGz({
     required String outputPath,
     required List<String> sources,
-  }) async {
-    final archive = Archive();
-    for (final source in sources) {
-      await _addPathsToArchive(source, archive, prefix: '');
-    }
-
-    final tarBytes = TarEncoder().encode(archive);
-    final gzBytes = GZipEncoder().encode(tarBytes);
-    await File(outputPath).writeAsBytes(gzBytes);
-    return outputPath;
+  }) {
+    return Isolate.run(() {
+      final archive = Archive();
+      for (final source in sources) {
+        _addPathSync(source, archive, '');
+      }
+      final tarBytes = TarEncoder().encode(archive);
+      final gzBytes = GZipEncoder().encode(tarBytes);
+      File(outputPath).writeAsBytesSync(gzBytes);
+      return outputPath;
+    });
   }
 
   /// Creates an XZ-compressed TAR archive (`*.tar.xz`) at [outputPath].
   static Future<String> createTarXz({
     required String outputPath,
     required List<String> sources,
-  }) async {
-    final archive = Archive();
-    for (final source in sources) {
-      await _addPathsToArchive(source, archive, prefix: '');
-    }
-
-    final tarBytes = TarEncoder().encode(archive);
-    final xzBytes = XZEncoder().encode(tarBytes);
-    await File(outputPath).writeAsBytes(xzBytes);
-    return outputPath;
+  }) {
+    return Isolate.run(() {
+      final archive = Archive();
+      for (final source in sources) {
+        _addPathSync(source, archive, '');
+      }
+      final tarBytes = TarEncoder().encode(archive);
+      final xzBytes = XZEncoder().encode(tarBytes);
+      File(outputPath).writeAsBytesSync(xzBytes);
+      return outputPath;
+    });
   }
 
   /// Creates a BZip2-compressed TAR archive (`*.tar.bz2`) at [outputPath].
   static Future<String> createTarBz2({
     required String outputPath,
     required List<String> sources,
-  }) async {
-    final archive = Archive();
-    for (final source in sources) {
-      await _addPathsToArchive(source, archive, prefix: '');
-    }
-
-    final tarBytes = TarEncoder().encode(archive);
-    final bz2Bytes = BZip2Encoder().encode(tarBytes);
-    await File(outputPath).writeAsBytes(bz2Bytes);
-    return outputPath;
+  }) {
+    return Isolate.run(() {
+      final archive = Archive();
+      for (final source in sources) {
+        _addPathSync(source, archive, '');
+      }
+      final tarBytes = TarEncoder().encode(archive);
+      final bz2Bytes = BZip2Encoder().encode(tarBytes);
+      File(outputPath).writeAsBytesSync(bz2Bytes);
+      return outputPath;
+    });
   }
 
   // -----------------------------------------------------------------------
   // Helpers
   // -----------------------------------------------------------------------
 
-  static Future<void> _addPathsToArchive(
-    String path,
-    Archive archive, {
-    required String prefix,
-  }) async {
-    final entityType = await FileSystemEntity.type(path);
+  /// Isolate-safe (sync) recursive walker: reads files and walks directories
+  /// synchronously so archive creation can run inside [Isolate.run].
+  static void _addPathSync(String path, Archive archive, String prefix) {
+    final type = FileSystemEntity.typeSync(path);
     final baseName = p.basename(path);
     final arcName = prefix.isEmpty ? baseName : '$prefix/$baseName';
-
-    if (entityType == FileSystemEntityType.file) {
-      final data = await File(path).readAsBytes();
+    if (type == FileSystemEntityType.file) {
+      final data = File(path).readAsBytesSync();
       archive.addFile(ArchiveFile(arcName, data.length, data));
-    } else if (entityType == FileSystemEntityType.directory) {
-      final entities = await Directory(path).list().toList();
-      for (final entity in entities) {
-        await _addPathsToArchive(entity.path, archive, prefix: arcName);
+    } else if (type == FileSystemEntityType.directory) {
+      for (final entity in Directory(path).listSync()) {
+        _addPathSync(entity.path, archive, arcName);
       }
     }
   }

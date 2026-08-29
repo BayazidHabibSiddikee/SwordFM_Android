@@ -219,9 +219,13 @@ class _TerminalScreenState extends State<TerminalScreen> {
                     ),
                     child: Row(
                       children: [
+                        _quickKey('↑', '\u001b[A'),
+                        _quickKey('↓', '\u001b[B'),
                         _quickKey('Esc', '\u001b'),
                         _quickKey('Tab', '\t'),
                         _quickKey('Ctrl+C', '\u0003'),
+                        _quickKey('Ctrl+D', '\u0004'),
+                        _quickKey('Ctrl+L', '\u000c'),
                         const Spacer(),
                         IconButton(
                           icon: Icon(

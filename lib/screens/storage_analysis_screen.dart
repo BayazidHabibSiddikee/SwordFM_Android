@@ -323,7 +323,13 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () => _scan(widget.rootPath),
+            onPressed: () {
+              // Re-read the disk total too — after "All files access" is
+              // granted, the scoped-sandbox size (~1.5GB) becomes the real
+              // storage size (e.g. 120GB).
+              _loadDiskInfo();
+              _scan(widget.rootPath);
+            },
             tooltip: 'Rescan',
           ),
         ],

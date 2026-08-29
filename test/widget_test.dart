@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:swordfm/main.dart';
@@ -9,6 +10,30 @@ import 'package:swordfm/widgets/file_browser.dart';
 
 void main() {
   group('SwordFM App Integration Tests', () {
+    setUp(() {
+      // MainScreen now checks "All files access" at startup (MainActivity
+      // channel). Mock it as granted so no dialog blocks the tests, and keep
+      // the storage-volume query a no-op.
+      const devices = MethodChannel('com.swordfm/devices');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(devices, (call) async {
+        switch (call.method) {
+          case 'allFilesAccessGranted':
+            return true;
+          case 'getStorageVolumes':
+            return <Object?>[];
+          default:
+            return null;
+        }
+      });
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+              const MethodChannel('com.swordfm/devices'), null);
+    });
+
     testWidgets('App builds with One Dark theme and bottom navigation', (
       WidgetTester tester,
     ) async {
@@ -20,7 +45,7 @@ void main() {
       // Verify bottom navigation bar is present
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(find.text('Files'), findsOneWidget);
-      expect(find.text('Bluetooth'), findsOneWidget);
+      expect(find.text('BT'), findsOneWidget);
       expect(find.text('LAN'), findsOneWidget);
       expect(find.text('Settings'), findsOneWidget);
     });
@@ -59,7 +84,7 @@ void main() {
 
         // Switch to the Bluetooth tab so its OneDarkColors-dependent UI is
         // onstage (IndexedStack keeps other tabs offstage).
-        await tester.tap(find.text('Bluetooth'));
+        await tester.tap(find.text('BT'));
         await tester.pump();
         expect(find.text('Disconnected'), findsOneWidget);
 
@@ -83,7 +108,7 @@ void main() {
         saveThemeMode('dark');
         themeNotifier.value++;
         await tester.pump();
-        await tester.tap(find.text('Bluetooth'));
+        await tester.tap(find.text('BT'));
         await tester.pump();
 
         // One Dark `dim` — applied without exiting and reopening the app.

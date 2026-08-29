@@ -10,7 +10,6 @@ import 'utils/app_paths.dart' show StoragePermissions;
 import 'widgets/file_browser.dart';
 import 'utils/file_utils.dart' show FileItem;
 import 'widgets/preview_panel.dart';
-import 'screens/folder_graph_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/trash_screen.dart';
 import 'screens/bluetooth_screen.dart';
@@ -110,6 +109,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   // all children eagerly, and spawning a PTY at app start would be wasteful).
   bool _terminalVisited = false;
 
+  // "All files access" grant prompt is shown at most once per session.
+  bool _storagePromptShown = false;
+
   // ignore: prefer_final_fields — mutated via setState
   List<String> _bookmarks =
       []; // loaded/persisted via BookmarksService (bookmarks.json)
@@ -161,13 +163,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (kIsWeb) return;
     try {
       final granted = await allFilesAccessGranted();
-      if (!granted) {
-        // Ask the user (non-blocking) so they can grant full storage access
-        // once, which also fixes paste / duplicate-scan permission errors.
-        final go = await _promptAllFilesAccess();
-        if (go) await requestAllFilesAccess();
-        if (mounted) _loadVolumes();
-      }
+      if (granted) return;
+      if (_storagePromptShown) return; // don't nag on every resume
+      _storagePromptShown = true;
+      // Ask the user (non-blocking) so they can grant full storage access
+      // once, which also fixes paste / duplicate-scan permission errors.
+      final go = await _promptAllFilesAccess();
+      if (go) await requestAllFilesAccess();
     } catch (_) {}
   }
 
@@ -325,31 +327,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         Icons.home,
                                         'Home',
                                         AppPaths.home,
-                                      ),
-                                      // Folder graph (available on phone too).
-                                      ListTile(
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                            ),
-                                        minLeadingWidth: 0,
-                                        horizontalTitleGap: 6,
-                                        leading: const Icon(
-                                          Icons.account_tree,
-                                          size: 18,
-                                        ),
-                                        title: const Text(
-                                          'Folder Graph',
-                                          style: TextStyle(fontSize: 13),
-                                        ),
-                                        onTap: () => Navigator.of(context)
-                                            .push(
-                                          MaterialPageRoute(
-                                            builder: (_) => FolderGraphScreen(
-                                              startPath: _currentPath,
-                                            ),
-                                          ),
-                                        ),
                                       ),
                                       ListTile(
                                         contentPadding:
@@ -685,22 +662,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                             // The preview panel is never shown on mobile and the
                             // folder graph is a niche desktop feature.
                             if (!isMobile) ...[
-                              IconButton(
-                                icon: Icon(
-                                  Icons.account_tree,
-                                  color: onSurfaceDim,
-                                ),
-                                onPressed: () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => FolderGraphScreen(
-                                        startPath: _currentPath,
-                                      ),
-                                    ),
-                                  );
-                                },
-                                tooltip: 'Folder Graph',
-                              ),
                               IconButton(
                                 icon: Icon(
                                   _previewVisible

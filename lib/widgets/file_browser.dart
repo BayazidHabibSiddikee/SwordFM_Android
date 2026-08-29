@@ -8,6 +8,7 @@ import '../services/archive_service.dart';
 import '../services/open_with_service.dart';
 import '../services/share_service.dart';
 import '../screens/terminal_screen.dart';
+import '../screens/folder_graph_screen.dart';
 import '../screens/lan_screen.dart';
 import 'preview_panel.dart';
 import 'convert_dialog.dart';
@@ -2191,6 +2192,20 @@ class _FileBrowserState extends State<FileBrowser> {
               icon: Icon(Icons.terminal, color: OneDarkColors.fgDim),
               onPressed: () => _openTerminalHere(_currentPath),
               tooltip: 'Open Terminal',
+            ),
+            // Folder graph — same feature as Linux SwordFM F3.
+            IconButton(
+              icon: Icon(Icons.account_tree, color: OneDarkColors.fgDim),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => FolderGraphScreen(
+                      startPath: _currentPath,
+                    ),
+                  ),
+                );
+              },
+              tooltip: 'Folder Graph',
             ),
             IconButton(
               icon: Icon(

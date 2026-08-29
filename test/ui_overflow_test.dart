@@ -20,6 +20,20 @@ void main() {
   setUp(() {
     // NetworkScreen loads profiles via shared_preferences at startup.
     SharedPreferences.setMockInitialValues({});
+    // MainScreen checks "All files access" at startup (MainActivity channel) —
+    // mock as granted so no dialog blocks the overflow test.
+    const devices = MethodChannel('com.swordfm/devices');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(devices, (call) async {
+      switch (call.method) {
+        case 'allFilesAccessGranted':
+          return true;
+        case 'getStorageVolumes':
+          return <Object?>[];
+        default:
+          return null;
+      }
+    });
     // BookmarksService uses path_provider; no plugin in the test harness.
     const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -35,6 +49,9 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
             const MethodChannel('plugins.flutter.io/path_provider'), null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('com.swordfm/devices'), null);
   });
 
   group('UI overflow regression (narrow phone viewport)', () {

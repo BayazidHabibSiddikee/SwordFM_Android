@@ -38,3 +38,26 @@ Future<List<StorageVolume>> getStorageVolumes() async {
     return []; // e.g. MissingPluginException on desktop/tests
   }
 }
+
+/// Whether the app has "All files access" (MANAGE_EXTERNAL_STORAGE),
+/// which unlocks read/write over the phone's full storage (not just the
+/// ~app-scoped sandbox). Returns false when not granted.
+Future<bool> allFilesAccessGranted() async {
+  const _channel = MethodChannel('com.swordfm/devices');
+  try {
+    return await _channel.invokeMethod<bool>('allFilesAccessGranted') ?? false;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Opens the system "All files access" settings screen so the user can
+/// grant broad storage access. Returns true when the screen was launched.
+Future<bool> requestAllFilesAccess() async {
+  const _channel = MethodChannel('com.swordfm/devices');
+  try {
+    return await _channel.invokeMethod<bool>('requestAllFilesAccess') ?? false;
+  } catch (_) {
+    return false;
+  }
+}

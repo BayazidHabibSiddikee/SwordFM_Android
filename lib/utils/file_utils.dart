@@ -188,19 +188,10 @@ class FileItem {
     return perms.toString();
   }
 
-  IconData get icon {
+    IconData get icon {
     if (isDirectory) return Icons.folder;
     final ext = extension;
-    if (const [
-      '.png',
-      '.jpg',
-      '.jpeg',
-      '.gif',
-      '.webp',
-      '.bmp',
-      '.svg',
-      '.heic',
-    ].contains(ext)) {
+    if (FileItem._kImageExtensions.contains(ext)) {
       return Icons.image;
     }
     if (const ['.mp4', '.mkv', '.mov', '.avi', '.webm'].contains(ext)) {
@@ -257,16 +248,7 @@ class FileItem {
   Color get iconColor {
     if (isDirectory) return Colors.cyan;
     final ext = extension;
-    if (const [
-      '.png',
-      '.jpg',
-      '.jpeg',
-      '.gif',
-      '.webp',
-      '.bmp',
-      '.svg',
-      '.heic',
-    ].contains(ext)) {
+    if (FileItem._kImageExtensions.contains(ext)) {
       return const Color(0xFFE5C07B);
     }
     if (const ['.mp4', '.mkv', '.mov', '.avi', '.webm'].contains(ext)) {
@@ -318,16 +300,13 @@ class FileItem {
   }
 
   bool get isHidden => name.startsWith('.');
-  bool get isImage => const [
-    '.png',
-    '.jpg',
-    '.jpeg',
-    '.gif',
-    '.webp',
-    '.bmp',
-    '.svg',
-    '.heic',
-  ].contains(extension);
+  bool get isImage => _kImageExtensions.contains(extension);
+  static const _kImageExtensions = {
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.heic',
+    '.ico', '.tif', '.tiff', '.avif', '.jxl', '.heif',
+    '.raw', '.cr2', '.nef', '.arw', '.dng', '.psd', '.xcf', '.tga',
+    '.dds', '.exr', '.hdr', '.ktx', '.pkm', '.pvr', '.s3tc',
+  };
   bool get isCode => const [
     '.py',
     '.dart',
@@ -571,16 +550,35 @@ class FileUtils {
     if (await src.exists()) {
       await src.copy(destPath);
     } else {
-      final dir = Directory(sourcePath);
       await Directory(destPath).create(recursive: true);
-      final entities = await dir.list(recursive: true).toList();
-      for (final entity in entities) {
-        final relative = p.relative(entity.path, from: sourcePath);
-        final newPath = p.join(destPath, relative);
-        if (entity is Directory) {
-          await Directory(newPath).create(recursive: true);
-        } else {
+      await _copyDirectoryContents(Directory(sourcePath), Directory(destPath));
+    }
+  }
+
+  /// Recursively copies [srcDir] into [destDir], skipping unreadable
+  /// subdirectories instead of failing the whole copy (Android blocks e.g.
+  /// Android/data — a paste must not abort just because one subtree is
+  /// protected).
+  static Future<void> _copyDirectoryContents(
+    Directory srcDir,
+    Directory destDir,
+  ) async {
+    List<FileSystemEntity> entities;
+    try {
+      entities = await srcDir.list().toList();
+    } catch (_) {
+      return;
+    }
+    for (final entity in entities) {
+      final newPath = p.join(destDir.path, p.basename(entity.path));
+      if (entity is Directory) {
+        await Directory(newPath).create(recursive: true);
+        await _copyDirectoryContents(entity, Directory(newPath));
+      } else {
+        try {
           await (entity as File).copy(newPath);
+        } catch (_) {
+          // Individual unreadable file — skip, keep the rest.
         }
       }
     }

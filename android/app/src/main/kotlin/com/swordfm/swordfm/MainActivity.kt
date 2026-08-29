@@ -15,6 +15,8 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
 import android.content.Intent
+import android.os.Build
+import android.provider.Settings
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -128,6 +130,9 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/terminal")
                 .setMethodCallHandler(this)
             MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/share")
+                .setMethodCallHandler(this)
+            // Storage volumes + "All files access" permission live here.
+            MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/devices")
                 .setMethodCallHandler(this)
         }
     }
@@ -284,6 +289,12 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                 }
                 result.success(volumes)
             }
+            "allFilesAccessGranted" -> {
+                result.success(allFilesAccessGranted())
+            }
+            "requestAllFilesAccess" -> {
+                result.success(requestAllFilesAccess())
+            }
             "shareFile" -> {
                 val path = call.argument<String>("path") ?: ""
                 try {
@@ -372,6 +383,40 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", 0) // 0 = new session
         }
         startService(intent)
+    }
+
+    /** True when the app has "All files access" (MANAGE_EXTERNAL_STORAGE). */
+    private fun allFilesAccessGranted(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            // Pre-Android 11 the legacy permission flows through the normal
+            // runtime permission; treat app as granted once we're passed here.
+            true
+        }
+    }
+
+    /** Opens the system "All files access" settings screen. Returns true when
+     *  the intent could be launched. */
+    private fun requestAllFilesAccess(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+                true
+            } else {
+                true
+            }
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
     private fun stopAllThreads() {
