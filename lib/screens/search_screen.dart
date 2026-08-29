@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:open_file/open_file.dart';
 import 'package:path/path.dart' as p;
 import '../services/archive_service.dart';
 import '../services/search_service.dart';
+import '../services/open_with_service.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
+import '../widgets/preview_panel.dart';
 
 /// Search screen — recursive filename search with result list.
 class SearchScreen extends StatefulWidget {
@@ -24,6 +25,7 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _loading = false;
   String? _error;
   int _resultCount = 0;
+  FileItem? _previewItem; // shown in the bottom preview panel on selection
 
   @override
   void initState() {
@@ -87,13 +89,25 @@ class _SearchScreenState extends State<SearchScreen> {
   Future<void> _openItem(FileItem item) async {
     if (item.isDirectory) {
       Navigator.pop(context, item.path);
-    } else {
-      final result = await OpenFile.open(item.path);
-      if (!mounted) return;
-      if (result.type != ResultType.done) {
+      return;
+    }
+    // Images/PDFs/text open in the in-app preview panel (like the browser).
+    if (item.isImage ||
+        item.isPdf ||
+        item.isMarkdown ||
+        item.isText ||
+        item.isCode) {
+      setState(() => _previewItem = item);
+      return;
+    }
+    // Other file types open externally.
+    try {
+      await OpenWithService.openDefault(item.path);
+    } catch (e) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Cannot open: ${result.message}'),
+            content: Text('Cannot open: $e'),
             backgroundColor: OneDarkColors.red,
           ),
         );
@@ -401,6 +415,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     separatorBuilder: (_, index) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final item = _results[index];
+                      final isSel = _previewItem?.path == item.path;
                       return ListTile(
                         leading: Icon(
                           item.icon,
@@ -419,12 +434,22 @@ class _SearchScreenState extends State<SearchScreen> {
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
+                        selected: isSel,
+                        selectedTileColor:
+                            OneDarkColors.select.withValues(alpha: 0.3),
                         onTap: () => _openItem(item),
                         onLongPress: () => _showContextMenu(item),
                       );
                     },
                   ),
           ),
+          if (_previewItem != null)
+            PreviewPanel(
+              item: _previewItem,
+              width: double.infinity,
+              height: 280,
+              onClose: () => setState(() => _previewItem = null),
+            ),
         ],
       ),
     );

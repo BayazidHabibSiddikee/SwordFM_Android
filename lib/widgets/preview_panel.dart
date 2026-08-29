@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:pdfx/pdfx.dart';
 import '../services/open_with_service.dart';
+import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 
 /// A collapsible panel that previews the selected file.
 class PreviewPanel extends StatefulWidget {
   final FileItem? item;
   final double width;
+  final double? height;
 
   /// Called when the header close button is tapped (dismisses the hosting
   /// bottom sheet, or collapses the side panel).
@@ -19,6 +21,7 @@ class PreviewPanel extends StatefulWidget {
     super.key,
     required this.item,
     required this.width,
+    this.height,
     this.onClose,
   });
 
@@ -140,10 +143,15 @@ class _PreviewPanelState extends State<PreviewPanel> {
 
     return SizedBox(
       width: widget.width,
-      child: Card(
-        margin: const EdgeInsets.all(8),
-        color: cs.surfaceContainerHighest,
-        child: Column(
+      height: widget.height,
+      child: GestureDetector(
+        // Tapping anywhere on the panel closes it (the close button and inner
+        // controls still win the gesture arena for their own taps).
+        onTap: widget.onClose,
+        child: Card(
+          margin: const EdgeInsets.all(8),
+          color: cs.surfaceContainerHighest,
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header
@@ -192,6 +200,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
             ),
           ],
         ),
+        ),
       ),
     );
   }
@@ -203,20 +212,43 @@ class _PreviewPanelState extends State<PreviewPanel> {
       return _buildPdfPreview();
     }
     if (item.isImage) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 320),
-          child: Image.file(
-            File(item.path),
-            fit: BoxFit.contain,
-            errorBuilder: (_, _, _) => Icon(
-              Icons.broken_image,
-              size: 48,
-              color: cs.onSurfaceVariant,
+      return Column(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 320),
+              child: Image.file(
+                File(item.path),
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) => Icon(
+                  Icons.broken_image,
+                  size: 48,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
             ),
           ),
-        ),
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            onPressed: () async {
+              try {
+                await OpenWithService.openDefault(item.path);
+              } catch (_) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text('No app can open this file'),
+                      backgroundColor: OneDarkColors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: const Text('Open with…'),
+          ),
+        ],
       );
     }
     if (item.isMarkdown) {

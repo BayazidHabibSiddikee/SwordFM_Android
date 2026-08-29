@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 import '../services/archive_service.dart';
@@ -13,6 +14,35 @@ import 'convert_dialog.dart';
 import 'package:path/path.dart' as p;
 
 enum ViewMode { details, grid }
+
+/// Persisted default view mode — Settings → "Default View" writes here,
+/// every FileBrowser instance follows it live.
+final ValueNotifier<ViewMode> viewModeNotifier = ValueNotifier<ViewMode>(
+  ViewMode.details,
+);
+
+const String kViewModePref = 'swordfm_default_view';
+
+Future<void> loadPersistedViewMode() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    viewModeNotifier.value =
+        prefs.getString(kViewModePref) == 'grid'
+            ? ViewMode.grid
+            : ViewMode.details;
+  } catch (_) {}
+}
+
+Future<void> savePersistedViewMode(ViewMode mode) async {
+  viewModeNotifier.value = mode;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      kViewModePref,
+      mode == ViewMode.grid ? 'grid' : 'details',
+    );
+  } catch (_) {}
+}
 
 enum SortOption { name, size, date, type }
 
@@ -248,6 +278,11 @@ class _FileBrowserState extends State<FileBrowser> {
   String _currentPath = '/';
   bool _showHidden = false;
   ViewMode _viewMode = ViewMode.details;
+
+  void _setViewMode(ViewMode mode) {
+    setState(() => _viewMode = mode);
+    savePersistedViewMode(mode);
+  }
   SortOption _sortOption = SortOption.name;
   SortDir _sortDir = SortDir.asc;
   SelectionMode _selectionMode = SelectionMode.none;
@@ -282,6 +317,9 @@ class _FileBrowserState extends State<FileBrowser> {
   @override
   void initState() {
     super.initState();
+    _viewMode = viewModeNotifier.value;
+    // Follow the persisted "Default View" setting live.
+    viewModeNotifier.addListener(_onViewModeNotifier);
     // Start at root; didUpdateWidget will navigate to initialPath if non-empty.
     _history.add(_currentPath);
     _historyIndex = 0;
@@ -311,10 +349,16 @@ class _FileBrowserState extends State<FileBrowser> {
 
   @override
   void dispose() {
+    viewModeNotifier.removeListener(_onViewModeNotifier);
     _renameController.dispose();
     _renameFocusNode.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  void _onViewModeNotifier() {
+    final mode = viewModeNotifier.value;
+    if (mode != _viewMode) setState(() => _viewMode = mode);
   }
 
   /// Returns [_items] filtered by the active type filter, date range, and junk filter.
@@ -786,10 +830,10 @@ class _FileBrowserState extends State<FileBrowser> {
         _loadDirectory();
         return true;
       case LogicalKeyboardKey.digit1:
-        setState(() => _viewMode = ViewMode.details);
+        _setViewMode(ViewMode.details);
         return true;
       case LogicalKeyboardKey.digit2:
-        setState(() => _viewMode = ViewMode.grid);
+        _setViewMode(ViewMode.grid);
         return true;
       default:
         return false;
@@ -1130,8 +1174,6 @@ class _FileBrowserState extends State<FileBrowser> {
     String defaultName = paths.length == 1
         ? p.basenameWithoutExtension(paths.first)
         : 'archive';
-    // Always start with the matching extension so the created file is
-    // recognizable as an archive (previously the default name had none).
     defaultName += '.zip';
     final controller = TextEditingController(text: defaultName);
     ArchiveFormat format = ArchiveFormat.zip;
@@ -1149,7 +1191,6 @@ class _FileBrowserState extends State<FileBrowser> {
       }
     }
 
-    // Outermost multi-part suffixes, longest-first, for stripping.
     const multiPartSuffixes = ['tar.bz2', 'tar.gz', 'tar.xz'];
 
     final result = await showDialog<(String, ArchiveFormat)?>(
@@ -1158,7 +1199,6 @@ class _FileBrowserState extends State<FileBrowser> {
         builder: (_, setDialogState) {
           void onFormatChanged(ArchiveFormat f) {
             final current = controller.text;
-            // Strip any known archive extension before re-appending the new one.
             String base = current;
             String? matched;
             for (final s in multiPartSuffixes) {
@@ -1181,80 +1221,67 @@ class _FileBrowserState extends State<FileBrowser> {
           return AlertDialog(
             backgroundColor: OneDarkColors.bg,
             title: Text(
-              'Compress Selection',
-              style: TextStyle(color: OneDarkColors.fg),
+              'Compress ${paths.length} item${paths.length > 1 ? 's' : ''}',
+              style: TextStyle(color: OneDarkColors.fg, fontSize: 15),
             ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  style: TextStyle(color: OneDarkColors.fg),
-                  decoration: const InputDecoration(
-                    labelText: 'Archive name',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Format',
-                  style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<ArchiveFormat>(
-                  segments: const [
-                    ButtonSegment(
-                      value: ArchiveFormat.zip,
-                      label: Text('ZIP'),
-                      icon: Icon(Icons.archive),
-                    ),
-                    ButtonSegment(
-                      value: ArchiveFormat.tar,
-                      label: Text('TAR'),
-                      icon: Icon(Icons.folder_zip),
-                    ),
-                    ButtonSegment(
-                      value: ArchiveFormat.tarGz,
-                      label: Text('TAR.GZ'),
-                      icon: Icon(Icons.compress),
-                    ),
-                    ButtonSegment(
-                      value: ArchiveFormat.tarXz,
-                      label: Text('TAR.XZ'),
-                      icon: Icon(Icons.compress),
-                    ),
-                    ButtonSegment(
-                      value: ArchiveFormat.tarBz2,
-                      label: Text('TAR.BZ2'),
-                      icon: Icon(Icons.compress),
-                    ),
-                  ],
-                  selected: {format},
-                  onSelectionChanged: (s) => onFormatChanged(s.first),
-                  style: ButtonStyle(
-                    foregroundColor: WidgetStatePropertyAll(OneDarkColors.fg),
-                    backgroundColor: WidgetStateProperty.resolveWith(
-                      (states) => states.contains(WidgetState.selected)
-                          ? OneDarkColors.select
-                          : OneDarkColors.dim,
+            content: SizedBox(
+              width: 320,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    style: TextStyle(color: OneDarkColors.fg),
+                    decoration: InputDecoration(
+                      labelText: 'Archive name',
+                      border: const OutlineInputBorder(),
+                      labelStyle: TextStyle(color: OneDarkColors.fgDim),
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 16),
+                  Text(
+                    'Format',
+                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final f in ArchiveFormat.values)
+                        ChoiceChip(
+                          label: Text(
+                            suffixFor(f),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: format == f
+                                  ? Colors.black
+                                  : OneDarkColors.fg,
+                            ),
+                          ),
+                          selected: format == f,
+                          selectedColor: OneDarkColors.cyan,
+                          onSelected: (_) => onFormatChanged(f),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext),
                 child: const Text('Cancel'),
               ),
-              FilledButton(
+              FilledButton.icon(
+                icon: const Icon(Icons.archive, size: 16),
                 onPressed: () => Navigator.pop(dialogContext, (
                   controller.text.trim(),
                   format,
                 )),
-                child: const Text('Create'),
+                label: const Text('Create'),
               ),
             ],
           );
@@ -1266,8 +1293,6 @@ class _FileBrowserState extends State<FileBrowser> {
     final (rawName, fmt) = result;
     var name = rawName.trim();
     if (name.isEmpty) return;
-    // Guarantee the archive suffix — if the user removed the extension the
-    // file would be created with no extension and look like it "didn't work".
     final suffix = suffixFor(fmt);
     if (!name.toLowerCase().endsWith(suffix)) name += suffix;
     final outputPath = p.join(p.dirname(paths.first), name);
@@ -1296,6 +1321,28 @@ class _FileBrowserState extends State<FileBrowser> {
       );
       if (overwrite != true) return;
     }
+
+    // Show a loading overlay while compressing
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Compressing…'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
 
     try {
       switch (fmt) {
@@ -1331,6 +1378,7 @@ class _FileBrowserState extends State<FileBrowser> {
           break;
       }
       if (mounted) {
+        Navigator.pop(context); // dismiss loading overlay
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Created $name'),
@@ -1341,6 +1389,7 @@ class _FileBrowserState extends State<FileBrowser> {
       }
     } catch (e) {
       if (mounted) {
+        Navigator.pop(context); // dismiss loading overlay
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Compression failed: $e'),
@@ -2114,6 +2163,12 @@ class _FileBrowserState extends State<FileBrowser> {
                 _loadDirectory();
               },
             ),
+            // Open the built-in terminal at the current directory.
+            IconButton(
+              icon: Icon(Icons.terminal, color: OneDarkColors.fgDim),
+              onPressed: () => _openTerminalHere(_currentPath),
+              tooltip: 'Open Terminal',
+            ),
             IconButton(
               icon: Icon(
                 _viewMode == ViewMode.details
@@ -2121,8 +2176,8 @@ class _FileBrowserState extends State<FileBrowser> {
                     : Icons.grid_view,
                 color: OneDarkColors.cyan,
               ),
-              onPressed: () => setState(
-                () => _viewMode = _viewMode == ViewMode.details
+              onPressed: () => _setViewMode(
+                _viewMode == ViewMode.details
                     ? ViewMode.grid
                     : ViewMode.details,
               ),
@@ -2330,7 +2385,24 @@ class _FileBrowserState extends State<FileBrowser> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(item.icon, size: 32, color: item.iconColor),
+                        // Image files show a real thumbnail instead of an icon.
+                        if (item.isImage)
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: Image.file(
+                              File(item.path),
+                              height: 96,
+                              width: 96,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) => Icon(
+                                item.icon,
+                                size: 32,
+                                color: item.iconColor,
+                              ),
+                            ),
+                          )
+                        else
+                          Icon(item.icon, size: 32, color: item.iconColor),
                         const SizedBox(height: 4),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -2515,14 +2587,6 @@ class _FileBrowserState extends State<FileBrowser> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                Flexible(
-                  flex: 3,
-                  child: Text(
-                    item.formattedDate,
-                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
                 if (!isMobile)
                   Flexible(
                     flex: 1,
@@ -2535,6 +2599,14 @@ class _FileBrowserState extends State<FileBrowser> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                Flexible(
+                  flex: 3,
+                  child: Text(
+                    item.formattedDate,
+                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
           ),
@@ -2564,13 +2636,6 @@ class _FileBrowserState extends State<FileBrowser> {
             style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
           ),
         ),
-        Flexible(
-          flex: 3,
-          child: Text(
-            'Date Modified',
-            style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
-          ),
-        ),
         if (!isMobile)
           Flexible(
             flex: 1,
@@ -2579,6 +2644,13 @@ class _FileBrowserState extends State<FileBrowser> {
               style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
             ),
           ),
+        Flexible(
+          flex: 3,
+          child: Text(
+            'Date Modified',
+            style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+          ),
+        ),
       ],
     );
   }

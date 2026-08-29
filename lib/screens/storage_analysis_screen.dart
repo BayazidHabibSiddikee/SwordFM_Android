@@ -14,7 +14,8 @@ String _formatBytes(int bytes) {
 
 class StorageAnalysisScreen extends StatefulWidget {
   final String rootPath;
-  const StorageAnalysisScreen({super.key, this.rootPath = '/'});
+  const StorageAnalysisScreen({super.key, String? rootPath})
+      : rootPath = rootPath ?? '/storage/emulated/0';
 
   @override
   State<StorageAnalysisScreen> createState() => _StorageAnalysisScreenState();
@@ -25,11 +26,30 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
   bool _loading = true;
   String? _error;
   int _totalBytes = 0;
+  int _totalDisk = 0;
 
   @override
   void initState() {
     super.initState();
+    _loadDiskInfo();
     _scan(widget.rootPath);
+  }
+
+  Future<void> _loadDiskInfo() async {
+    try {
+      final result = await Process.run('df', ['/storage/emulated/0']);
+      final lines = (result.stdout as String).split('\n');
+      if (lines.length > 1) {
+        final parts = lines[1].trim().split(RegExp(r'\s+'));
+        // df output: Filesystem 1K-blocks Used Available Use% Mounted
+        if (parts.length >= 2) {
+          final totalKb = int.tryParse(parts[1]);
+          if (totalKb != null && mounted) {
+            setState(() => _totalDisk = totalKb * 1024);
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _scan(String path) async {
@@ -55,18 +75,19 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
     }
   }
 
-  /// Recursively collect folder sizes, capping depth at 3 to keep scan fast.
+  /// Recursively collect folder sizes, capping depth at 4 to get a fuller
+  /// picture while still keeping the scan fast on mobile.
   Future<List<_FolderSize>> _collectSizes(
     Directory dir,
     String rootPath, [
     int depth = 0,
   ]) async {
-    if (depth > 3) return [];
+    if (depth > 4) return [];
     List<FileSystemEntity> children;
     try {
       children = await dir.list().toList();
     } catch (_) {
-      return []; // skip inaccessible directories
+      return [];
     }
     final results = <_FolderSize>[];
     for (final entity in children) {
@@ -76,7 +97,7 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
         try {
           subItems = await _collectSizes(entity, rootPath, depth + 1);
         } catch (_) {
-          subItems = []; // one bad subfolder must not fail the whole scan
+          subItems = [];
         }
         int total = subItems.fold(0, (s, e) => s + e.size);
         // Also include direct files in this dir
@@ -89,7 +110,9 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
             }
           }
         } catch (_) {}
-        results.add(_FolderSize(entity.path, total, subItems));
+        if (total > 0) {
+          results.add(_FolderSize(entity.path, total, subItems));
+        }
       }
     }
     results.sort((a, b) => b.size.compareTo(a.size));
@@ -312,24 +335,60 @@ class _StorageAnalysisScreenState extends State<StorageAnalysisScreen> {
                 Container(
                   padding: const EdgeInsets.all(16),
                   color: OneDarkColors.bgDark,
-                  child: Row(
+                  child: Column(
                     children: [
-                      Icon(Icons.storage, color: OneDarkColors.cyan, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Total: ${_formatBytes(_totalBytes)}',
-                        style: TextStyle(color: OneDarkColors.fg, fontSize: 14),
+                      Row(
+                        children: [
+                          Icon(Icons.storage, color: OneDarkColors.cyan, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Scanned: ${_formatBytes(_totalBytes)}',
+                            style: TextStyle(color: OneDarkColors.fg, fontSize: 14),
+                          ),
+                          const Spacer(),
+                          Text(
+                            widget.rootPath,
+                            style: TextStyle(
+                              color: OneDarkColors.fgDim,
+                              fontSize: 11,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
-                      const Spacer(),
-                      Text(
-                        widget.rootPath,
-                        style: TextStyle(
-                          color: OneDarkColors.fgDim,
-                          fontSize: 11,
+                      if (_totalDisk > 0) ...[
+                        const SizedBox(height: 8),
+                        LinearProgressIndicator(
+                          value: _totalDisk > 0
+                              ? (_totalBytes / _totalDisk).clamp(0.0, 1.0)
+                              : 0,
+                          minHeight: 6,
+                          backgroundColor: OneDarkColors.dim,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(OneDarkColors.cyan),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Text(
+                              'Total disk: ${_formatBytes(_totalDisk)}',
+                              style: TextStyle(
+                                color: OneDarkColors.fgDim,
+                                fontSize: 11,
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '${_totalDisk > 0 ? ((_totalBytes / _totalDisk) * 100).toStringAsFixed(1) : '0'}% scanned',
+                              style: TextStyle(
+                                color: OneDarkColors.fgDim,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),

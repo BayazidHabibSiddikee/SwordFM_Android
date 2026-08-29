@@ -5,6 +5,7 @@ import 'package:flutter_pty/flutter_pty.dart';
 import 'package:xterm/xterm.dart';
 import '../services/terminal_service.dart';
 import '../theme/theme.dart';
+import '../utils/constants.dart' show AppPaths;
 
 /// Built-in terminal emulator (no Termux required).
 ///
@@ -25,6 +26,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   late final Terminal _terminal;
   Pty? _pty;
   String? _spawnError;
+  final FocusNode _terminalFocusNode = FocusNode();
 
   @override
   void initState() {
@@ -38,9 +40,16 @@ class _TerminalScreenState extends State<TerminalScreen> {
   }
 
   Future<void> _startShell() async {
-    final cwd = Directory(widget.startPath).existsSync()
-        ? widget.startPath
-        : '/';
+    // Prefer the requested directory; fall back to home, never '/' — root is
+    // read-only/locked on Android and makes the shell unusable.
+    var cwd = widget.startPath;
+    if (cwd.isEmpty ||
+        cwd == '/' ||
+        !Directory(cwd).existsSync() ||
+        !_canWrite(cwd)) {
+      cwd = AppPaths.home;
+      if (!Directory(cwd).existsSync()) cwd = Directory.systemTemp.path;
+    }
     // /system/bin/sh always exists on Android; try the fuller shells first.
     final candidates = ['/system/bin/sh', '/bin/sh'];
     final shell = candidates.firstWhere(
@@ -55,7 +64,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         environment: {
           'TERM': 'xterm-256color',
           'PATH': '/system/bin:/system/xbin:/product/bin:/vendor/bin',
-          'HOME': widget.startPath,
+          'HOME': cwd,
           'LANG': 'en_US.UTF-8',
         },
       );
@@ -80,11 +89,27 @@ class _TerminalScreenState extends State<TerminalScreen> {
     }
   }
 
+  /// Quick probe: can we create a file here? Scoped-storage dirs that only
+  /// allow media writes reject plain file creation.
+  static bool _canWrite(String dirPath) {
+    try {
+      final probe = File(
+        '$dirPath/.swordfm_write_probe_${DateTime.now().millisecondsSinceEpoch}',
+      );
+      probe.createSync();
+      probe.deleteSync();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   @override
   void dispose() {
     try {
       _pty?.kill();
     } catch (_) {}
+    _terminalFocusNode.dispose();
     super.dispose();
   }
 
@@ -150,12 +175,68 @@ class _TerminalScreenState extends State<TerminalScreen> {
               child: CircularProgressIndicator(color: OneDarkColors.cyan),
             )
           : SafeArea(
-              child: TerminalView(
-                _terminal,
-                theme: _oneDarkTerminalTheme,
-                textStyle: const TerminalStyle(fontSize: 13),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      // Tap anywhere on the terminal to focus and raise the
+                      // on-screen keyboard (the default keyboardType is
+                      // emailAddress, which shows @/.com keys — unusable for
+                      // a shell).
+                      onTap: () =>
+                          _terminalFocusNode.requestFocus(),
+                      child: TerminalView(
+                        _terminal,
+                        theme: _oneDarkTerminalTheme,
+                        textStyle: const TerminalStyle(fontSize: 13),
+                        autofocus: true,
+                        keyboardType: TextInputType.text,
+                        focusNode: _terminalFocusNode,
+                      ),
+                    ),
+                  ),
+                  // Quick keys for touch users + hide-keyboard toggle.
+                  Container(
+                    color: OneDarkColors.bg,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    child: Row(
+                      children: [
+                        _quickKey('Esc', '\u001b'),
+                        _quickKey('Tab', '\t'),
+                        _quickKey('Ctrl+C', '\u0003'),
+                        const Spacer(),
+                        IconButton(
+                          icon: Icon(
+                            Icons.keyboard_hide,
+                            size: 20,
+                            color: OneDarkColors.fgDim,
+                          ),
+                          tooltip: 'Hide keyboard',
+                          onPressed: () => FocusScope.of(context).unfocus(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
+    );
+  }
+
+  /// Sends [sequence] straight to the shell (bypasses the xterm input pipe).
+  Widget _quickKey(String label, String sequence) {
+    return TextButton(
+      style: TextButton.styleFrom(
+        minimumSize: const Size(48, 32),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        foregroundColor: OneDarkColors.cyan,
+      ),
+      onPressed: () =>
+          _pty?.write(Uint8List.fromList(sequence.codeUnits)),
+      child: Text(label, style: const TextStyle(fontSize: 12)),
     );
   }
 

@@ -2,10 +2,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
-import '../theme/theme.dart';
 import '../utils/file_utils.dart' show FileItem;
 import '../utils/constants.dart' show AppPaths;
-import '../services/open_with_service.dart';
+import '../widgets/preview_panel.dart';
 
 /// Shows recently modified files across common storage directories,
 /// similar to the "Recent" category in Google Files.
@@ -20,6 +19,7 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
   List<_RecentEntry> _entries = [];
   bool _loading = true;
   String? _error;
+  FileItem? _previewItem;
 
   @override
   void initState() {
@@ -91,6 +91,9 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    final isWide = width > 700;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Recent Files'),
@@ -126,58 +129,145 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
                         ],
                       ),
                     )
-                  : RefreshIndicator(
-                      onRefresh: _loadRecent,
-                      child: ListView.separated(
-                        itemCount: _entries.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final entry = _entries[index];
-                          final file = File(entry.path);
-                          final item = FileItem(
-                            entity: file,
-                            name: entry.name,
-                            path: entry.path,
-                            isDirectory: false,
-                            size: entry.size,
-                            lastModified: entry.modified,
-                          );
-                          return ListTile(
-                            leading: Icon(item.icon,
-                                color: item.iconColor, size: 28),
-                            title: Text(
-                              entry.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            subtitle: Text(
-                              '${_formatSize(entry.size)}  ·  ${_relativeTime(entry.modified)}',
-                              style: TextStyle(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
-                                fontSize: 12,
+                  : isWide
+                      ? Row(
+                          children: [
+                            Expanded(
+                              child: RefreshIndicator(
+                                onRefresh: _loadRecent,
+                                child: ListView.separated(
+                                  itemCount: _entries.length,
+                                  separatorBuilder: (_, __) =>
+                                      const Divider(height: 1),
+                                  itemBuilder: (context, index) {
+                                    final entry = _entries[index];
+                                    final file = File(entry.path);
+                                    final item = FileItem(
+                                      entity: file,
+                                      name: entry.name,
+                                      path: entry.path,
+                                      isDirectory: false,
+                                      size: entry.size,
+                                      lastModified: entry.modified,
+                                    );
+                                    final isSel = _previewItem?.path == entry.path;
+                                    return ListTile(
+                                      leading: Icon(item.icon,
+                                          color: item.iconColor, size: 28),
+                                      title: Text(
+                                        entry.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      subtitle: Text(
+                                        _formatSize(entry.size),
+                                        style: TextStyle(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      trailing: Text(
+                                        _relativeTime(entry.modified),
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      selected: isSel,
+                                      selectedTileColor:
+                                          Theme.of(context)
+                                              .colorScheme
+                                              .primaryContainer
+                                              .withValues(alpha: 0.2),
+                                      onTap: () {
+                                        setState(() => _previewItem = item);
+                                      },
+                                    );
+                                  },
+                                ),
                               ),
                             ),
-                            onTap: () async {
-                              try {
-                                await OpenWithService.openDefault(entry.path);
-                              } catch (e) {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Cannot open: $e'),
-                                      backgroundColor: OneDarkColors.red,
-                                    ),
-                                  );
-                                }
-                              }
-                            },
-                          );
-                        },
-                      ),
-                    ),
+                            if (_previewItem != null)
+                              PreviewPanel(
+                                item: _previewItem,
+                                width: 340,
+                                onClose: () =>
+                                    setState(() => _previewItem = null),
+                              ),
+                          ],
+                        )
+                      : Column(
+                          children: [
+                            Expanded(
+                              child: RefreshIndicator(
+                                onRefresh: _loadRecent,
+                                child: ListView.separated(
+                                  itemCount: _entries.length,
+                                  separatorBuilder: (_, __) =>
+                                      const Divider(height: 1),
+                                  itemBuilder: (context, index) {
+                                    final entry = _entries[index];
+                                    final file = File(entry.path);
+                                    final item = FileItem(
+                                      entity: file,
+                                      name: entry.name,
+                                      path: entry.path,
+                                      isDirectory: false,
+                                      size: entry.size,
+                                      lastModified: entry.modified,
+                                    );
+                                    final isSel =
+                                        _previewItem?.path == entry.path;
+                                    return ListTile(
+                                      leading: Icon(item.icon,
+                                          color: item.iconColor, size: 28),
+                                      title: Text(
+                                        entry.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      subtitle: Text(
+                                        _formatSize(entry.size),
+                                        style: TextStyle(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      trailing: Text(
+                                        _relativeTime(entry.modified),
+                                        style: TextStyle(
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      selected: isSel,
+                                      selectedTileColor:
+                                          Theme.of(context)
+                                              .colorScheme
+                                              .primaryContainer
+                                              .withValues(alpha: 0.2),
+                                      onTap: () {
+                                        setState(() => _previewItem = item);
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                            if (_previewItem != null)
+                              PreviewPanel(
+                                item: _previewItem,
+                                width: double.infinity,
+                                height: 280,
+                                onClose: () =>
+                                    setState(() => _previewItem = null),
+                              ),
+                          ],
+                        ),
     );
   }
 
