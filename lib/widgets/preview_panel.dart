@@ -221,6 +221,9 @@ class _PreviewPanelState extends State<PreviewPanel> {
               child: Image.file(
                 File(item.path),
                 fit: BoxFit.contain,
+                // Decode at most 1000px wide — full-res photos (10MB+) are
+                // slow to decode on mobile and would stall the preview.
+                cacheWidth: 1000,
                 errorBuilder: (_, _, _) => Icon(
                   Icons.broken_image,
                   size: 48,

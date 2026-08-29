@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:xterm/xterm.dart';
 import '../services/terminal_service.dart';
@@ -54,12 +55,19 @@ class _TerminalScreenState extends State<TerminalScreen> {
           ? home
           : Directory.systemTemp.path;
     }
-    // /system/bin/sh always exists on Android; try the fuller shells first.
-    final candidates = ['/system/bin/sh', '/bin/sh'];
-    final shell = candidates.firstWhere(
-      (c) => File(c).existsSync(),
-      orElse: () => candidates.first,
-    );
+    // Prefer Termux's shell when installed — it ships a package manager
+    // (pkg/apt), so `pkg install python` / `pkg install cmatrix` work. The
+    // bare /system/bin/sh has no package manager at all.
+    const termuxShell = '/data/data/com.termux/files/usr/bin/bash';
+    final usingTermux = File(termuxShell).existsSync();
+    final shell = usingTermux
+        ? termuxShell
+        : (File('/system/bin/sh').existsSync() ? '/system/bin/sh' : '/bin/sh');
+    final shellPath = usingTermux
+        ? '/data/data/com.termux/files/usr/bin:'
+              '/data/data/com.termux/files/usr/bin/applets:'
+              '/system/bin:/system/xbin:/product/bin:/vendor/bin'
+        : '/system/bin:/system/xbin:/product/bin:/vendor/bin';
 
     try {
       final pty = Pty.start(
@@ -67,7 +75,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         workingDirectory: cwd,
         environment: {
           'TERM': 'xterm-256color',
-          'PATH': '/system/bin:/system/xbin:/product/bin:/vendor/bin',
+          'PATH': shellPath,
           'HOME': cwd,
           'LANG': 'en_US.UTF-8',
         },
@@ -210,14 +218,17 @@ class _TerminalScreenState extends State<TerminalScreen> {
                       ),
                     ),
                   ),
-                  // Quick keys for touch users + hide-keyboard toggle.
+                  // Quick keys for touch users + paste + hide-keyboard.
+                  // Horizontally scrollable so they fit narrow phones.
                   Container(
                     color: OneDarkColors.bg,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
                       vertical: 2,
                     ),
-                    child: Row(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
                       children: [
                         _quickKey('↑', '\u001b[A'),
                         _quickKey('↓', '\u001b[B'),
@@ -229,6 +240,15 @@ class _TerminalScreenState extends State<TerminalScreen> {
                         const Spacer(),
                         IconButton(
                           icon: Icon(
+                            Icons.content_paste,
+                            size: 20,
+                            color: OneDarkColors.fgDim,
+                          ),
+                          tooltip: 'Paste from clipboard',
+                          onPressed: _pasteFromClipboard,
+                        ),
+                        IconButton(
+                          icon: Icon(
                             Icons.keyboard_hide,
                             size: 20,
                             color: OneDarkColors.fgDim,
@@ -238,6 +258,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                         ),
                       ],
                     ),
+                  ),
                   ),
                 ],
               ),
@@ -257,6 +278,15 @@ class _TerminalScreenState extends State<TerminalScreen> {
           _pty?.write(Uint8List.fromList(sequence.codeUnits)),
       child: Text(label, style: const TextStyle(fontSize: 12)),
     );
+  }
+
+  /// Reads the system clipboard and types it into the shell (Android's IME
+  /// paste menu doesn't reach the hidden xterm input field).
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty) return;
+    _pty?.write(Uint8List.fromList(text.codeUnits));
   }
 
   /// One Dark-flavored terminal palette. A getter (not a cached static) so it

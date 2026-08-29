@@ -2432,6 +2432,9 @@ class _FileBrowserState extends State<FileBrowser> {
                               height: 96,
                               width: 96,
                               fit: BoxFit.cover,
+                              // Decode at thumbnail size — full-res photos are
+                              // slow to decode and would jank the grid.
+                              cacheWidth: 200,
                               errorBuilder: (_, _, _) => Icon(
                                 item.icon,
                                 size: 32,
