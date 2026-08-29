@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:xterm/xterm.dart';
@@ -29,6 +30,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
   void initState() {
     super.initState();
     _terminal = Terminal(maxLines: 10000);
+    // width = columns, height = rows; Pty.resize takes (rows, columns).
+    _terminal.onResize = (width, height, _, __) {
+      _pty?.resize(height, width);
+    };
     _startShell();
   }
 
@@ -66,7 +71,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
       // Keyboard/IME input → shell.
       _terminal.onOutput = (data) {
-        _pty?.write(data);
+        _pty?.write(Uint8List.fromList(data.codeUnits));
       };
 
       if (mounted) setState(() => _pty = pty);
@@ -92,7 +97,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         foregroundColor: OneDarkColors.fg,
         title: Text(
           'Terminal — ${widget.startPath}',
-          style: const TextStyle(color: OneDarkColors.fg, fontSize: 14),
+          style: TextStyle(color: OneDarkColors.fg, fontSize: 14),
           overflow: TextOverflow.ellipsis,
         ),
       ),
@@ -101,7 +106,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline,
+                  Icon(Icons.error_outline,
                       size: 48, color: OneDarkColors.red),
                   const SizedBox(height: 12),
                   Text(
@@ -128,8 +133,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
                       );
                       if (!mounted || launched) return;
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Termux is not installed'),
+                        SnackBar(
+                          content: const Text('Termux is not installed'),
                           backgroundColor: OneDarkColors.amber,
                         ),
                       );
@@ -141,22 +146,44 @@ class _TerminalScreenState extends State<TerminalScreen> {
               ),
             )
           : _pty == null
-          ? const Center(
+          ? Center(
               child: CircularProgressIndicator(color: OneDarkColors.cyan),
             )
           : SafeArea(
               child: TerminalView(
                 _terminal,
-                backgroundColor: OneDarkColors.bgDark,
-                textStyle: TerminalStyle(
-                  fontSize: 13,
-                  color: OneDarkColors.fg,
-                ),
-                onResize: (size) {
-                  _pty?.resize(size.columns, size.rows);
-                },
+                theme: _oneDarkTerminalTheme,
+                textStyle: const TerminalStyle(fontSize: 13),
               ),
             ),
     );
   }
+
+  /// One Dark-flavored terminal palette. A getter (not a cached static) so it
+  /// tracks the current theme mode like the rest of the app.
+  static TerminalTheme get _oneDarkTerminalTheme => TerminalTheme(
+    cursor: OneDarkColors.cyan,
+    selection: OneDarkColors.select,
+    foreground: OneDarkColors.fg,
+    background: OneDarkColors.bgDark,
+    black: const Color(0xFF282C34),
+    red: const Color(0xFFE06C75),
+    green: const Color(0xFF98C379),
+    yellow: const Color(0xFFE5C07B),
+    blue: const Color(0xFF61AFEF),
+    magenta: const Color(0xFFC678DD),
+    cyan: const Color(0xFF56B6C2),
+    white: const Color(0xFFABB2BF),
+    brightBlack: const Color(0xFF5C6370),
+    brightRed: const Color(0xFFE06C75),
+    brightGreen: const Color(0xFF98C379),
+    brightYellow: const Color(0xFFE5C07B),
+    brightBlue: const Color(0xFF61AFEF),
+    brightMagenta: const Color(0xFFC678DD),
+    brightCyan: const Color(0xFF56B6C2),
+    brightWhite: const Color(0xFFFFFFFF),
+    searchHitBackground: OneDarkColors.dim,
+    searchHitBackgroundCurrent: OneDarkColors.hover,
+    searchHitForeground: OneDarkColors.fg,
+  );
 }
