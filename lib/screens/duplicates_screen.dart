@@ -110,6 +110,10 @@ class _DupsState extends State<DuplicatesScreen> {
   /// Recursively collects file paths under [dir] into [out], skipping
   /// unreadable subdirectories instead of aborting the whole scan with a
   /// permission error (Android blocks e.g. Android/data and Android/obb).
+  ///
+  /// System/irrelevant subtrees are pruned so the scan stays fast even on a
+  /// full 120GB tree: `/Android` (app data/cache/obb), `LOST.DIR`, and any
+  /// hidden dot-folder contain no user duplicates worth hashing.
   Future<void> _collectFiles(
     Directory dir,
     List<String> out,
@@ -122,6 +126,12 @@ class _DupsState extends State<DuplicatesScreen> {
     }
     for (final entity in entities) {
       if (entity is Directory) {
+        final name = p.basename(entity.path);
+        if (name == 'Android' ||
+            name == 'LOST.DIR' ||
+            name.startsWith('.')) {
+          continue; // system / junk subtree — skip
+        }
         await _collectFiles(entity, out);
       } else if (entity is File) {
         out.add(entity.path);
