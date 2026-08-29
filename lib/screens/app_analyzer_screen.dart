@@ -1,0 +1,230 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import '../theme/theme.dart';
+
+/// Shows device information and installed apps with details.
+class AppAnalyzerScreen extends StatefulWidget {
+  const AppAnalyzerScreen({super.key});
+  @override
+  State<AppAnalyzerScreen> createState() => _AppAnalyzerState();
+}
+
+class _AppAnalyzerState extends State<AppAnalyzerScreen> {
+  bool _loading = true;
+  String _deviceInfo = '';
+  List<_AppInfo> _apps = [];
+  List<_AppInfo> _filteredApps = [];
+  final _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInfo();
+    _searchController.addListener(_filter);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _filter() {
+    final q = _searchController.text.toLowerCase();
+    setState(() {
+      _filteredApps = q.isEmpty
+          ? List.from(_apps)
+          : _apps.where((a) => a.name.toLowerCase().contains(q) || a.pkg.toLowerCase().contains(q)).toList();
+    });
+  }
+
+  Future<void> _loadInfo() async {
+    final info = DeviceInfoPlugin();
+    if (Platform.isAndroid) {
+      final android = await info.androidInfo;
+      _deviceInfo = '${android.model} (${android.brand})\n'
+          'Android ${android.version.release} (SDK ${android.version.sdkInt})\n'
+          'Board: ${android.board}\n'
+          'Hardware: ${android.hardware}';
+      // Get installed apps via MethodChannel-like approach
+      _apps = await _getInstalledApps();
+      _apps.sort((a, b) => a.name.compareTo(b.name));
+      _filteredApps = List.from(_apps);
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<List<_AppInfo>> _getInstalledApps() async {
+    // Use /data/app to list installed apps (requires root or ALL_FILES_ACCESS)
+    final apps = <_AppInfo>[];
+    try {
+      // Try reading package manager output
+      final result = await Process.run('pm', ['list', 'packages', '-f']);
+      final lines = (result.stdout as String).split('\n');
+      for (final line in lines) {
+        if (!line.startsWith('package:')) continue;
+        final parts = line.substring(8).trim().split('=');
+        if (parts.length >= 2) {
+          final path = parts[0].trim();
+          final pkg = parts[1].trim();
+          apps.add(_AppInfo(
+            name: pkg.split('.').last,
+            pkg: pkg,
+            path: path,
+            isSystem: path.startsWith('/system/'),
+          ));
+        }
+      }
+    } catch (_) {
+      // Fallback: empty
+    }
+    return apps;
+  }
+
+  void _sortApps(String sortBy) {
+    setState(() {
+      switch (sortBy) {
+        case 'name':
+          _filteredApps.sort((a, b) => a.name.compareTo(b.name));
+        case 'size':
+          _filteredApps.sort((a, b) => a.name.compareTo(b.name));
+        case 'pkg':
+          _filteredApps.sort((a, b) => a.pkg.compareTo(b.pkg));
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: OneDarkColors.bg,
+      appBar: AppBar(
+        title: const Text('App Analyzer', style: TextStyle(fontSize: 16)),
+        backgroundColor: OneDarkColors.bgDark,
+        foregroundColor: OneDarkColors.fg,
+        iconTheme: IconThemeData(color: OneDarkColors.fg),
+        actions: [
+          PopupMenuButton<String>(
+            icon: Icon(Icons.sort, color: OneDarkColors.fgDim),
+            onSelected: _sortApps,
+            color: OneDarkColors.bgDark,
+            itemBuilder: (_) => [
+              PopupMenuItem(value: 'name', child: Text('Sort by Name', style: TextStyle(color: OneDarkColors.fg))),
+              PopupMenuItem(value: 'pkg', child: Text('Sort by Package', style: TextStyle(color: OneDarkColors.fg))),
+            ],
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                // Device info card
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: OneDarkColors.bgDark,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: OneDarkColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.phone_android, size: 18, color: OneDarkColors.cyan),
+                          const SizedBox(width: 8),
+                          Text('Device Info', style: TextStyle(color: OneDarkColors.cyan, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(_deviceInfo, style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12, height: 1.5)),
+                    ],
+                  ),
+                ),
+                // Search
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: TextField(
+                    controller: _searchController,
+                    style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Search ${_apps.length} apps…',
+                      hintStyle: TextStyle(color: OneDarkColors.fgDim),
+                      prefixIcon: Icon(Icons.search, size: 18, color: OneDarkColors.fgDim),
+                      isDense: true,
+                      border: OutlineInputBorder(borderSide: BorderSide(color: OneDarkColors.border)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // App count
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      Icon(Icons.apps, size: 14, color: OneDarkColors.fgDim),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${_filteredApps.length} apps',
+                        style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                // App list
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: _filteredApps.length,
+                    separatorBuilder: (_, i) => const Divider(height: 1, indent: 56),
+                    itemBuilder: (_, i) {
+                      final app = _filteredApps[i];
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(
+                          app.isSystem ? Icons.android : Icons.apps,
+                          size: 20,
+                          color: app.isSystem ? OneDarkColors.fgDim : OneDarkColors.cyan,
+                        ),
+                        title: Text(
+                          app.name,
+                          style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          app.pkg,
+                          style: TextStyle(color: OneDarkColors.fgDim, fontSize: 10),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: app.isSystem
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: OneDarkColors.amber.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text('SYS', style: TextStyle(color: OneDarkColors.amber, fontSize: 9)),
+                              )
+                            : null,
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class _AppInfo {
+  final String name;
+  final String pkg;
+  final String path;
+  final bool isSystem;
+  const _AppInfo({required this.name, required this.pkg, required this.path, this.isSystem = false});
+}

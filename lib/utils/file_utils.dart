@@ -64,6 +64,47 @@ const Map<String, String> _mimeTypes = {
   'exe': 'application/x-msdownload',
 };
 
+/// File extensions that open in the built-in video player.
+const Set<String> kVideoExtensions = {
+  '.mp4',
+  '.mkv',
+  '.avi',
+  '.mov',
+  '.wmv',
+  '.flv',
+  '.webm',
+  '.m4v',
+  '.3gp',
+  '.3g2',
+  '.mts',
+  '.m2ts',
+  '.ts',
+  '.vob',
+  '.ogv',
+  '.rm',
+  '.rmvb',
+  '.asf',
+  '.divx',
+};
+
+/// File extensions that open in the built-in music player.
+const Set<String> kAudioExtensions = {
+  '.mp3',
+  '.wav',
+  '.flac',
+  '.aac',
+  '.ogg',
+  '.wma',
+  '.m4a',
+  '.opus',
+  '.aiff',
+  '.ape',
+  '.alac',
+  '.mid',
+  '.midi',
+  '.amr',
+};
+
 /// Represents a single file or directory entry.
 class FileItem {
   final FileSystemEntity entity;
@@ -189,7 +230,7 @@ class FileItem {
     return perms.toString();
   }
 
-    IconData get icon {
+  IconData get icon {
     if (isDirectory) return Icons.folder;
     final ext = extension;
     if (FileItem._kImageExtensions.contains(ext)) {
@@ -303,10 +344,35 @@ class FileItem {
   bool get isHidden => name.startsWith('.');
   bool get isImage => _kImageExtensions.contains(extension);
   static const _kImageExtensions = {
-    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.heic',
-    '.ico', '.tif', '.tiff', '.avif', '.jxl', '.heif',
-    '.raw', '.cr2', '.nef', '.arw', '.dng', '.psd', '.xcf', '.tga',
-    '.dds', '.exr', '.hdr', '.ktx', '.pkm', '.pvr', '.s3tc',
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.gif',
+    '.webp',
+    '.bmp',
+    '.svg',
+    '.heic',
+    '.ico',
+    '.tif',
+    '.tiff',
+    '.avif',
+    '.jxl',
+    '.heif',
+    '.raw',
+    '.cr2',
+    '.nef',
+    '.arw',
+    '.dng',
+    '.psd',
+    '.xcf',
+    '.tga',
+    '.dds',
+    '.exr',
+    '.hdr',
+    '.ktx',
+    '.pkm',
+    '.pvr',
+    '.s3tc',
   };
   bool get isCode => const [
     '.py',
@@ -779,8 +845,7 @@ class FileUtils {
     final trashDir = await AppPaths.trashDir;
     final dir = Directory(trashDir);
     if (!await dir.exists()) return;
-    final cutoffMs =
-        DateTime.now().subtract(olderThan).millisecondsSinceEpoch;
+    final cutoffMs = DateTime.now().subtract(olderThan).millisecondsSinceEpoch;
     try {
       await for (final entity in dir.list()) {
         final name = p.basename(entity.path);

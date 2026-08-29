@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/theme.dart';
+import '../screens/video_player_screen.dart';
+import '../screens/music_player_screen.dart';
+import '../screens/notepad_screen.dart';
+import '../screens/pdf_reader_screen.dart';
 import '../utils/file_utils.dart';
 import '../services/archive_service.dart';
 import '../services/open_with_service.dart';
@@ -10,6 +14,7 @@ import '../services/share_service.dart';
 import '../screens/terminal_screen.dart';
 import '../screens/folder_graph_screen.dart';
 import '../screens/lan_screen.dart';
+import '../screens/archive_browser_screen.dart';
 import 'preview_panel.dart';
 import 'convert_dialog.dart';
 import 'package:path/path.dart' as p;
@@ -31,10 +36,9 @@ const String kViewModePref = 'swordfm_default_view';
 Future<void> loadPersistedViewMode() async {
   try {
     final prefs = await SharedPreferences.getInstance();
-    viewModeNotifier.value =
-        prefs.getString(kViewModePref) == 'grid'
-            ? ViewMode.grid
-            : ViewMode.details;
+    viewModeNotifier.value = prefs.getString(kViewModePref) == 'grid'
+        ? ViewMode.grid
+        : ViewMode.details;
   } catch (_) {}
 }
 
@@ -218,6 +222,45 @@ const Set<String> _kTextExtensions = {
   '.diff',
 };
 
+const Set<String> _kVideoExtensions = {
+  '.mp4',
+  '.mkv',
+  '.avi',
+  '.mov',
+  '.wmv',
+  '.flv',
+  '.webm',
+  '.m4v',
+  '.3gp',
+  '.3g2',
+  '.mts',
+  '.m2ts',
+  '.ts',
+  '.vob',
+  '.ogv',
+  '.rm',
+  '.rmvb',
+  '.asf',
+  '.divx',
+};
+
+const Set<String> _kAudioExtensions = {
+  '.mp3',
+  '.wav',
+  '.flac',
+  '.aac',
+  '.ogg',
+  '.wma',
+  '.m4a',
+  '.opus',
+  '.aiff',
+  '.ape',
+  '.alac',
+  '.mid',
+  '.midi',
+  '.amr',
+};
+
 /// Aggregate info about the current multi-selection, reported to the parent
 /// via [FileBrowser.onSelectionChanged].
 class SelectionInfo {
@@ -293,6 +336,7 @@ class _FileBrowserState extends State<FileBrowser> {
     setState(() => _viewMode = mode);
     savePersistedViewMode(mode);
   }
+
   SortOption _sortOption = SortOption.name;
   SortDir _sortDir = SortDir.asc;
   SelectionMode _selectionMode = SelectionMode.none;
@@ -557,11 +601,32 @@ class _FileBrowserState extends State<FileBrowser> {
     if (item.isDirectory) {
       _loadDirectory(path: item.path);
     } else {
-      // Keep the selection for the preview panel, then open the file with its
-      // default app. On Android, plain file:// URIs are rejected by the OS
-      // (FileUriExposedException), so go through the FileProvider-backed
-      // OpenWithService instead.
       widget.onItemSelected(item);
+
+      final ext = item.extension.toLowerCase();
+      // Video → built-in player
+      if (_kVideoExtensions.contains(ext)) {
+        _openVideo(item.path);
+        return;
+      }
+      // Audio → built-in music player (with sibling playlist)
+      if (_kAudioExtensions.contains(ext)) {
+        await _openAudio(item);
+        return;
+      }
+      // Text/code → notepad
+      if (_kTextExtensions.contains(ext) && !item.isPdf) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => NotepadScreen(filePath: item.path)),
+        );
+        return;
+      }
+      // PDF → built-in reader
+      if (item.isPdf) {
+        _openPdf(item.path);
+        return;
+      }
+      // Everything else → external app
       try {
         await OpenWithService.openDefault(item.path);
       } catch (e) {
@@ -572,8 +637,22 @@ class _FileBrowserState extends State<FileBrowser> {
 
   /// Single-tap on a file: select it for the preview panel. On phones the
   /// side panel is hidden, so open the preview in a bottom sheet instead.
+  /// Video/audio/PDF open directly in the built-in players/reader.
   Future<void> _showFile(FileItem item) async {
     widget.onItemSelected(item);
+    final ext = item.extension.toLowerCase();
+    if (_kVideoExtensions.contains(ext)) {
+      _openVideo(item.path);
+      return;
+    }
+    if (_kAudioExtensions.contains(ext)) {
+      await _openAudio(item);
+      return;
+    }
+    if (item.isPdf) {
+      _openPdf(item.path);
+      return;
+    }
     if (MediaQuery.of(context).size.width < 600) {
       await showModalBottomSheet<void>(
         context: context,
@@ -591,6 +670,42 @@ class _FileBrowserState extends State<FileBrowser> {
         ),
       );
     }
+  }
+
+  void _openVideo(String path) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => VideoPlayerScreen(filePath: path)),
+    );
+  }
+
+  void _openPdf(String path) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => PdfReaderScreen(filePath: path)));
+  }
+
+  /// Opens [item] in the music player, seeding a playlist with the other
+  /// audio files in the same directory (the tapped file first if found).
+  Future<void> _openAudio(FileItem item) async {
+    final siblings = <String>[];
+    try {
+      final items = await FileUtils.listDirectory(_currentPath);
+      for (final it in items) {
+        if (_kAudioExtensions.contains(it.extension.toLowerCase())) {
+          siblings.add(it.path);
+        }
+      }
+    } catch (_) {}
+    final index = siblings.indexOf(item.path);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MusicPlayerScreen(
+          filePath: item.path,
+          playlist: siblings,
+          initialIndex: index < 0 ? 0 : index,
+        ),
+      ),
+    );
   }
 
   /// Shared tap handling for list/grid items: multi-select toggles the
@@ -975,9 +1090,9 @@ class _FileBrowserState extends State<FileBrowser> {
   /// Opens the built-in terminal emulator at [path] (Linux F4 equivalent).
   /// The screen itself falls back to Termux when no shell can be spawned.
   Future<void> _openTerminalHere(String path) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => TerminalScreen(startPath: path)),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => TerminalScreen(startPath: path)));
   }
 
   /// Ctrl+L: jump to a typed path.
@@ -1351,7 +1466,7 @@ class _FileBrowserState extends State<FileBrowser> {
       if (overwrite != true) return;
     }
 
-        // Show a loading overlay while compressing
+    // Show a loading overlay while compressing
     if (!mounted) return;
     showDialog(
       context: context,
@@ -1408,8 +1523,11 @@ class _FileBrowserState extends State<FileBrowser> {
           );
           break;
       }
-            if (mounted) {
-                Navigator.of(context, rootNavigator: true).pop(); // dismiss loading overlay
+      if (mounted) {
+        Navigator.of(
+          context,
+          rootNavigator: true,
+        ).pop(); // dismiss loading overlay
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Created $name'),
@@ -1420,7 +1538,10 @@ class _FileBrowserState extends State<FileBrowser> {
       }
     } catch (e) {
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop(); // dismiss loading overlay
+        Navigator.of(
+          context,
+          rootNavigator: true,
+        ).pop(); // dismiss loading overlay
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Compression failed: $e'),
@@ -1736,6 +1857,13 @@ class _FileBrowserState extends State<FileBrowser> {
         _menuItem('Rename', Icons.edit, () => _showRenameDialog(item)),
         _menuItem('Delete', Icons.delete, () => _confirmDelete(item)),
         if (ArchiveService.isArchive(item.path)) ...[
+          _menuItem('Browse Archive…', Icons.folder_special, () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ArchiveBrowserScreen(archivePath: item.path),
+              ),
+            );
+          }),
           _menuItem(
             'Extract Here',
             Icons.folder_open,
@@ -1753,7 +1881,7 @@ class _FileBrowserState extends State<FileBrowser> {
           () => _compressSelection([item.path]),
         ),
         const PopupMenuDivider(),
-        if (item.isText)
+        if (item.isText || item.extension == '.docx')
           _menuItem('Convert…', Icons.transform, () {
             Navigator.push(
               context,
@@ -2258,8 +2386,7 @@ class _FileBrowserState extends State<FileBrowser> {
             // Bookmark the current folder.
             IconButton(
               icon: Icon(Icons.bookmark_add, color: OneDarkColors.fgDim),
-              onPressed: () =>
-                  widget.onBookmarkCurrentPath?.call(_currentPath),
+              onPressed: () => widget.onBookmarkCurrentPath?.call(_currentPath),
               tooltip: 'Bookmark This Folder',
             ),
             // Folder graph — same feature as Linux SwordFM F3.
@@ -2268,9 +2395,7 @@ class _FileBrowserState extends State<FileBrowser> {
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => FolderGraphScreen(
-                      startPath: _currentPath,
-                    ),
+                    builder: (_) => FolderGraphScreen(startPath: _currentPath),
                   ),
                 );
               },
@@ -2709,7 +2834,7 @@ class _FileBrowserState extends State<FileBrowser> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                                Flexible(
+                Flexible(
                   flex: 3,
                   child: Text(
                     item.formattedDate,
@@ -2755,7 +2880,7 @@ class _FileBrowserState extends State<FileBrowser> {
               style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
             ),
           ),
-                                        Flexible(
+        Flexible(
           flex: 3,
           child: Text(
             'Date Modified',
@@ -2947,6 +3072,11 @@ class _FileBrowserState extends State<FileBrowser> {
         const PopupMenuDivider(),
         _menuItem('New Folder', Icons.create_new_folder, _showNewFolderDialog),
         _menuItem('New File', Icons.note_add, _showNewFileDialog),
+        _menuItem('New Note', Icons.sticky_note_2, () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => NotepadScreen(filePath: null)),
+          );
+        }),
         const PopupMenuDivider(),
         if (FileUtils.hasClipboard)
           _menuItem('Paste', Icons.content_paste, () async {

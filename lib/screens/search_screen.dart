@@ -7,6 +7,8 @@ import '../services/open_with_service.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 import '../widgets/preview_panel.dart';
+import 'video_player_screen.dart';
+import 'music_player_screen.dart';
 
 /// Search screen — recursive filename search with result list.
 class SearchScreen extends StatefulWidget {
@@ -107,22 +109,57 @@ class _SearchScreenState extends State<SearchScreen> {
   int _parseSize(String text) {
     text = text.trim().toLowerCase();
     if (text.isEmpty) return 0;
-    final match = RegExp(r'^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)?$').firstMatch(text);
+    final match = RegExp(
+      r'^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)?$',
+    ).firstMatch(text);
     if (match == null) return 0;
     final value = double.parse(match.group(1)!);
     final unit = match.group(2) ?? 'b';
     switch (unit) {
-      case 'kb': return (value * 1024).round();
-      case 'mb': return (value * 1024 * 1024).round();
-      case 'gb': return (value * 1024 * 1024 * 1024).round();
-      case 'tb': return (value * 1024 * 1024 * 1024 * 1024).round();
-      default: return value.round();
+      case 'kb':
+        return (value * 1024).round();
+      case 'mb':
+        return (value * 1024 * 1024).round();
+      case 'gb':
+        return (value * 1024 * 1024 * 1024).round();
+      case 'tb':
+        return (value * 1024 * 1024 * 1024 * 1024).round();
+      default:
+        return value.round();
     }
   }
 
   Future<void> _openItem(FileItem item) async {
     if (item.isDirectory) {
       Navigator.pop(context, item.path);
+      return;
+    }
+    final ext = item.extension.toLowerCase();
+    // Video → built-in player
+    if (kVideoExtensions.contains(ext)) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => VideoPlayerScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
+    // Audio → built-in music player (playlist = all audio hits)
+    if (kAudioExtensions.contains(ext)) {
+      final playlist = _results
+          .where((r) => kAudioExtensions.contains(r.extension.toLowerCase()))
+          .map((r) => r.path)
+          .toList();
+      final index = playlist.indexOf(item.path);
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => MusicPlayerScreen(
+            filePath: item.path,
+            playlist: playlist,
+            initialIndex: index < 0 ? 0 : index,
+          ),
+        ),
+      );
       return;
     }
     // Images/PDFs/text open in the in-app preview panel (like the browser).
@@ -419,8 +456,8 @@ class _SearchScreenState extends State<SearchScreen> {
             hintText: _searchMode == SearchMode.regex
                 ? 'Regex pattern…'
                 : _searchMode == SearchMode.glob
-                    ? 'Glob pattern (e.g. *.jpg)…'
-                    : 'Search files…',
+                ? 'Glob pattern (e.g. *.jpg)…'
+                : 'Search files…',
             hintStyle: TextStyle(color: OneDarkColors.fgDim),
             border: InputBorder.none,
           ),
@@ -529,10 +566,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   const SizedBox(width: 4),
                   Text(
                     'KB/MB/GB',
-                    style: TextStyle(
-                      color: OneDarkColors.fgDim,
-                      fontSize: 10,
-                    ),
+                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 10),
                   ),
                 ],
               ),
@@ -607,8 +641,9 @@ class _SearchScreenState extends State<SearchScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         selected: isSel,
-                        selectedTileColor:
-                            OneDarkColors.select.withValues(alpha: 0.3),
+                        selectedTileColor: OneDarkColors.select.withValues(
+                          alpha: 0.3,
+                        ),
                         onTap: () => _openItem(item),
                         onLongPress: () => _showContextMenu(item),
                       );

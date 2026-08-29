@@ -25,7 +25,10 @@ class DocConverter {
     final file = File(sourcePath);
     if (!await file.exists()) return null;
     final content = await file.readAsString();
-    final bytes = await _buildPdfBytes(content);
+    final bytes = await _buildPdfBytes(_preprocessForMarkdown(
+      sourcePath,
+      content,
+    ));
     final outPath = p.setExtension(sourcePath, '.pdf');
     await File(outPath).writeAsBytes(bytes);
     return outPath;
@@ -39,7 +42,10 @@ class DocConverter {
     final file = File(sourcePath);
     if (!await file.exists()) return null;
     final content = await file.readAsString();
-    final bytes = await _buildDocxBytes(content);
+    final bytes = await _buildDocxBytes(_preprocessForMarkdown(
+      sourcePath,
+      content,
+    ));
     final outPath = p.setExtension(sourcePath, '.docx');
     await File(outPath).writeAsBytes(bytes);
     return outPath;
@@ -51,7 +57,109 @@ class DocConverter {
     final file = File(sourcePath);
     if (!await file.exists()) return null;
     final content = await file.readAsString();
-    return markdownToText(content);
+    return markdownToText(_preprocessForMarkdown(sourcePath, content));
+  }
+
+  /// Extracts the plain text of a `.docx` file (word/document.xml inside the
+  /// OOXML ZIP), writing `<base>.txt` next to the source.
+  static Future<String?> fromDocx(String sourcePath) async {
+    final file = File(sourcePath);
+    if (!await file.exists()) return null;
+    try {
+      final bytes = await file.readAsBytes();
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final docXml = archive.files
+          .where((f) => f.name == 'word/document.xml')
+          .firstOrNull;
+      if (docXml == null) return null;
+      final xml = utf8.decode(docXml.content as List<int>);
+      // Strip tags; break paragraphs/rows onto separate lines.
+      final text = xml
+          .replaceAll(RegExp(r'</w:p>'), '\n')
+          .replaceAll(RegExp(r'</w:tr>'), '\n')
+          .replaceAll(RegExp(r'<[^>]+>'), '')
+          .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+          .trim();
+      final outPath = p.setExtension(sourcePath, '.txt');
+      await File(outPath).writeAsString(text);
+      return outPath;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Prepares the raw file content for the shared markdown pipeline:
+  /// HTML → plain text (tags stripped), CSV → a markdown table, anything
+  /// else passes through unchanged.
+  static String _preprocessForMarkdown(String sourcePath, String content) {
+    final ext = p.extension(sourcePath).toLowerCase();
+    if (ext == '.html' || ext == '.htm') {
+      return _stripHtml(content);
+    }
+    if (ext == '.csv') {
+      return _csvToMarkdown(content);
+    }
+    return content;
+  }
+
+  /// Crude-but-effective HTML → text: drop scripts/styles and tags, decode a
+  /// few common entities, collapse blank lines.
+  static String _stripHtml(String html) {
+    var text = html.replaceAll(RegExp(r'<script[\s\S]*?</script>', caseSensitive: false), ' ');
+    text = text.replaceAll(RegExp(r'<style[\s\S]*?</style>', caseSensitive: false), ' ');
+    text = text.replaceAll(RegExp(r'<[^>]+>'), '');
+    text = text
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'");
+    return text.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+  }
+
+  /// Turns CSV rows into a GitHub-style markdown table so the shared pipeline
+  /// renders it as a real table in PDF/DOCX/HTML output.
+  static String _csvToMarkdown(String csv) {
+    final rows = csv
+        .split(RegExp(r'\r?\n'))
+        .where((l) => l.trim().isNotEmpty)
+        .map((l) => _splitCsvLine(l))
+        .toList();
+    if (rows.isEmpty) return csv;
+    final cell = (String s) => s.trim().replaceAll('|', '\\|');
+    final header = rows.first;
+    final sb = StringBuffer();
+    sb.writeln('| ${header.map(cell).join(' | ')} |');
+    sb.writeln('|${header.map((_) => '---').join('|')}|');
+    for (final row in rows.skip(1)) {
+      sb.writeln('| ${row.map(cell).join(' | ')} |');
+    }
+    return sb.toString();
+  }
+
+  static List<String> _splitCsvLine(String line) {
+    final result = <String>[];
+    final buf = StringBuffer();
+    var inQuotes = false;
+    for (var i = 0; i < line.length; i++) {
+      final ch = line[i];
+      if (ch == '"') {
+        if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+          buf.write('"');
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch == ',' && !inQuotes) {
+        result.add(buf.toString());
+        buf.clear();
+      } else {
+        buf.write(ch);
+      }
+    }
+    result.add(buf.toString());
+    return result;
   }
 
   /// Reads a Markdown/text file and returns full HTML document.
@@ -283,7 +391,7 @@ class DocConverter {
       '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.conf', '.cfg',
       '.log', '.css', '.js', '.ts', '.jsx', '.tsx', '.py', '.dart',
       '.java', '.kt', '.c', '.cpp', '.h', '.rs', '.go', '.sh', '.bat',
-      '.sql', '.env', '.gitignore', '.diff',
+      '.sql', '.env', '.gitignore', '.diff', '.docx',
     };
     return textExts.contains(ext);
   }

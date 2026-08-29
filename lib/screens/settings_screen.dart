@@ -12,6 +12,10 @@ import '../widgets/file_browser.dart'
 import 'privacy_policy_screen.dart';
 import 'auth_screen.dart';
 import 'duplicates_screen.dart';
+import 'app_analyzer_screen.dart';
+import 'document_scanner_screen.dart';
+import 'cast_screen.dart';
+import 'notepad_screen.dart';
 
 /// Settings screen for configuring the app.
 class SettingsScreen extends StatefulWidget {
@@ -196,10 +200,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       value: ViewMode.details,
                       child: Text('Details'),
                     ),
-                    DropdownMenuItem(
-                      value: ViewMode.grid,
-                      child: Text('Grid'),
-                    ),
+                    DropdownMenuItem(value: ViewMode.grid, child: Text('Grid')),
                   ],
                   onChanged: (v) {
                     if (v != null) savePersistedViewMode(v);
@@ -300,6 +301,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'Browse cloud storage via rclone (requires Termux)',
             trailing: const Icon(Icons.chevron_right),
             onTap: _openRcloneBrowser,
+          ),
+          const SizedBox(height: 8),
+          _settingTile(
+            icon: Icons.document_scanner,
+            title: 'Document Scanner',
+            subtitle: 'Scan pages into a PDF',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const DocumentScannerScreen()),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _settingTile(
+            icon: Icons.speed,
+            title: 'App Analyzer',
+            subtitle: 'Device info & installed apps',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AppAnalyzerScreen()),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _settingTile(
+            icon: Icons.cast,
+            title: 'Cast',
+            subtitle: 'Discover Chromecast / DLNA devices',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const CastScreen())),
+          ),
+          const SizedBox(height: 8),
+          _settingTile(
+            icon: Icons.sticky_note_2,
+            title: 'Notepad',
+            subtitle: 'Create and edit text documents',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const NotepadScreen())),
           ),
 
           const SizedBox(height: 16),
@@ -518,7 +559,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? Text(subtitle, style: TextStyle(color: OneDarkColors.fgDim))
           : null,
       trailing: trailing,
-            onTap: onTap,
+      onTap: onTap,
     );
   }
 

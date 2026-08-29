@@ -2,9 +2,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
-import '../utils/file_utils.dart' show FileItem;
+import '../utils/file_utils.dart'
+    show FileItem, kAudioExtensions, kVideoExtensions;
 import '../utils/constants.dart' show AppPaths;
 import '../widgets/preview_panel.dart';
+import 'video_player_screen.dart';
+import 'music_player_screen.dart';
 
 /// Shows recently modified files across common storage directories,
 /// similar to the "Recent" category in Google Files.
@@ -58,12 +61,14 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
             try {
               final stat = await entity.stat();
               if (stat.modified.isAfter(cutoff)) {
-                entries.add(_RecentEntry(
-                  path: entity.path,
-                  name: p.basename(entity.path),
-                  size: stat.size,
-                  modified: stat.modified,
-                ));
+                entries.add(
+                  _RecentEntry(
+                    path: entity.path,
+                    name: p.basename(entity.path),
+                    size: stat.size,
+                    modified: stat.modified,
+                  ),
+                );
               }
             } catch (_) {}
           }
@@ -102,173 +107,199 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(_error!,
-                        style: TextStyle(
-                            color: Theme.of(context).colorScheme.error)),
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            )
+          : _entries.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.history,
+                    size: 48,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                )
-              : _entries.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.history,
-                              size: 48,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant),
-                          const SizedBox(height: 12),
-                          Text('No recent files',
-                              style: TextStyle(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant)),
-                        ],
-                      ),
-                    )
-                  : isWide
-                      ? Row(
-                          children: [
-                            Expanded(
-                              child: RefreshIndicator(
-                                onRefresh: _loadRecent,
-                                child: ListView.separated(
-                                  itemCount: _entries.length,
-                                  separatorBuilder: (_, __) =>
-                                      const Divider(height: 1),
-                                  itemBuilder: (context, index) {
-                                    final entry = _entries[index];
-                                    final file = File(entry.path);
-                                    final item = FileItem(
-                                      entity: file,
-                                      name: entry.name,
-                                      path: entry.path,
-                                      isDirectory: false,
-                                      size: entry.size,
-                                      lastModified: entry.modified,
-                                    );
-                                    final isSel = _previewItem?.path == entry.path;
-                                    return ListTile(
-                                      leading: Icon(item.icon,
-                                          color: item.iconColor, size: 28),
-                                      title: Text(
-                                        entry.name,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      subtitle: Text(
-                                        _formatSize(entry.size),
-                                        style: TextStyle(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSurfaceVariant,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                      trailing: Text(
-                                        _relativeTime(entry.modified),
-                                        style: TextStyle(
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                      selected: isSel,
-                                      selectedTileColor:
-                                          Theme.of(context)
-                                              .colorScheme
-                                              .primaryContainer
-                                              .withValues(alpha: 0.2),
-                                      onTap: () {
-                                        setState(() => _previewItem = item);
-                                      },
-                                    );
-                                  },
-                                ),
-                              ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'No recent files',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : isWide
+          ? Row(
+              children: [
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _loadRecent,
+                    child: ListView.separated(
+                      itemCount: _entries.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final entry = _entries[index];
+                        final file = File(entry.path);
+                        final item = FileItem(
+                          entity: file,
+                          name: entry.name,
+                          path: entry.path,
+                          isDirectory: false,
+                          size: entry.size,
+                          lastModified: entry.modified,
+                        );
+                        final isSel = _previewItem?.path == entry.path;
+                        return ListTile(
+                          leading: Icon(
+                            item.icon,
+                            color: item.iconColor,
+                            size: 28,
+                          ),
+                          title: Text(
+                            entry.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            _formatSize(entry.size),
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                              fontSize: 12,
                             ),
-                            if (_previewItem != null)
-                              PreviewPanel(
-                                item: _previewItem,
-                                width: 340,
-                                onClose: () =>
-                                    setState(() => _previewItem = null),
-                              ),
-                          ],
-                        )
-                      : Column(
-                          children: [
-                            Expanded(
-                              child: RefreshIndicator(
-                                onRefresh: _loadRecent,
-                                child: ListView.separated(
-                                  itemCount: _entries.length,
-                                  separatorBuilder: (_, __) =>
-                                      const Divider(height: 1),
-                                  itemBuilder: (context, index) {
-                                    final entry = _entries[index];
-                                    final file = File(entry.path);
-                                    final item = FileItem(
-                                      entity: file,
-                                      name: entry.name,
-                                      path: entry.path,
-                                      isDirectory: false,
-                                      size: entry.size,
-                                      lastModified: entry.modified,
-                                    );
-                                    final isSel =
-                                        _previewItem?.path == entry.path;
-                                    return ListTile(
-                                      leading: Icon(item.icon,
-                                          color: item.iconColor, size: 28),
-                                      title: Text(
-                                        entry.name,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      subtitle: Text(
-                                        _formatSize(entry.size),
-                                        style: TextStyle(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSurfaceVariant,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                      trailing: Text(
-                                        _relativeTime(entry.modified),
-                                        style: TextStyle(
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                      selected: isSel,
-                                      selectedTileColor:
-                                          Theme.of(context)
-                                              .colorScheme
-                                              .primaryContainer
-                                              .withValues(alpha: 0.2),
-                                      onTap: () {
-                                        setState(() => _previewItem = item);
-                                      },
-                                    );
-                                  },
-                                ),
-                              ),
+                          ),
+                          trailing: Text(
+                            _relativeTime(entry.modified),
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                              fontSize: 12,
                             ),
-                            if (_previewItem != null)
-                              PreviewPanel(
-                                item: _previewItem,
-                                width: double.infinity,
-                                height: 280,
-                                onClose: () =>
-                                    setState(() => _previewItem = null),
-                              ),
-                          ],
-                        ),
+                          ),
+                          selected: isSel,
+                          selectedTileColor: Theme.of(
+                            context,
+                          ).colorScheme.primaryContainer.withValues(alpha: 0.2),
+                          onTap: () {
+                            _openEntry(item);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                if (_previewItem != null)
+                  PreviewPanel(
+                    item: _previewItem,
+                    width: 340,
+                    onClose: () => setState(() => _previewItem = null),
+                  ),
+              ],
+            )
+          : Column(
+              children: [
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _loadRecent,
+                    child: ListView.separated(
+                      itemCount: _entries.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final entry = _entries[index];
+                        final file = File(entry.path);
+                        final item = FileItem(
+                          entity: file,
+                          name: entry.name,
+                          path: entry.path,
+                          isDirectory: false,
+                          size: entry.size,
+                          lastModified: entry.modified,
+                        );
+                        final isSel = _previewItem?.path == entry.path;
+                        return ListTile(
+                          leading: Icon(
+                            item.icon,
+                            color: item.iconColor,
+                            size: 28,
+                          ),
+                          title: Text(
+                            entry.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            _formatSize(entry.size),
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                              fontSize: 12,
+                            ),
+                          ),
+                          trailing: Text(
+                            _relativeTime(entry.modified),
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                              fontSize: 12,
+                            ),
+                          ),
+                          selected: isSel,
+                          selectedTileColor: Theme.of(
+                            context,
+                          ).colorScheme.primaryContainer.withValues(alpha: 0.2),
+                          onTap: () {
+                            _openEntry(item);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                if (_previewItem != null)
+                  PreviewPanel(
+                    item: _previewItem,
+                    width: double.infinity,
+                    height: 280,
+                    onClose: () => setState(() => _previewItem = null),
+                  ),
+              ],
+            ),
     );
+  }
+
+  /// Taps a recent entry: video/audio open in the built-in players, anything
+  /// else shows the preview panel.
+  void _openEntry(FileItem item) {
+    final ext = item.extension.toLowerCase();
+    if (kVideoExtensions.contains(ext)) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => VideoPlayerScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
+    if (kAudioExtensions.contains(ext)) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => MusicPlayerScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
+    setState(() => _previewItem = item);
   }
 
   static String _formatSize(int bytes) {

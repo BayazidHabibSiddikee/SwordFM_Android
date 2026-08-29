@@ -59,8 +59,10 @@ class ArchiveService {
     }
 
     // Only head-groups with 2+ candidates need full hashing.
-    final candidates =
-        headGroups.values.where((g) => g.length > 1).expand((g) => g).toList();
+    final candidates = headGroups.values
+        .where((g) => g.length > 1)
+        .expand((g) => g)
+        .toList();
     if (candidates.isEmpty) return {};
 
     // Pass 3: full SHA-256 on candidates only.
@@ -183,17 +185,29 @@ class ArchiveService {
         files = TarDecoder().decodeBytes(bz2Decoded).files;
         break;
       case '.7z':
-        throw Exception(
-          'unsupported:7z extraction requires native bindings — install p7zip on your device',
+        return _extractWithTool(
+          archivePath,
+          destDir,
+          tool: '7z',
+          toolArgs: ['x', '-y'],
+          hint: 'Install "p7zip" in Termux to extract 7z archives',
         );
       case '.rar':
-        throw Exception(
-          'unsupported:RAR extraction requires native bindings — install unrar on your device',
+        return _extractWithTool(
+          archivePath,
+          destDir,
+          tool: 'unrar',
+          toolArgs: ['x', '-y'],
+          hint: 'Install "unrar" in Termux to extract RAR archives',
         );
       case '.zst':
       case '.tar.zst':
-        throw Exception(
-          'unsupported:Zstandard extraction requires native bindings — install zstd on your device',
+        return _extractWithTool(
+          archivePath,
+          destDir,
+          tool: 'zstd',
+          toolArgs: ['-d', '-o'],
+          hint: 'Install "zstd" in Termux to extract Zstandard archives',
         );
       default:
         throw Exception('unsupported:unknown archive format $ext');
@@ -226,6 +240,127 @@ class ArchiveService {
     }
 
     return extractedPaths;
+  }
+
+  /// Extracts a format that the pure-Dart decoders can't handle (7z/rar/zst)
+  /// by shelling out to the matching binary installed in Termux. Throws an
+  /// actionable message when the tool is missing.
+  static Future<List<String>> _extractWithTool(
+    String archivePath,
+    String destDir, {
+    required String tool,
+    required List<String> toolArgs,
+    required String hint,
+  }) async {
+    const termuxBin = '/data/data/com.termux/files/usr/bin';
+    final binary = '$termuxBin/$tool';
+    if (!File(binary).existsSync()) {
+      throw Exception('unsupported:$hint');
+    }
+    await Directory(destDir).create(recursive: true);
+    if (tool == 'zstd') {
+      // zstd -d file.tar.zst → file.tar in the working dir; then TAR-decode.
+      final result = await Process.run(binary, [
+        '-d',
+        archivePath,
+      ], workingDirectory: destDir);
+      if (result.exitCode != 0) {
+        throw Exception('io:zstd failed: ${result.stderr}');
+      }
+      final name = p.basename(archivePath);
+      final tarName = name.endsWith('.zst')
+          ? name.substring(0, name.length - 4)
+          : name;
+      final tarPath = p.join(destDir, tarName);
+      if (File(tarPath).existsSync()) {
+        final inner = TarDecoder().decodeBytes(File(tarPath).readAsBytesSync());
+        for (final af in inner.files) {
+          if (af.isDirectory) continue;
+          final outPath = p.join(destDir, af.name);
+          await Directory(p.dirname(outPath)).create(recursive: true);
+          await File(outPath).writeAsBytes(af.content as List<int>);
+        }
+      }
+      return [destDir];
+    }
+    final outFlag = tool == '7z' ? '-o$destDir' : '$destDir${p.separator}';
+    final result = await Process.run(binary, [
+      ...toolArgs,
+      archivePath,
+      outFlag,
+    ]);
+    if (result.exitCode != 0) {
+      throw Exception('io:${tool} failed: ${result.stderr}');
+    }
+    return [destDir];
+  }
+
+  /// Decodes the archive and returns its entries (name / size / isDirectory),
+  /// without writing anything. Used by the archive-browser screen.
+  static Future<List<ArchiveEntryInfo>> listArchiveContents(
+    String archivePath,
+  ) async {
+    final files = await _decodeArchive(archivePath);
+    return files
+        .where(
+          (af) =>
+              !af.name.contains('..') &&
+              !af.name.contains(String.fromCharCode(0)),
+        )
+        .map(
+          (af) => ArchiveEntryInfo(
+            name: af.name,
+            size: af.isDirectory ? 0 : af.size,
+            isDirectory: af.isDirectory,
+          ),
+        )
+        .toList();
+  }
+
+  /// Extracts a single entry (by name) from [archivePath] into [destDir],
+  /// creating parent folders as needed. Returns the written path.
+  static Future<String> extractEntry(
+    String archivePath,
+    String entryName,
+    String destDir,
+  ) async {
+    final files = await _decodeArchive(archivePath);
+    final af = files.where((f) => f.name == entryName && !f.isDirectory).first;
+    final destPath = p.join(destDir, entryName);
+    await Directory(p.dirname(destPath)).create(recursive: true);
+    final outStream = File(destPath).openWrite();
+    outStream.add(af.content as List<int>);
+    await outStream.close();
+    return destPath;
+  }
+
+  static Future<List<ArchiveFile>> _decodeArchive(String archivePath) async {
+    final ext = p.extension(archivePath).toLowerCase();
+    final archiveFile = File(archivePath);
+    if (!await archiveFile.exists()) {
+      throw Exception('archive not found: $archivePath');
+    }
+    final data = await archiveFile.readAsBytes();
+    switch (ext) {
+      case '.zip':
+        return ZipDecoder().decodeBytes(data).files;
+      case '.tar':
+        return TarDecoder().decodeBytes(data).files;
+      case '.gz':
+      case '.tgz':
+      case '.tar.gz':
+        return TarDecoder().decodeBytes(GZipDecoder().decodeBytes(data)).files;
+      case '.xz':
+      case '.txz':
+      case '.tar.xz':
+        return TarDecoder().decodeBytes(XZDecoder().decodeBytes(data)).files;
+      case '.bz2':
+      case '.tbz2':
+      case '.tar.bz2':
+        return TarDecoder().decodeBytes(BZip2Decoder().decodeBytes(data)).files;
+      default:
+        throw Exception('unsupported:${ext} — 7z/rar/zst need native tools');
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -338,4 +473,16 @@ class ArchiveService {
       }
     }
   }
+}
+
+/// Lightweight archive-entry descriptor used by the archive browser.
+class ArchiveEntryInfo {
+  final String name;
+  final int size;
+  final bool isDirectory;
+  const ArchiveEntryInfo({
+    required this.name,
+    required this.size,
+    required this.isDirectory,
+  });
 }

@@ -19,6 +19,10 @@ import 'screens/storage_analysis_screen.dart';
 import 'screens/network_screen.dart';
 import 'screens/recent_files_screen.dart';
 import 'screens/terminal_screen.dart';
+import 'screens/notepad_screen.dart';
+import 'screens/document_scanner_screen.dart';
+import 'screens/app_analyzer_screen.dart';
+import 'screens/cast_screen.dart';
 import 'services/entitlement_service.dart';
 import 'services/device_service.dart';
 import 'services/bookmarks_service.dart';
@@ -433,6 +437,57 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         ),
                                       ),
                                       const Divider(),
+                                      // ── Tools section ──────────────────────
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        child: Text(
+                                          'Tools',
+                                          style: TextStyle(
+                                            color: onSurfaceDim,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ),
+                                      _sidebarAction(
+                                        Icons.document_scanner,
+                                        'Scanner',
+                                        () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => const DocumentScannerScreen(),
+                                          ),
+                                        ),
+                                      ),
+                                      _sidebarAction(
+                                        Icons.note_add,
+                                        'Notepad',
+                                        () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => const NotepadScreen(),
+                                          ),
+                                        ),
+                                      ),
+                                      _sidebarAction(
+                                        Icons.apps,
+                                        'App Analyzer',
+                                        () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => const AppAnalyzerScreen(),
+                                          ),
+                                        ),
+                                      ),
+                                      _sidebarAction(
+                                        Icons.cast,
+                                        'Cast',
+                                        () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => const CastScreen(),
+                                          ),
+                                        ),
+                                      ),
+                                      const Divider(),
                                       // ── Devices section ──────────────────────
                                       if (_volumes != null &&
                                           _volumes!.isNotEmpty)
@@ -840,6 +895,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         selectedTileColor: cs.primaryContainer.withValues(alpha: 0.3),
         onTap: () => setState(() => _currentPath = path),
       ),
+    );
+  }
+
+  Widget _sidebarAction(IconData icon, String label, VoidCallback onTap) {
+    final onSurfaceDim = Theme.of(context).colorScheme.onSurfaceVariant;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      minLeadingWidth: 0,
+      horizontalTitleGap: 6,
+      leading: Icon(icon, size: 18, color: onSurfaceDim),
+      title: Text(
+        label,
+        style: TextStyle(color: onSurfaceDim, fontSize: 13),
+      ),
+      onTap: onTap,
     );
   }
 

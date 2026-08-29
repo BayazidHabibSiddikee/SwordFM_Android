@@ -37,7 +37,11 @@ class _ConvertDialogState extends State<ConvertDialog> {
           outPath = await DocConverter.markdownFileToHtml(widget.filePath);
           break;
         default: // TXT
-          outPath = await DocConverter.toText(widget.filePath);
+          if (widget.filePath.toLowerCase().endsWith('.docx')) {
+            outPath = await DocConverter.fromDocx(widget.filePath);
+          } else {
+            outPath = await DocConverter.toText(widget.filePath);
+          }
           break;
       }
       if (outPath != null) {
