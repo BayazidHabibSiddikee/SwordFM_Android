@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'theme/theme.dart';
@@ -16,6 +17,7 @@ import 'screens/lan_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
 import 'screens/network_screen.dart';
+import 'screens/recent_files_screen.dart';
 import 'services/entitlement_service.dart';
 import 'services/device_service.dart';
 import 'services/bookmarks_service.dart';
@@ -248,6 +250,33 @@ class _MainScreenState extends State<MainScreen> {
                                         Icons.home,
                                         'Home',
                                         AppPaths.home,
+                                      ),
+                                      ListTile(
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                            ),
+                                        minLeadingWidth: 0,
+                                        horizontalTitleGap: 6,
+                                        leading: Icon(
+                                          Icons.history,
+                                          size: 18,
+                                          color: cs.primary,
+                                        ),
+                                        title: Text(
+                                          'Recent',
+                                          style: TextStyle(
+                                            color: cs.onSurface,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                        onTap: () => Navigator.of(context)
+                                            .push(
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const RecentFilesScreen(),
+                                          ),
+                                        ),
                                       ),
                                       if (_homeDirsLoaded)
                                         ..._homeDirs
@@ -510,6 +539,27 @@ class _MainScreenState extends State<MainScreen> {
                               ),
                             ),
                             const SizedBox(width: 4),
+                            // Copy current path to clipboard
+                            IconButton(
+                              icon: Icon(
+                                Icons.copy,
+                                size: 18,
+                                color: onSurfaceDim,
+                              ),
+                              onPressed: () async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                await Clipboard.setData(
+                                  ClipboardData(text: _currentPath),
+                                );
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text('Path copied: $_currentPath'),
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                              tooltip: 'Copy Path',
+                            ),
                             IconButton(
                               icon: Icon(
                                 Icons.search,
@@ -593,21 +643,6 @@ class _MainScreenState extends State<MainScreen> {
                         color: surfaceHighest,
                         child: Row(
                           children: [
-                            Icon(
-                              Icons.folder_open,
-                              size: 14,
-                              color: onSurfaceDim,
-                            ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                _currentPath,
-                                style: TextStyle(
-                                  color: onSurfaceDim,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
                             // Clipboard indicator (copy = cyan, cut = amber)
                             if (_clipboardInfo != null &&
                                 _clipboardInfo!.hasClipboard) ...[
@@ -708,7 +743,11 @@ class _MainScreenState extends State<MainScreen> {
 
                 // ── Preview panel (collapsible) ──────────────────────────
                 if (_previewVisible && !isMobile)
-                  PreviewPanel(item: _selectedItem, width: 280),
+                  PreviewPanel(
+                    item: _selectedItem,
+                    width: 280,
+                    onClose: () => setState(() => _previewVisible = false),
+                  ),
               ],
             ),
             // Tab 1-4: Full-screen screens

@@ -11,7 +11,16 @@ class PreviewPanel extends StatefulWidget {
   final FileItem? item;
   final double width;
 
-  const PreviewPanel({super.key, required this.item, required this.width});
+  /// Called when the header close button is tapped (dismisses the hosting
+  /// bottom sheet, or collapses the side panel).
+  final VoidCallback? onClose;
+
+  const PreviewPanel({
+    super.key,
+    required this.item,
+    required this.width,
+    this.onClose,
+  });
 
   @override
   State<PreviewPanel> createState() => _PreviewPanelState();
@@ -143,7 +152,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
                   ),
                   IconButton(
                     icon: const Icon(Icons.close, size: 18),
-                    onPressed: () {},
+                    onPressed: widget.onClose ?? () {},
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                   ),
@@ -181,11 +190,18 @@ class _PreviewPanelState extends State<PreviewPanel> {
     if (item.isImage) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(4),
-        child: Image.file(
-          File(item.path),
-          fit: BoxFit.contain,
-          errorBuilder: (_, _, _) =>
-              Icon(Icons.broken_image, size: 48, color: OneDarkColors.fgDim),
+        // Clamp the height so tall photos don't fill the whole sheet/panel.
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 320),
+          child: Image.file(
+            File(item.path),
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) => Icon(
+              Icons.broken_image,
+              size: 48,
+              color: OneDarkColors.fgDim,
+            ),
+          ),
         ),
       );
     }

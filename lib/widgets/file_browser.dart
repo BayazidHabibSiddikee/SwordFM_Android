@@ -518,7 +518,11 @@ class _FileBrowserState extends State<FileBrowser> {
         builder: (sheetContext) => SafeArea(
           child: SizedBox(
             height: MediaQuery.of(sheetContext).size.height * 0.6,
-            child: PreviewPanel(item: item, width: double.infinity),
+            child: PreviewPanel(
+              item: item,
+              width: double.infinity,
+              onClose: () => Navigator.pop(sheetContext),
+            ),
           ),
         ),
       );
@@ -1342,11 +1346,13 @@ class _FileBrowserState extends State<FileBrowser> {
             outputPath: outputPath,
             sources: paths,
           );
+          break;
         case ArchiveFormat.tar:
           await ArchiveService.createTar(
             outputPath: outputPath,
             sources: paths,
           );
+          break;
         case ArchiveFormat.tarGz:
           await ArchiveService.createTarGz(
             outputPath: outputPath,
@@ -2485,19 +2491,7 @@ class _FileBrowserState extends State<FileBrowser> {
               _showContextMenu(item, details.globalPosition),
           onSecondaryTapDown: (details) =>
               _showContextMenu(item, details.globalPosition),
-          onTap: () {
-            if (_selectionMode == SelectionMode.multi) {
-              _toggleSelection(item.path);
-            } else if (item.isDirectory) {
-              if (isSelected) {
-                _openItem(item);
-              } else {
-                _toggleSelection(item.path);
-              }
-            } else {
-              _showFile(item);
-            }
-          },
+          onTap: () => _handleItemTap(item, isSelected),
           child: Container(
             color: isSelected ? OneDarkColors.select : Colors.transparent,
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
