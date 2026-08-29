@@ -6,12 +6,11 @@ import '../utils/file_utils.dart';
 import '../services/archive_service.dart';
 import '../services/open_with_service.dart';
 import '../services/share_service.dart';
-import '../services/terminal_service.dart';
+import '../screens/terminal_screen.dart';
 import '../screens/lan_screen.dart';
 import 'preview_panel.dart';
 import 'convert_dialog.dart';
 import 'package:path/path.dart' as p;
-import 'package:url_launcher/url_launcher.dart';
 
 enum ViewMode { details, grid }
 
@@ -903,59 +902,11 @@ class _FileBrowserState extends State<FileBrowser> {
         });
   }
 
-  /// Opens a Termux session at [path] (Linux F4 equivalent). Shows install
-  /// instructions when Termux is unavailable.
+  /// Opens the built-in terminal emulator at [path] (Linux F4 equivalent).
+  /// The screen itself falls back to Termux when no shell can be spawned.
   Future<void> _openTerminalHere(String path) async {
-    final launched = await TerminalService.openTerminalAt(path);
-    if (launched || !mounted) return;
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: OneDarkColors.bg,
-        title: Text('Open Terminal', style: TextStyle(color: OneDarkColors.fg)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'This feature uses Termux. Open Termux and run:',
-              style: TextStyle(color: OneDarkColors.fg),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              "cd '$path' && bash",
-              style: TextStyle(
-                color: OneDarkColors.cyan,
-                fontFamily: 'monospace',
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Prerequisites: Termux installed with "Allow external apps" enabled.',
-              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (!mounted) return;
-              Navigator.pop(context);
-              final termuxUri = Uri.parse(
-                'https://f-droid.org/packages/com.termux/',
-              );
-              if (await canLaunchUrl(termuxUri)) {
-                await launchUrl(termuxUri);
-              }
-            },
-            child: const Text('Install Termux'),
-          ),
-        ],
-      ),
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => TerminalScreen(startPath: path)),
     );
   }
 
@@ -1176,11 +1127,13 @@ class _FileBrowserState extends State<FileBrowser> {
   /// extension to the name when the user hasn't typed one explicitly.
   Future<void> _compressSelection(List<String> paths) async {
     if (paths.isEmpty) return;
-    final controller = TextEditingController(
-      text: paths.length == 1
-          ? p.basenameWithoutExtension(paths.first)
-          : 'archive',
-    );
+    String defaultName = paths.length == 1
+        ? p.basenameWithoutExtension(paths.first)
+        : 'archive';
+    // Always start with the matching extension so the created file is
+    // recognizable as an archive (previously the default name had none).
+    defaultName += '.zip';
+    final controller = TextEditingController(text: defaultName);
     ArchiveFormat format = ArchiveFormat.zip;
 
     String suffixFor(ArchiveFormat f) {
@@ -1310,14 +1263,19 @@ class _FileBrowserState extends State<FileBrowser> {
     );
 
     if (result == null) return;
-    final (name, fmt) = result;
+    final (rawName, fmt) = result;
+    var name = rawName.trim();
     if (name.isEmpty) return;
+    // Guarantee the archive suffix — if the user removed the extension the
+    // file would be created with no extension and look like it "didn't work".
+    final suffix = suffixFor(fmt);
+    if (!name.toLowerCase().endsWith(suffix)) name += suffix;
     final outputPath = p.join(p.dirname(paths.first), name);
 
     if (await File(outputPath).exists()) {
       final overwrite = await showDialog<bool>(
         context: context,
-        builder: (_) => AlertDialog(
+        builder: (dialogContext) => AlertDialog(
           backgroundColor: OneDarkColors.bg,
           title: Text('Overwrite?', style: TextStyle(color: OneDarkColors.fg)),
           content: Text(
@@ -1326,11 +1284,11 @@ class _FileBrowserState extends State<FileBrowser> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => Navigator.pop(dialogContext, false),
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () => Navigator.pop(dialogContext, true),
               child: const Text('Overwrite'),
             ),
           ],
@@ -2052,42 +2010,6 @@ class _FileBrowserState extends State<FileBrowser> {
               tooltip: 'Forward',
             ),
             const SizedBox(width: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 160, maxWidth: 320),
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 8),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: OneDarkColors.dim,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.folder_open,
-                      size: 16,
-                      color: OneDarkColors.cyan,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        _currentPath,
-                        style: TextStyle(
-                          color: OneDarkColors.fg,
-                          fontSize: 12,
-                          fontFamily: 'monospace',
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 4),
             if (!inSelectMode) ...[
               IconButton(
                 icon: Icon(Icons.create_new_folder, color: OneDarkColors.fgDim),

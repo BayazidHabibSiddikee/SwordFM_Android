@@ -74,7 +74,7 @@ class SwordFM extends StatelessWidget {
                 title: 'SwordFM',
                 debugShowCheckedModeBanner: false,
                 theme: theme,
-                home: const MainScreen(),
+                home: MainScreen(key: ValueKey('main_$currentThemeMode')),
               ),
             );
           },
@@ -101,9 +101,7 @@ class _MainScreenState extends State<MainScreen> {
   bool _previewVisible = true;
   String _currentPath = ''; // resolved in initState for Android
   FileItem? _selectedItem;
-  SelectionInfo? _selectionInfo; // aggregate multi-select info from FileBrowser
-  ClipboardInfo? _clipboardInfo; // clipboard state from FileBrowser
-  int _markCount = 0; // mark count from FileBrowser
+
   int _itemCount = 0; // item count in the current directory
 
   // ignore: prefer_final_fields — mutated via setState
@@ -579,36 +577,43 @@ class _MainScreenState extends State<MainScreen> {
                               },
                               tooltip: 'Search',
                             ),
-                            IconButton(
-                              icon: Icon(
-                                Icons.account_tree,
-                                color: onSurfaceDim,
-                              ),
-                              onPressed: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => FolderGraphScreen(
-                                      startPath: _currentPath,
+                            // Desktop-only actions — on phones (width < 600) the
+                            // 5 fixed buttons overflow the 200px browser pane
+                            // when the sidebar is open (RenderFlex overflow).
+                            // The preview panel is never shown on mobile and the
+                            // folder graph is a niche desktop feature.
+                            if (!isMobile) ...[
+                              IconButton(
+                                icon: Icon(
+                                  Icons.account_tree,
+                                  color: onSurfaceDim,
+                                ),
+                                onPressed: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => FolderGraphScreen(
+                                        startPath: _currentPath,
+                                      ),
                                     ),
-                                  ),
-                                );
-                              },
-                              tooltip: 'Folder Graph',
-                            ),
-                            IconButton(
-                              icon: Icon(
-                                _previewVisible
-                                    ? Icons.unfold_less
-                                    : Icons.unfold_more,
-                                color: _previewVisible
-                                    ? cs.primary
-                                    : onSurfaceDim,
+                                  );
+                                },
+                                tooltip: 'Folder Graph',
                               ),
-                              onPressed: () => setState(
-                                () => _previewVisible = !_previewVisible,
+                              IconButton(
+                                icon: Icon(
+                                  _previewVisible
+                                      ? Icons.unfold_less
+                                      : Icons.unfold_more,
+                                  color: _previewVisible
+                                      ? cs.primary
+                                      : onSurfaceDim,
+                                ),
+                                onPressed: () => setState(
+                                  () => _previewVisible = !_previewVisible,
+                                ),
+                                tooltip: 'Toggle Preview',
                               ),
-                              tooltip: 'Toggle Preview',
-                            ),
+                            ],
                           ],
                         ),
                       ),
@@ -620,121 +625,12 @@ class _MainScreenState extends State<MainScreen> {
                           initialPath: _currentPath,
                           onItemSelected: (item) =>
                               setState(() => _selectedItem = item),
-                          onSelectionChanged: (info) =>
-                              setState(() => _selectionInfo = info),
-                          onClipboardChanged: (info) =>
-                              setState(() => _clipboardInfo = info),
                           onPathChanged: (path) => setState(() {
                             _currentPath = path;
                             _selectedItem = null;
                           }),
-                          onMarksChanged: (count) =>
-                              setState(() => _markCount = count),
                           onItemCountChanged: (count) =>
                               setState(() => _itemCount = count),
-                        ),
-                      ),
-                      // Status bar
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        color: surfaceHighest,
-                        child: Row(
-                          children: [
-                            // Clipboard indicator (copy = cyan, cut = amber)
-                            if (_clipboardInfo != null &&
-                                _clipboardInfo!.hasClipboard) ...[
-                              const SizedBox(width: 8),
-                              Icon(
-                                _clipboardInfo!.operation == 'cut'
-                                    ? Icons.content_cut
-                                    : Icons.content_copy,
-                                size: 14,
-                                color: _clipboardInfo!.operation == 'cut'
-                                    ? OneDarkColors.amber
-                                    : OneDarkColors.cyan,
-                              ),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  '${_clipboardInfo!.operation == 'cut' ? 'Cut' : 'Copied'}: ${_clipboardInfo!.count}',
-                                  style: TextStyle(
-                                    color: _clipboardInfo!.operation == 'cut'
-                                        ? OneDarkColors.amber
-                                        : OneDarkColors.cyan,
-                                    fontSize: 11,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                            // Mark count indicator
-                            if (_markCount > 0) ...[
-                              const SizedBox(width: 8),
-                              Icon(
-                                Icons.check_circle,
-                                size: 14,
-                                color: OneDarkColors.amber,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                '$_markCount marked',
-                                style: TextStyle(
-                                  color: OneDarkColors.amber,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                            // Multi-select aggregate summary
-                            if (_selectionInfo != null &&
-                                _selectionInfo!.count > 1) ...[
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  '${_selectionInfo!.count} selected (${_formatBytes(_selectionInfo!.totalSizeBytes)})',
-                                  style: TextStyle(
-                                    color: onSurface,
-                                    fontSize: 11,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                            const Spacer(),
-                            if (_selectedItem != null) ...[
-                              const SizedBox(width: 12),
-                              Icon(
-                                _selectedItem!.icon,
-                                size: 14,
-                                color: _selectedItem!.iconColor,
-                              ),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  _selectedItem!.name,
-                                  style: TextStyle(
-                                    color: onSurface,
-                                    fontSize: 11,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Flexible(
-                                child: Text(
-                                  _selectedItem!.formattedSize,
-                                  style: TextStyle(
-                                    color: onSurfaceDim,
-                                    fontSize: 11,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ],
                         ),
                       ),
                     ],
@@ -750,12 +646,16 @@ class _MainScreenState extends State<MainScreen> {
                   ),
               ],
             ),
-            // Tab 1-4: Full-screen screens
-            const BluetoothScreen(),
-            const LANSharingScreen(),
-            const SettingsScreen(),
+            // Tab 1-4: Full-screen screens.
+            // NOTE: deliberately NOT const — these use OneDarkColors getters in
+            // their build methods, and const instances are skipped when the
+            // parent rebuilds (themeNotifier fires), leaving stale light colors
+            // until the next app start.
+            BluetoothScreen(),
+            LANSharingScreen(),
+            SettingsScreen(),
             StorageAnalysisScreen(rootPath: AppPaths.home),
-            const NetworkScreen(),
+            NetworkScreen(),
           ],
         ),
       ),
@@ -956,15 +856,6 @@ class _MainScreenState extends State<MainScreen> {
         BookmarksService.save(_bookmarks);
       }
     });
-  }
-
-  /// Formats a byte count for the status bar (B / KB / MB / GB).
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024)
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
   /// Strips the primary emulated storage prefix for display.

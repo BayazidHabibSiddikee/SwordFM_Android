@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import '../theme/theme.dart';
 import '../utils/file_utils.dart' show FileItem;
+import '../utils/constants.dart' show AppPaths;
 import '../services/open_with_service.dart';
 
 /// Shows recently modified files across common storage directories,
@@ -33,15 +34,16 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
     });
     try {
       final cutoff = DateTime.now().subtract(const Duration(days: 7));
-      final home = '/storage/emulated/0';
-      // Scan common media directories
+      final home = AppPaths.home;
+      // Scan common media directories (resolved via AppPaths so the screen
+      // also works on the Linux desktop build).
       final dirs = [
+        AppPaths.pictures,
+        AppPaths.downloads,
+        AppPaths.documents,
+        AppPaths.music,
+        AppPaths.videos,
         '$home/DCIM',
-        '$home/Download',
-        '$home/Documents',
-        '$home/Music',
-        '$home/Pictures',
-        '$home/Videos',
         '$home/Telegram',
         '$home/WhatsApp',
       ];
