@@ -16,6 +16,7 @@ import 'screens/bluetooth_screen.dart';
 import 'screens/lan_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
+import 'screens/network_screen.dart';
 import 'screens/recent_files_screen.dart';
 import 'screens/terminal_screen.dart';
 import 'services/entitlement_service.dart';
@@ -714,11 +715,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   ),
               ],
             ),
-            // Tab 1-4: Full-screen screens.
+            // Tab 1-6: Full-screen screens.
             BluetoothScreen(),
             LANSharingScreen(),
             SettingsScreen(),
             StorageAnalysisScreen(rootPath: AppPaths.home),
+            const NetworkScreen(),
             // Terminal — lazy: only spawns the PTY shell after first visit.
             _terminalVisited
                 ? TerminalScreen(startPath: AppPaths.home)
@@ -731,7 +733,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         onDestinationSelected: (index) => setState(() {
           _selectedIndex = index;
           if (index == 0) _previewVisible = true;
-          if (index == 5) _terminalVisited = true;
+          if (index == 6) _terminalVisited = true;
         }),
         backgroundColor: surface,
         indicatorColor: cs.primaryContainer,
@@ -744,6 +746,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           NavigationDestination(icon: Icon(Icons.wifi), label: 'LAN'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Storage'),
+          NavigationDestination(icon: Icon(Icons.cloud), label: 'Network'),
           NavigationDestination(icon: Icon(Icons.terminal), label: 'Terminal'),
         ],
       ),
