@@ -274,10 +274,18 @@ class DocConverter {
         .replaceAll('"', '&quot;');
   }
 
-  /// Checks if the file can be converted.
+  /// Checks if the file can be converted. Accepts every plain-text format —
+  /// markdown, code and data files all flow through the same text pipeline.
   static bool canConvert(String path) {
     final ext = p.extension(path).toLowerCase();
-    return ['.md', '.markdown', '.txt', '.html', '.csv', '.rst'].contains(ext);
+    const textExts = {
+      '.md', '.markdown', '.txt', '.html', '.htm', '.csv', '.rst',
+      '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.conf', '.cfg',
+      '.log', '.css', '.js', '.ts', '.jsx', '.tsx', '.py', '.dart',
+      '.java', '.kt', '.c', '.cpp', '.h', '.rs', '.go', '.sh', '.bat',
+      '.sql', '.env', '.gitignore', '.diff',
+    };
+    return textExts.contains(ext);
   }
 
   /// Lists available output formats for a given file.

@@ -25,9 +25,21 @@ class _ConvertDialogState extends State<ConvertDialog> {
       _lastResultPath = null;
     });
     try {
-      final outPath = format == 'PDF'
-          ? await DocConverter.toPdf(widget.filePath)
-          : await DocConverter.toDocx(widget.filePath);
+      final String? outPath;
+      switch (format) {
+        case 'PDF':
+          outPath = await DocConverter.toPdf(widget.filePath);
+          break;
+        case 'DOCX':
+          outPath = await DocConverter.toDocx(widget.filePath);
+          break;
+        case 'HTML':
+          outPath = await DocConverter.markdownFileToHtml(widget.filePath);
+          break;
+        default: // TXT
+          outPath = await DocConverter.toText(widget.filePath);
+          break;
+      }
       if (outPath != null) {
         if (mounted) setState(() => _lastResultPath = outPath);
       } else {
@@ -108,6 +120,42 @@ class _ConvertDialogState extends State<ConvertDialog> {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: OneDarkColors.cyan,
                       side: BorderSide(color: OneDarkColors.cyan),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _converting ? null : () => _convert('HTML'),
+                    icon: Icon(
+                      Icons.html,
+                      size: 18,
+                      color: OneDarkColors.amber,
+                    ),
+                    label: const Text('HTML'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: OneDarkColors.amber,
+                      side: BorderSide(color: OneDarkColors.amber),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _converting ? null : () => _convert('TXT'),
+                    icon: Icon(
+                      Icons.text_fields,
+                      size: 18,
+                      color: OneDarkColors.green,
+                    ),
+                    label: const Text('TXT'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: OneDarkColors.green,
+                      side: BorderSide(color: OneDarkColors.green),
                     ),
                   ),
                 ),
