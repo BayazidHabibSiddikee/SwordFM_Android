@@ -63,5 +63,61 @@ void main() {
       expect(results.length, 1);
       expect(results.first.name, 'nested.pdf');
     });
+
+    test('content search finds text inside files', () async {
+      await File('${tempDir.path}/readme.md').writeAsString('Hello World');
+      await File('${tempDir.path}/other.txt').writeAsString('Nothing here');
+
+      final results = await SearchService.searchDirectory(
+        tempDir.path, 'Hello', searchContent: true,
+      );
+      // Filename 'readme.md' doesn't contain 'Hello', but file content does
+      expect(results.length, 1);
+      expect(results.first.name, 'readme.md');
+      expect(results.first.snippet, isNotNull);
+      expect(results.first.snippet, contains('Hello'));
+    });
+
+    test('content search skips binary files', () async {
+      // Create a file with NUL bytes (binary)
+      final binFile = File('${tempDir.path}/image.bin');
+      await binFile.writeAsBytes(List<int>.filled(256, 0));
+      // Create a text file with the same query
+      await File('${tempDir.path}/readme.txt').writeAsString('Find me');
+
+      final results = await SearchService.searchDirectory(
+        tempDir.path, 'Find', searchContent: true,
+      );
+      expect(results.length, 1);
+      expect(results.first.name, 'readme.txt');
+    });
+
+    test('content search with regex mode', () async {
+      await File('${tempDir.path}/code.dart').writeAsString('void main() {}');
+
+      final results = await SearchService.searchDirectory(
+        tempDir.path, r'void\s+\w+',
+        mode: SearchMode.regex,
+        searchContent: true,
+      );
+      expect(results.length, 1);
+      expect(results.first.name, 'code.dart');
+      expect(results.first.snippet, contains('void main'));
+    });
+
+    test('content search with glob mode skips content scan', () async {
+      await File('${tempDir.path}/test.dart').writeAsString('glob test');
+
+      // Glob mode doesn't search file contents — only filenames
+      final results = await SearchService.searchDirectory(
+        tempDir.path, '*.dart',
+        mode: SearchMode.glob,
+        searchContent: true,
+      );
+      expect(results.length, 1);
+      expect(results.first.name, 'test.dart');
+      // Snippet should be null — glob skips content
+      expect(results.first.snippet, isNull);
+    });
   });
 }

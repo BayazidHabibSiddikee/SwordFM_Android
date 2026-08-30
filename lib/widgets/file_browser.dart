@@ -516,7 +516,7 @@ class _FileBrowserState extends State<FileBrowser> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('System directory — navigation blocked'),
+              content: Text('System directory — enable Root Mode in Settings to browse'),
               backgroundColor: OneDarkColors.amber,
             ),
           );
@@ -549,27 +549,44 @@ class _FileBrowserState extends State<FileBrowser> {
     setState(() {
       _isLoading = true;
     });
-    // With an active type/date filter, search the whole subtree instead of
-    // listing just this directory (matches Linux filtered-search behaviour).
-    final items = _isRecursiveFilterActive
-        ? await FileUtils.listRecursiveFiltered(
-            _currentPath,
-            includeHidden: _showHidden,
-            showJunk: _showJunk,
-            keep: _matchesTypeDate,
-          )
-        : await FileUtils.listDirectory(
-            _currentPath,
-            includeHidden: _showHidden,
-          );
-    _sortItems(items);
-    if (mounted) {
-      setState(() {
-        _items = items;
-        _isLoading = false;
-      });
+    try {
+      final items = _isRecursiveFilterActive
+          ? await FileUtils.listRecursiveFiltered(
+              _currentPath,
+              includeHidden: _showHidden,
+              showJunk: _showJunk,
+              keep: _matchesTypeDate,
+            )
+          : await FileUtils.listDirectory(
+              _currentPath,
+              includeHidden: _showHidden,
+            );
+      _sortItems(items);
+      if (mounted) {
+        setState(() {
+          _items = items;
+          _isLoading = false;
+        });
+      }
+      widget.onItemCountChanged?.call(items.length);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      String msg = 'Failed to list directory: $e';
+      if (e.toString().contains('Permission denied') && rootModeNotifier.value) {
+        msg = 'Permission denied — device may not be rooted. '
+            'Root Mode allows browsing, but /system and /data require root access.';
+      } else if (e.toString().contains('Permission denied')) {
+        msg = 'Permission denied — grant "All files access" in Settings';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: OneDarkColors.red,
+          duration: const Duration(seconds: 4),
+        ),
+      );
     }
-    widget.onItemCountChanged?.call(items.length);
   }
 
   Future<int> _computeFolderSize(FileItem folder) async {

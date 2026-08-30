@@ -347,8 +347,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 icon: Icons.admin_panel_settings,
                 title: 'Root Mode',
                 subtitle: rootMode
-                    ? 'System dirs (/proc, /sys, /dev) visible — be careful'
-                    : 'Browses system dirs when enabled',
+                    ? 'System dirs browsable — requires rooted device for /system, /data'
+                    : 'Enable to browse /proc, /sys, /dev and other system dirs',
                 trailing: Switch(
                   value: rootMode,
                   onChanged: (v) => savePersistedRootMode(v),

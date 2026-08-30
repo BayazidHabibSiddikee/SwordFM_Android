@@ -254,13 +254,14 @@ void _searchInDirSync(
       if (!includeHidden && name.startsWith('.')) continue;
 
       final nameLower = name.toLowerCase();
+      final queryLower = query.toLowerCase();
       String? snippet;
 
       // Filename match based on mode.
       bool matched = false;
       switch (mode) {
         case SearchMode.substring:
-          matched = nameLower.contains(query);
+          matched = nameLower.contains(queryLower);
         case SearchMode.regex:
           matched = regex?.hasMatch(name) ?? false;
         case SearchMode.glob:
@@ -348,7 +349,7 @@ String? _contentSnippet(
     final text = utf8.decode(bytes, allowMalformed: true);
     switch (mode) {
       case SearchMode.substring:
-        final idx = text.toLowerCase().indexOf(query);
+        final idx = text.toLowerCase().indexOf(query.toLowerCase());
         if (idx < 0) return null;
         return _snippetLine(text, idx, idx + query.length);
       case SearchMode.regex:

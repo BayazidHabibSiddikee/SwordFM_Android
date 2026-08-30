@@ -87,6 +87,8 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
         }
     }
 
+    private var pendingInstallResult: MethodChannel.Result? = null
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_PICK_FILE && resultCode == RESULT_OK && data != null) {
@@ -326,12 +328,16 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             }
             "installApk" -> {
                 val path = call.argument<String>("path") ?: ""
-                result.success(installApks(listOf(path)))
+                pendingInstallResult = result
+                installApks(listOf(path))
+                // result will be completed by InstallReceiver
             }
             "installApks" -> {
                 @Suppress("UNCHECKED_CAST")
                 val paths = call.argument<List<String>>("paths") ?: emptyList()
-                result.success(installApks(paths))
+                pendingInstallResult = result
+                installApks(paths)
+                // result will be completed by InstallReceiver
             }
             else -> {
                 result.notImplemented()
@@ -370,8 +376,6 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             )
             val sessionId = packageInstaller.createSession(params)
             val session = packageInstaller.openSession(sessionId)
-            // Stream every APK (base + splits) into the session — the
-            // installer infers split roles from the file names.
             for (path in files) {
                 val file = File(path)
                 val pfd = ParcelFileDescriptor.open(
@@ -390,6 +394,12 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                 stream.close()
                 pfd.close()
             }
+            // Store pending result so InstallReceiver can complete it
+            val pendingResult = pendingInstallResult
+            if (pendingResult != null) {
+                InstallReceiver.pendingResult = pendingResult
+                pendingInstallResult = null
+            }
             val pi = PendingIntent.getBroadcast(
                 this,
                 sessionId,
@@ -401,8 +411,6 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             session.close()
             true
         } catch (_: Exception) {
-            // Missing "Install unknown apps" permission — fall back to the
-            // system installer UI for a single APK.
             try {
                 if (files.size == 1) openFileWithChooser(files.first())
                 false
@@ -863,6 +871,10 @@ private fun readFully(stream: InputStream, buffer: ByteArray) {
 
 /** Receives the PackageInstaller session result broadcast and surfaces it. */
 class InstallReceiver : BroadcastReceiver() {
+    companion object {
+        var pendingResult: MethodChannel.Result? = null
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -1)
         val message = when (status) {
@@ -874,8 +886,26 @@ class InstallReceiver : BroadcastReceiver() {
                 return
             }
             PackageInstaller.STATUS_SUCCESS -> "App installed"
+            PackageInstaller.STATUS_FAILURE_ABORTED -> "Install aborted"
+            PackageInstaller.STATUS_FAILURE_BLOCKED -> "Install blocked by policy"
+            PackageInstaller.STATUS_FAILURE_CONFLICT -> "Conflict with existing package"
+            PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> "Incompatible with this device"
+            PackageInstaller.STATUS_FAILURE_INVALID -> "Invalid APK"
+            PackageInstaller.STATUS_FAILURE_STORAGE -> "Storage error"
             else -> "Install failed ($status)"
         }
+
+        // Send result back to Dart if a pending result exists
+        val result = pendingResult
+        if (result != null) {
+            pendingResult = null
+            if (status == PackageInstaller.STATUS_SUCCESS) {
+                result.success(true)
+            } else {
+                result.success(false)
+            }
+        }
+
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 }
