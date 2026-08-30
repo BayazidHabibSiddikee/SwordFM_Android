@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/theme.dart';
@@ -94,38 +95,143 @@ class _NotepadScreenState extends State<NotepadScreen> {
     final nameController = TextEditingController(
       text: _currentPath.isNotEmpty ? p.basename(_currentPath) : 'untitled.txt',
     );
-    final choice = await showDialog<String>(
+    var saveDir = _lastSaveDir.isNotEmpty ? _lastSaveDir : AppPaths.documents;
+    final choice = await showDialog<Map<String, String>>(
       context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: OneDarkColors.bg,
-        title: Text('Save As', style: TextStyle(color: OneDarkColors.fg)),
-        content: TextField(
-          controller: nameController,
-          style: TextStyle(color: OneDarkColors.fg),
-          decoration: const InputDecoration(
-            labelText: 'Filename',
-            border: OutlineInputBorder(),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          backgroundColor: OneDarkColors.bg,
+          title: Text('Save As', style: TextStyle(color: OneDarkColors.fg)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameController,
+                style: TextStyle(color: OneDarkColors.fg),
+                decoration: InputDecoration(
+                  labelText: 'Filename',
+                  suffixText: '.txt',
+                  border: OutlineInputBorder(),
+                ),
+                autofocus: true,
+              ),
+              const SizedBox(height: 12),
+              // Save location picker — shows the current target directory
+              // and lets the user pick a common folder or any custom one.
+              InkWell(
+                onTap: () async {
+                  final picked = await _pickSaveFolder(dialogContext, saveDir);
+                  if (picked != null) setDialogState(() => saveDir = picked);
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: OneDarkColors.bgDark,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: OneDarkColors.dim),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder, size: 18, color: OneDarkColors.amber),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          saveDir,
+                          style: TextStyle(
+                            color: OneDarkColors.fg,
+                            fontSize: 12,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Icon(Icons.chevron_right, size: 18, color: OneDarkColors.fgDim),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-          autofocus: true,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, {
+                'name': nameController.text.trim(),
+                'dir': saveDir,
+              }),
+              child: const Text('Save'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, nameController.text.trim()),
-            child: const Text('Save'),
-          ),
-        ],
       ),
     );
-    if (choice == null || choice.isEmpty) return;
-    final dir = _lastSaveDir.isNotEmpty
-        ? _lastSaveDir
-        : AppPaths.documents;
-    _currentPath = p.join(dir, choice);
+    if (choice == null) return;
+    var name = choice['name'] ?? '';
+    if (name.isEmpty) return;
+    if (!name.endsWith('.txt')) name = '$name.txt';
+    final dir = choice['dir'] ?? AppPaths.documents;
+    _currentPath = p.join(dir, name);
     await _save();
+  }
+
+  /// Lets the user choose where the text file is saved: the common document
+  /// folders, the last-used folder, or any custom directory via file_picker.
+  Future<String?> _pickSaveFolder(
+    BuildContext dialogContext,
+    String current,
+  ) async {
+    final dirs = <String>{
+      current,
+      AppPaths.documents,
+      AppPaths.downloads,
+      AppPaths.home,
+    }.toList();
+    return showDialog<String>(
+      context: dialogContext,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bgDark,
+        title: Text('Save to', style: TextStyle(color: OneDarkColors.fg)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ...dirs.map(
+              (d) => ListTile(
+                dense: true,
+                leading: Icon(Icons.folder, size: 18, color: OneDarkColors.amber),
+                title: Text(
+                  d.split('/').last,
+                  style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
+                ),
+                subtitle: Text(
+                  d,
+                  style: TextStyle(color: OneDarkColors.fgDim, fontSize: 10),
+                ),
+                onTap: () => Navigator.pop(dialogContext, d),
+              ),
+            ),
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.create_new_folder, size: 18, color: OneDarkColors.cyan),
+              title: Text(
+                'Choose other folder…',
+                style: TextStyle(color: OneDarkColors.cyan, fontSize: 13),
+              ),
+              onTap: () async {
+                final custom = await FilePicker.getDirectoryPath(
+                  dialogTitle: 'Select save folder',
+                );
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext, custom ?? current);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override

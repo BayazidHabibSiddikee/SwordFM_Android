@@ -102,6 +102,20 @@ class DocConverter {
     if (ext == '.csv') {
       return _csvToMarkdown(content);
     }
+    if (ext == '.docx') {
+      // DOCX content is raw XML from word/document.xml — extract text
+      return content
+          .replaceAll('</w:p>', '\n')
+          .replaceAll('</w:tr>', '\n')
+          .replaceAll('<w:tab/>', '\t')
+          .replaceAll(RegExp(r'<[^>]+>'), '')
+          .replaceAll('&amp;', '&')
+          .replaceAll('&lt;', '<')
+          .replaceAll('&gt;', '>')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&apos;', "'")
+          .trim();
+    }
     return content;
   }
 

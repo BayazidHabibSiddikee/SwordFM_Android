@@ -158,7 +158,11 @@ class ArchiveService {
       throw Exception('io:failed to read archive: $e');
     }
 
-    List<ArchiveFile> files;
+    List<ArchiveFile> files = <ArchiveFile>[];
+    // Non-tar single-file compressed archives (e.g. notes.txt.gz) — written
+    // as one decompressed file instead of failing with "invalid archive".
+    List<int>? singleFileData;
+    String? singleFileName;
     switch (ext) {
       case '.zip':
         files = ZipDecoder().decodeBytes(data).files;
@@ -170,19 +174,37 @@ class ArchiveService {
       case '.tgz':
       case '.tar.gz':
         final gzipDecoded = GZipDecoder().decodeBytes(data);
-        files = TarDecoder().decodeBytes(gzipDecoded).files;
+        final tarFiles = _tryDecodeTar(gzipDecoded);
+        if (tarFiles != null) {
+          files = tarFiles;
+        } else {
+          singleFileData = gzipDecoded;
+          singleFileName = _stripExt(archivePath, '.gz');
+        }
         break;
       case '.xz':
       case '.txz':
       case '.tar.xz':
         final xzDecoded = XZDecoder().decodeBytes(data);
-        files = TarDecoder().decodeBytes(xzDecoded).files;
+        final tarFiles = _tryDecodeTar(xzDecoded);
+        if (tarFiles != null) {
+          files = tarFiles;
+        } else {
+          singleFileData = xzDecoded;
+          singleFileName = _stripExt(archivePath, '.xz');
+        }
         break;
       case '.bz2':
       case '.tbz2':
       case '.tar.bz2':
         final bz2Decoded = BZip2Decoder().decodeBytes(data);
-        files = TarDecoder().decodeBytes(bz2Decoded).files;
+        final tarFiles = _tryDecodeTar(bz2Decoded);
+        if (tarFiles != null) {
+          files = tarFiles;
+        } else {
+          singleFileData = bz2Decoded;
+          singleFileName = _stripExt(archivePath, '.bz2');
+        }
         break;
       case '.7z':
         return _extractWithTool(
@@ -213,16 +235,35 @@ class ArchiveService {
         throw Exception('unsupported:unknown archive format $ext');
     }
 
-    if (files.isEmpty) {
+    if (files.isEmpty && singleFileData == null) {
       throw Exception('invalid:archive contains no files');
     }
 
     final extractedPaths = <String>[];
+
+    if (singleFileData != null) {
+      // Single decompressed file (non-tar .gz/.xz/.bz2).
+      final outPath = p.join(destDir, singleFileName);
+      await File(outPath).writeAsBytes(singleFileData);
+      extractedPaths.add(outPath);
+      return extractedPaths;
+    }
+
     for (final af in files) {
-      final name = af.name;
+      var name = af.name;
       // Safety: reject path traversal in archive entries
-      if (name.contains('..') || name.contains(String.fromCharCode(0)))
+      if (name.contains('..') || name.contains(String.fromCharCode(0))) {
         continue;
+      }
+      // Normalize Windows-style separators and strip leading slashes so
+      // entries can't escape the destination dir (or create weird filenames).
+      name = name.replaceAll('\\', '/');
+      while (name.startsWith('/')) {
+        name = name.substring(1);
+      }
+      if (name.isEmpty) continue;
+      // Skip symlinks — they can point outside the archive.
+      if (af.isSymbolicLink) continue;
 
       final destPath = p.join(destDir, name);
 
@@ -231,15 +272,55 @@ class ArchiveService {
       } else {
         final parentDir = Directory(p.dirname(destPath));
         await parentDir.create(recursive: true);
-        final outStream = File(destPath).openWrite();
-        final content = af.content as List<int>;
-        outStream.add(content);
-        await outStream.close();
+        // readBytes() returns null for some entries (e.g. zero-length or
+        // unsupported compression) — the `content` getter would silently
+        // write an EMPTY file. Fail loudly instead so the user knows.
+        final content = af.readBytes();
+        if (content == null) {
+          throw Exception(
+            'io:could not read archive entry "$name" (corrupt or '
+            'unsupported compression)',
+          );
+        }
+        await File(destPath).writeAsBytes(content);
       }
       extractedPaths.add(destPath);
     }
 
     return extractedPaths;
+  }
+
+  /// Attempts to decode [data] as a tar archive. Returns null when it isn't
+  /// valid tar (e.g. a plain gzip'd text file), so callers can fall back to
+  /// treating it as a single compressed file.
+  static List<ArchiveFile>? _tryDecodeTar(List<int> data) {
+    try {
+      final archive = TarDecoder().decodeBytes(data);
+      if (archive.files.isEmpty) return null;
+      return archive.files;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Strips [archiveExt] and then [ext] from [archivePath], e.g.
+  /// `notes.tar.gz` with ext `.gz` → `notes.tar`.
+  static String _stripExt(String archivePath, String ext) {
+    var base = p.basenameWithoutExtension(archivePath);
+    final inner = p.extension(base);
+    // Only strip the inner extension when it matches the compression layer
+    // (e.g. notes.tar.gz → notes.tar, but readme.txt.gz → readme.txt).
+    if (ext == '.gz' || ext == '.xz' || ext == '.bz2') {
+      if (inner == '.tar' ||
+          (base.toLowerCase().endsWith(ext) &&
+              inner.isNotEmpty &&
+              inner != ext &&
+              base.length > inner.length &&
+              base.toLowerCase().endsWith('$inner$ext'))) {
+        base = base.substring(0, base.length - inner.length);
+      }
+    }
+    return base;
   }
 
   /// Extracts a format that the pure-Dart decoders can't handle (7z/rar/zst)

@@ -9,3 +9,21 @@
 9. Add photo editing options too with some basic tools 
 10. Open QR code didn't worked 
 11. PDF and other conversions where ??
+1. Transfer BT to LAN section 
+2. While scanning and notepad it should open or save the place or where I opened it 
+3. and it showed only 50 apps but there is more than that 
+4. and fix other issues 
+it closed when I turned bluetooth and paired
+2. text pdf docx md etc files should be shown as preview as same as images 
+3. why it's only 50 apps ?? there is more though 
+4. I don't know where does text file saves so like the scanned documents add path and rename option where to save text file 
+5. there should be a bit gap between date modified and Size column 
+6. Make the folder graph more interactive movable 
+7. terminal isn't working need a fix 
+8. In settings source code button isn't working 
+9. archieve extraction didn't worked properly 
+10. remove showing QR code option while holding a folder for long it doesn't work either 
+11. while going to touch for long and sharing via LAN it doesn't show bottom bar 
+13. make sure root mode works only on rooted phone 
+14. make the video be see on the tab as image preview 
+15. and while sliding that bar it opens images/video/texts/pdf/docx/md in full screen 

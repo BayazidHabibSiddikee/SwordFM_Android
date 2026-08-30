@@ -27,6 +27,11 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
   int _rotation = 0; // 0, 90, 180, 270
   bool _flipH = false;
   bool _flipV = false;
+  int _cropX = 0;
+  int _cropY = 0;
+  int _cropW = 0;
+  int _cropH = 0;
+  bool _hasCrop = false;
 
   @override
   void initState() {
@@ -66,6 +71,11 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
     // Brightness & Contrast
     if (_brightness != 0 || _contrast != 1) {
       result = img.adjustColor(result, brightness: _brightness / 100, contrast: _contrast);
+    }
+
+    // Crop
+    if (_hasCrop && _cropW > 0 && _cropH > 0) {
+      result = img.copyCrop(result, x: _cropX, y: _cropY, width: _cropW, height: _cropH);
     }
 
     _edited = result;
@@ -112,6 +122,7 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
       _rotation = 0;
       _flipH = false;
       _flipV = false;
+      _hasCrop = false;
       _edited = _original != null ? img.Image.from(_original!) : null;
     });
   }
@@ -199,6 +210,7 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
                             'Contrast', _contrast, 0.2, 3,
                             (v) { setState(() => _contrast = v); _applyEdits(); },
                           )),
+                          _toolButton(Icons.crop, 'Crop', _showCropDialog),
                         ],
                       ),
                     ],
@@ -220,6 +232,105 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
           Text(label, style: TextStyle(color: OneDarkColors.fgDim, fontSize: 10)),
         ],
       ),
+    );
+  }
+
+  void _showCropDialog() {
+    if (_original == null) return;
+    final w = _hasCrop ? _cropW : _original!.width;
+    final h = _hasCrop ? _cropH : _original!.height;
+    final x = _hasCrop ? _cropX : 0;
+    final y = _hasCrop ? _cropY : 0;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        double xFrac = x / w;
+        double yFrac = y / h;
+        double wFrac = 1 - xFrac;
+        double hFrac = 1 - yFrac;
+        return AlertDialog(
+          backgroundColor: OneDarkColors.bgDark,
+          title: Text('Crop', style: TextStyle(color: OneDarkColors.fg)),
+          content: StatefulBuilder(
+            builder: (ctx, setDialogState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Area: ${(wFrac * 100).round()}% × ${(hFrac * 100).round()}%',
+                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  _cropSlider('Left edge', xFrac, 0, 1, (v) {
+                    setDialogState(() => xFrac = v);
+                  }),
+                  _cropSlider('Top edge', yFrac, 0, 1, (v) {
+                    setDialogState(() => yFrac = v);
+                  }),
+                  _cropSlider('Width', wFrac, 0.1, 1, (v) {
+                    setDialogState(() => wFrac = v);
+                  }),
+                  _cropSlider('Height', hFrac, 0.1, 1, (v) {
+                    setDialogState(() => hFrac = v);
+                  }),
+                ],
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Cancel', style: TextStyle(color: OneDarkColors.fgDim)),
+            ),
+            FilledButton(
+              onPressed: () {
+                final ox = _original!.width;
+                final oy = _original!.height;
+                setState(() {
+                  _cropX = (xFrac * ox).round().clamp(0, ox - 1);
+                  _cropY = (yFrac * oy).round().clamp(0, oy - 1);
+                  _cropW = (wFrac * ox).round().clamp(1, ox - _cropX);
+                  _cropH = (hFrac * oy).round().clamp(1, oy - _cropY);
+                  _hasCrop = true;
+                });
+                _applyEdits();
+                Navigator.pop(ctx);
+              },
+              child: const Text('Apply'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _cropSlider(String label, double value, double min, double max, ValueChanged<double> onChanged) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 60,
+          child: Text(label, style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+        ),
+        Expanded(
+          child: Slider(
+            value: value.clamp(min, max).toDouble(),
+            min: min,
+            max: max,
+            activeColor: OneDarkColors.cyan,
+            inactiveColor: OneDarkColors.dim,
+            onChanged: onChanged,
+          ),
+        ),
+        SizedBox(
+          width: 36,
+          child: Text(
+            '${(value * 100).round()}%',
+            style: TextStyle(color: OneDarkColors.fgDim, fontSize: 10),
+            textAlign: TextAlign.right,
+          ),
+        ),
+      ],
     );
   }
 

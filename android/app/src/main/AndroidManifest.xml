@@ -35,7 +35,15 @@
             <data android:scheme="termux" />
         </intent>
         <package android:name="com.termux" />
+        <!-- Required for installed_apps plugin on Android 11+ (API 30+) -->
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.PICK" />
+        </intent>
     </queries>
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <application
         android:label="SwordFM"

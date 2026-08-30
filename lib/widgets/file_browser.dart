@@ -7,6 +7,8 @@ import '../screens/video_player_screen.dart';
 import '../screens/music_player_screen.dart';
 import '../screens/notepad_screen.dart';
 import '../screens/pdf_reader_screen.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
+import 'dart:typed_data';
 import '../screens/qr_file_screen.dart';
 import '../services/widget_service.dart';
 import '../utils/file_utils.dart';
@@ -702,19 +704,44 @@ class _FileBrowserState extends State<FileBrowser> {
     if (MediaQuery.of(context).size.width < 600) {
       await showModalBottomSheet<void>(
         context: context,
-        backgroundColor: OneDarkColors.bgDark,
+        backgroundColor: Colors.transparent,
         isScrollControlled: true,
-        builder: (sheetContext) => SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(sheetContext).size.height * 0.6,
-            child: PreviewPanel(
-              item: item,
-              width: double.infinity,
-              onClose: () => Navigator.pop(sheetContext),
-              onSwipe: () {
-                Navigator.pop(sheetContext);
-                _openItem(item);
-              },
+        builder: (sheetContext) => DraggableScrollableSheet(
+          // Starts at 60% height like before; dragging the bar up expands the
+          // preview (images/text/pdf/docx/md) to full screen, dragging down
+          // dismisses it.
+          initialChildSize: 0.6,
+          minChildSize: 0.35,
+          maxChildSize: 1.0,
+          builder: (sheetContext, scrollController) => Container(
+            decoration: BoxDecoration(
+              color: OneDarkColors.bgDark,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            child: Column(
+              children: [
+                // Grab handle — drag up for fullscreen, down to close.
+                Container(
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: OneDarkColors.fgDim,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Expanded(
+                  child: PreviewPanel(
+                    item: item,
+                    width: double.infinity,
+                    onClose: () => Navigator.pop(sheetContext),
+                    onSwipe: () {
+                      Navigator.pop(sheetContext);
+                      _openItem(item);
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -1301,6 +1328,20 @@ class _FileBrowserState extends State<FileBrowser> {
           ),
           child: Column(
             children: [
+              // Grab handle + title bar so the sheet is clearly draggable and
+              // the LAN screen's controls (incl. its bottom action bar) get
+              // the full remaining height.
+              Container(
+                padding: const EdgeInsets.only(top: 8),
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white54,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
               Container(
                 padding: const EdgeInsets.all(16),
                 child: const Text(
@@ -1309,7 +1350,11 @@ class _FileBrowserState extends State<FileBrowser> {
                 ),
               ),
               Expanded(
-                child: LANSharingScreen(initialShareRoot: path, server: null),
+                child: MediaQuery.removePadding(
+                  context: context,
+                  removeBottom: true,
+                  child: LANSharingScreen(initialShareRoot: path, server: null),
+                ),
               ),
             ],
           ),
@@ -2004,24 +2049,21 @@ class _FileBrowserState extends State<FileBrowser> {
         const PopupMenuDivider(),
         if (item.isText || item.extension == '.docx')
           _menuItem('Convert…', Icons.transform, () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ConvertDialog(filePath: item.path),
-              ),
+            showDialog(
+              context: context,
+              builder: (_) => ConvertDialog(filePath: item.path),
             );
           }),
-        if (!item.isDirectory)
-          _menuItem(
-            'Show QR Code',
-            Icons.qr_code,
-            () {
-              showDialog(
-                context: context,
-                builder: (_) => QrFileScreen(filePath: item.path),
-              );
-            },
-          ),
+        _menuItem(
+          'Show QR Code',
+          Icons.qr_code,
+          () {
+            showDialog(
+              context: context,
+              builder: (_) => QrFileScreen(filePath: item.path),
+            );
+          },
+        ),
         _menuItem(
           'Properties',
           Icons.info_outline,
@@ -2779,7 +2821,7 @@ class _FileBrowserState extends State<FileBrowser> {
           padding: const EdgeInsets.all(8),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
-            childAspectRatio: crossAxisCount >= 6 ? 0.65 : 0.72,
+            childAspectRatio: crossAxisCount >= 6 ? 0.72 : 0.8,
             crossAxisSpacing: 4,
             mainAxisSpacing: 4,
           ),
@@ -2809,25 +2851,23 @@ class _FileBrowserState extends State<FileBrowser> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.min,
+                      mainAxisSize: MainAxisSize.max,
                       children: [
                         // Image files show a real thumbnail instead of an icon.
                         if (item.isImage)
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
-                            child: FittedBox(
-                              fit: BoxFit.cover,
-                              child: SizedBox(
-                                width: 72,
-                                height: 72,
-                                child: Image.file(
-                                  File(item.path),
-                                  cacheWidth: 200,
-                                  errorBuilder: (_, __, ___) => Icon(
-                                    item.icon,
-                                    size: 32,
-                                    color: item.iconColor,
-                                  ),
+                            child: SizedBox(
+                              width: 72,
+                              height: 72,
+                              child: Image.file(
+                                File(item.path),
+                                cacheWidth: 200,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => Icon(
+                                  item.icon,
+                                  size: 32,
+                                  color: item.iconColor,
                                 ),
                               ),
                             ),
@@ -2835,50 +2875,26 @@ class _FileBrowserState extends State<FileBrowser> {
                         else if (item.isVideo)
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
-                            child: FittedBox(
-                              fit: BoxFit.cover,
-                              child: SizedBox(
-                                width: 72,
-                                height: 72,
-                                child: Stack(
-                                  children: [
-                                    Image.file(
-                                      File(item.path),
-                                      cacheWidth: 200,
-                                      errorBuilder: (_, __, ___) => Icon(
-                                        item.icon,
-                                        size: 32,
-                                        color: item.iconColor,
-                                      ),
-                                    ),
-                                    Center(
-                                      child: Icon(
-                                        Icons.play_circle,
-                                        size: 36,
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
+                            child: _VideoThumbnail(path: item.path, item: item),
                           )
                         else
                           Icon(item.icon, size: 32, color: item.iconColor),
                         const SizedBox(height: 4),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: Text(
-                            item.name,
-                            style: TextStyle(
-                              color: isMarked
-                                  ? OneDarkColors.amber
-                                  : OneDarkColors.fg,
-                              fontSize: 11,
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Text(
+                              item.name,
+                              style: TextStyle(
+                                color: isMarked
+                                    ? OneDarkColors.amber
+                                    : OneDarkColors.fg,
+                                fontSize: 11,
+                              ),
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -3097,23 +3113,29 @@ class _FileBrowserState extends State<FileBrowser> {
         ),
         Flexible(
           flex: 2,
-          child: Text(
-            'Size',
-            style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              'Size',
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+            ),
           ),
         ),
         if (!isMobile)
           Flexible(
             flex: 1,
-            child: Text(
-              'Type',
-              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                'Type',
+                style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+              ),
             ),
           ),
         Flexible(
           flex: 3,
           child: Padding(
-            padding: const EdgeInsets.only(left: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Text(
               'Date Modified',
               style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
@@ -3674,6 +3696,79 @@ class _BatchRenameDialogState extends State<_BatchRenameDialog> {
           child: const Text('Apply'),
         ),
       ],
+    );
+  }
+}
+
+/// Grid-tile video thumbnail: extracts a frame from the video with
+/// [VideoThumbnail] and overlays a play glyph. Falls back to the generic
+/// video icon when extraction fails.
+class _VideoThumbnail extends StatefulWidget {
+  final String path;
+  final FileItem item;
+  const _VideoThumbnail({required this.path, required this.item});
+
+  // In-memory cache so re-entering a folder doesn't re-extract frames.
+  static final Map<String, Uint8List?> _cache = {};
+
+  @override
+  State<_VideoThumbnail> createState() => _VideoThumbnailState();
+}
+
+class _VideoThumbnailState extends State<_VideoThumbnail> {
+  Future<Uint8List?> _load() async {
+    if (_VideoThumbnail._cache.containsKey(widget.path)) {
+      return _VideoThumbnail._cache[widget.path];
+    }
+    Uint8List? bytes;
+    try {
+      bytes = await VideoThumbnail.thumbnailData(
+        video: widget.path,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 256,
+        quality: 60,
+      );
+    } catch (_) {
+      bytes = null;
+    }
+    _VideoThumbnail._cache[widget.path] = bytes;
+    return bytes;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FittedBox(
+      fit: BoxFit.cover,
+      child: SizedBox(
+        width: 72,
+        height: 72,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            FutureBuilder<Uint8List?>(
+              future: _load(),
+              builder: (context, snap) {
+                final bytes = snap.data;
+                if (bytes != null) {
+                  return Image.memory(
+                    bytes,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  );
+                }
+                return Icon(
+                  widget.item.icon,
+                  size: 32,
+                  color: widget.item.iconColor,
+                );
+              },
+            ),
+            const Center(
+              child: Icon(Icons.play_circle, size: 36, color: Colors.white70),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -349,16 +349,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ValueListenableBuilder<bool>(
             valueListenable: rootModeNotifier,
             builder: (context, rootMode, _) {
-              return _settingTile(
-                icon: Icons.admin_panel_settings,
-                title: 'Root Mode',
-                subtitle: rootMode
-                    ? 'System dirs browsable — requires rooted device for /system, /data'
-                    : 'Enable to browse /proc, /sys, /dev and other system dirs',
-                trailing: Switch(
-                  value: rootMode,
-                  onChanged: (v) => savePersistedRootMode(v),
-                ),
+              return FutureBuilder<bool>(
+                future: FileUtils.isRooted,
+                builder: (context, snapshot) {
+                  final isRooted = snapshot.data ?? false;
+                  return _settingTile(
+                    icon: Icons.admin_panel_settings,
+                    title: 'Root Mode',
+                    subtitle: isRooted
+                        ? 'System dirs browsable — requires rooted device for /system, /data'
+                        : 'Enable to browse /proc, /sys, /dev and other system dirs (requires root)',
+                    trailing: isRooted
+                        ? Switch(
+                            value: rootMode,
+                            onChanged: (v) => savePersistedRootMode(v),
+                          )
+                        : IconButton(
+                            icon: const Icon(Icons.lock_outline, size: 18),
+                            tooltip: 'Device is not rooted',
+                            onPressed: () {},
+                          ),
+                  );
+                },
               );
             },
           ),
@@ -510,6 +522,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Source Code',
             subtitle: 'Open source (MIT)',
             trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              final uri = Uri.parse(
+                'https://github.com/BayazidHabibSiddikee/SwordFM_Android',
+              );
+              try {
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                } else {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text(
+                        'https://github.com/BayazidHabibSiddikee/SwordFM_Android',
+                      ),
+                      backgroundColor: OneDarkColors.bgDark,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Could not open link: $e'),
+                    backgroundColor: OneDarkColors.red,
+                  ),
+                );
+              }
+            },
           ),
         ],
       ),

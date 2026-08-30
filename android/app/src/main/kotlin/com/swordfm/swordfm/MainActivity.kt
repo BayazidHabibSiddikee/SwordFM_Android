@@ -187,11 +187,28 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             }
             "getPairedDevices" -> {
                 val devicesList = mutableListOf<Map<String, String>>()
-                if (bluetoothAdapter != null && bluetoothAdapter!!.isEnabled) {
-                    val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter!!.bondedDevices
-                    pairedDevices?.forEach { device ->
-                        devicesList.add(mapOf("name" to device.name, "address" to device.address))
+                try {
+                    // Android 12+ requires BLUETOOTH_CONNECT before touching
+                    // bondedDevices or device.name — calling without it throws
+                    // SecurityException and crashes the app (fixed: guarded).
+                    val canAccess = bluetoothAdapter != null && bluetoothAdapter!!.isEnabled && (
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                            androidx.core.content.ContextCompat.checkSelfPermission(
+                                activity, android.Manifest.permission.BLUETOOTH_CONNECT
+                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        )
+                    if (canAccess) {
+                        val pairedDevices: Set<BluetoothDevice>? = bluetoothAdapter!!.bondedDevices
+                        pairedDevices?.forEach { device ->
+                            val name = try { device.name } catch (_: SecurityException) { device.address }
+                            devicesList.add(mapOf("name" to (name ?: device.address), "address" to device.address))
+                        }
                     }
+                } catch (e: SecurityException) {
+                    // Missing runtime permission — return an empty list instead
+                    // of crashing; the Dart side surfaces the permission flow.
+                } catch (e: Exception) {
+                    // Ignore adapter errors.
                 }
                 result.success(devicesList)
             }

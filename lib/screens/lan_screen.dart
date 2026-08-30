@@ -186,18 +186,31 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
   }
 
   Future<void> _startBtListening() async {
-    await _btService.startServer();
+    try {
+      await _btService.startServer();
+    } catch (e) {
+      if (mounted) setState(() => _btStatusMessage = 'Failed to start: $e');
+    }
   }
 
   Future<void> _stopBtListening() async {
-    await _btService.stopServer();
+    try {
+      await _btService.stopServer();
+    } catch (e) {
+      if (mounted) setState(() => _btStatusMessage = 'Stop failed: $e');
+    }
     if (mounted) setState(() => _btStatusMessage = null);
   }
 
   Future<void> _connectToDevice(BluetoothDeviceItem device) async {
-    if (mounted) setState(() => _btStatusMessage = 'Connecting to ${device.name}...');
-    await _btService.connectToDevice(device.address);
-    if (mounted) setState(() => _btStatusMessage = 'Connected to ${device.name}');
+    if (!mounted || device.name.isEmpty || device.address.isEmpty) return;
+    setState(() => _btStatusMessage = 'Connecting to ${device.name}...');
+    try {
+      await _btService.connectToDevice(device.address);
+      if (mounted) setState(() => _btStatusMessage = 'Connected to ${device.name}');
+    } catch (e) {
+      if (mounted) setState(() => _btStatusMessage = 'Connection failed: $e');
+    }
   }
 
   Future<void> _pickAndSendFiles() async {

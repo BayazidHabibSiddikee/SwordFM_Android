@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:installed_apps/installed_apps.dart';
@@ -59,13 +60,17 @@ class _AppAnalyzerState extends State<AppAnalyzerScreen> {
   Future<List<_AppInfo>> _getInstalledApps() async {
     final apps = <_AppInfo>[];
     try {
-      // Query ALL apps — system + user
-      final installedApps = await InstalledApps.getInstalledApps(true, false);
+      // Query ALL apps — system + user. The first arg is excludeSystemApps
+      // (must be false to show every app, not just the ~50 user-installed
+      // ones); the second enables icons so each app shows its real launcher
+      // icon instead of a generic placeholder.
+      final installedApps = await InstalledApps.getInstalledApps(false, true);
       for (final app in installedApps) {
         apps.add(_AppInfo(
           name: app.name,
           pkg: app.packageName,
           version: app.getVersionInfo(),
+          icon: app.icon,
         ));
       }
     } catch (e) {
@@ -179,11 +184,22 @@ class _AppAnalyzerState extends State<AppAnalyzerScreen> {
                       final app = _filteredApps[i];
                       return ListTile(
                         dense: true,
-                        leading: Icon(
-                          Icons.apps,
-                          size: 20,
-                          color: OneDarkColors.cyan,
-                        ),
+                        leading: app.icon != null
+                            ? Image.memory(
+                                app.icon!,
+                                width: 32,
+                                height: 32,
+                                errorBuilder: (_, _, _) => Icon(
+                                  Icons.apps,
+                                  size: 20,
+                                  color: OneDarkColors.cyan,
+                                ),
+                              )
+                            : Icon(
+                                Icons.apps,
+                                size: 20,
+                                color: OneDarkColors.cyan,
+                              ),
                         title: Text(
                           app.name,
                           style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
@@ -208,5 +224,11 @@ class _AppInfo {
   final String name;
   final String pkg;
   final String version;
-  const _AppInfo({required this.name, required this.pkg, this.version = ''});
+  final Uint8List? icon;
+  const _AppInfo({
+    required this.name,
+    required this.pkg,
+    this.version = '',
+    this.icon,
+  });
 }

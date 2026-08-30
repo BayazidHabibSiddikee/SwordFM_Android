@@ -107,7 +107,15 @@ class BluetoothShareService : Service() {
                         val socket: BluetoothSocket? = serverSocket?.accept(5000)
                         if (socket != null) {
                             acceptLoopRunning = false // stop accepting after first connection
-                            val deviceName = socket.remoteDevice.name ?: "Unknown"
+                            // BLUETOOTH_CONNECT is required to read the remote
+                            // device name on Android 12+ — guard against
+                            // SecurityException so an inbound pairing never
+                            // crashes the app.
+                            val deviceName = try {
+                                socket.remoteDevice.name ?: "Unknown"
+                            } catch (_: SecurityException) {
+                                "Unknown"
+                            }
                             val deviceAddress = socket.remoteDevice.address
                             notifyMethod("onConnected", mapOf("name" to deviceName, "address" to deviceAddress))
                             TransferWorker(socket, this).start()
