@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import '../theme/theme.dart';
 import '../services/google_drive_service.dart';
 import '../services/dropbox_service.dart';
+import '../services/opendrive_service.dart';
 
-enum CloudProvider { googleDrive, dropbox }
+enum CloudProvider { googleDrive, dropbox, openDrive }
 
 /// Unified cloud browser screen for Google Drive and Dropbox.
 class CloudBrowserScreen extends StatefulWidget {
@@ -19,10 +22,14 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
   CloudProvider _currentProvider = CloudProvider.googleDrive;
   final GoogleDriveService _gDrive = GoogleDriveService();
   final DropboxService _dropbox = DropboxService();
+  final OpenDriveService _openDrive = OpenDriveService();
 
   List<CloudFile> _files = [];
   bool _loading = false;
+  bool _uploading = false;
   String? _error;
+  // For Google Drive: store the resolved folder ID for the current path to avoid re-resolution.
+  String? _currentFolderId;
   String _currentPath = '/';
   bool _selectMode = false;
   Set<String> _selectedIds = {};
@@ -36,6 +43,7 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
   Future<void> _loadConfigs() async {
     await _gDrive.loadConfig();
     await _dropbox.loadConfig();
+    await _openDrive.loadConfig();
 
     // Auto-connect if credentials exist
     if (_gDrive.savedClientId != null) {
@@ -44,10 +52,13 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
     if (_dropbox.savedAppKey != null) {
       await _dropbox.connect();
     }
+    if (_openDrive.savedApiKey != null) {
+      await _openDrive.connect();
+    }
 
     if (mounted) {
       setState(() {});
-      if (_gDrive.isConnected || _dropbox.isConnected) {
+      if (_isConnected) {
         _listFiles();
       }
     }
@@ -55,7 +66,8 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
 
   bool get _isConnected =>
       (_currentProvider == CloudProvider.googleDrive && _gDrive.isConnected) ||
-      (_currentProvider == CloudProvider.dropbox && _dropbox.isConnected);
+      (_currentProvider == CloudProvider.dropbox && _dropbox.isConnected) ||
+      (_currentProvider == CloudProvider.openDrive && _openDrive.isConnected);
 
   Future<void> _listFiles() async {
     if (!_isConnected) return;
@@ -73,8 +85,10 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
           folderId = await _gDrive.getFolderIdFromPath(_currentPath);
         }
         files = await _gDrive.listFolder(folderId: folderId);
-      } else {
+      } else if (_currentProvider == CloudProvider.dropbox) {
         files = await _dropbox.listFolder(path: _currentPath);
+      } else {
+        files = await _openDrive.listFolder();
       }
 
       if (mounted) {
@@ -94,8 +108,11 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
   }
 
   void _navigateToFolder(CloudFile folder) {
+    final newPath = _currentProvider == CloudProvider.googleDrive
+        ? '$_currentPath${folder.name}/'
+        : '$_currentPath${folder.name}';
     setState(() {
-      _currentPath = '$_currentPath${folder.name}/';
+      _currentPath = newPath;
       _selectedIds.clear();
     });
     _listFiles();
@@ -103,9 +120,28 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
 
   void _navigateUp() {
     if (_currentPath == '/') return;
-    final parts = _currentPath.split('/')..removeLast..removeLast;
+    // Google Drive paths look like /Folder/Sub/; Dropbox paths look like /Folder/Sub.
+    String normalized;
+    if (_currentProvider == CloudProvider.googleDrive) {
+      final parts = _currentPath.split('/').where((p) => p.isNotEmpty).toList();
+      if (parts.length <= 1) {
+        setState(() {
+          _currentPath = '/';
+          _selectedIds.clear();
+        });
+        _listFiles();
+        return;
+      }
+      parts.removeLast();
+      normalized = parts.isEmpty ? '/' : '/${parts.join('/')}/';
+    } else {
+      final idx = _currentPath.lastIndexOf('/');
+      normalized = idx == 0 ? '/' : _currentPath.substring(0, idx);
+      if (!normalized.endsWith('/')) normalized += '/';
+      if (normalized == '//') normalized = '/';
+    }
     setState(() {
-      _currentPath = parts.isEmpty ? '/' : '${parts.join('/')}/';
+      _currentPath = normalized;
       _selectedIds.clear();
     });
     _listFiles();
@@ -277,6 +313,120 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
     }
   }
 
+  Future<void> _connectOpenDrive() async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: OneDarkColors.bgDark,
+        title: Text('OpenDrive API Key', style: TextStyle(color: OneDarkColors.fg)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Enter your OpenDrive API Key.',
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Get your key at dev.openrazer.com',
+              style: TextStyle(color: OneDarkColors.cyan, fontSize: 11),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              style: TextStyle(color: OneDarkColors.fg),
+              decoration: InputDecoration(
+                hintText: 'Enter API key',
+                hintStyle: TextStyle(color: OneDarkColors.fgDim),
+                filled: true,
+                fillColor: OneDarkColors.bgDark,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: OneDarkColors.dim),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: TextStyle(color: OneDarkColors.fgDim)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: Text('Connect', style: TextStyle(color: OneDarkColors.cyan)),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      await _openDrive.saveApiKey(result);
+      final success = await _openDrive.connect(apiKey: result);
+      if (mounted) {
+        setState(() {});
+        if (success) {
+          _listFiles();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Connected to OpenDrive')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to connect to OpenDrive')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _uploadFile() async {
+    final results = await FilePicker.pickFiles(
+      type: FileType.any,
+      allowMultiple: false,
+    );
+    if (results.isEmpty || results.single.path == null) return;
+
+    setState(() => _uploading = true);
+    try {
+      final filePath = results.single.path!;
+      final fileName = results.single.name;
+      final fileBytes = await File(filePath).readAsBytes();
+      bool ok = false;
+      if (_currentProvider == CloudProvider.googleDrive) {
+        final uploaded = await _gDrive.uploadBytes(fileBytes, fileName);
+        ok = uploaded != null;
+      } else if (_currentProvider == CloudProvider.dropbox) {
+        final remotePath = _currentPath == '/' ? '/$fileName' : '$_currentPath$fileName';
+        ok = await _dropbox.uploadFile(fileBytes, remotePath) != null;
+      } else {
+        ok = await _openDrive.uploadFile(filePath, fileName) != null;
+      }
+      if (mounted) {
+        setState(() => _uploading = false);
+        if (ok) {
+          _listFiles();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Uploaded $fileName')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Upload failed')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _uploading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload error: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _createFolder() async {
     final controller = TextEditingController();
     final name = await showDialog<String>(
@@ -355,9 +505,11 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
         final file = _files.firstWhere((f) => f.id == id);
         if (_currentProvider == CloudProvider.googleDrive) {
           await _gDrive.delete(id);
-        } else {
+        } else if (_currentProvider == CloudProvider.dropbox) {
           final filePath = '$_currentPath${file.name}';
           await _dropbox.delete(filePath);
+        } else {
+          await _openDrive.delete(id);
         }
       }
       setState(() {
@@ -404,10 +556,12 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
     if (newName != null && newName.isNotEmpty && newName != file.name) {
       if (_currentProvider == CloudProvider.googleDrive) {
         await _gDrive.rename(file.id, newName);
-      } else {
+      } else if (_currentProvider == CloudProvider.dropbox) {
         final oldPath = '$_currentPath${file.name}';
         final newPath = '$_currentPath$newName';
         await _dropbox.rename(oldPath, newPath);
+      } else {
+        await _openDrive.rename(file.id, newName);
       }
       _listFiles();
     }
@@ -417,9 +571,11 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
     String? url;
     if (_currentProvider == CloudProvider.googleDrive) {
       url = await _gDrive.getDownloadUrl(file.id);
-    } else {
+    } else if (_currentProvider == CloudProvider.dropbox) {
       final filePath = '$_currentPath${file.name}';
       url = await _dropbox.getTemporaryLink(filePath);
+    } else {
+      url = await _openDrive.getDownloadUrl(file.id);
     }
 
     if (url != null && mounted) {
@@ -513,8 +669,10 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
                   if (confirm == true) {
                     if (_currentProvider == CloudProvider.googleDrive) {
                       await _gDrive.delete(file.id);
-                    } else {
+                    } else if (_currentProvider == CloudProvider.dropbox) {
                       await _dropbox.delete('$_currentPath${file.name}');
+                    } else {
+                      await _openDrive.delete(file.id);
                     }
                     _listFiles();
                   }
@@ -575,7 +733,9 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
               style: TextStyle(color: OneDarkColors.fg, fontSize: 16),
             ),
             Text(
-              _currentProvider == CloudProvider.googleDrive ? 'Google Drive' : 'Dropbox',
+              _currentProvider == CloudProvider.googleDrive ? 'Google Drive'
+                  : _currentProvider == CloudProvider.dropbox ? 'Dropbox'
+                  : 'OpenDrive',
               style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
             ),
           ],
@@ -601,6 +761,11 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
                 onPressed: _createFolder,
                 tooltip: 'New Folder',
               ),
+              IconButton(
+                icon: Icon(_uploading ? Icons.hourglass_top : Icons.upload_file, color: OneDarkColors.fgDim),
+                onPressed: _uploading ? null : _uploadFile,
+                tooltip: 'Upload',
+              ),
               PopupMenuButton<String>(
                 icon: Icon(Icons.more_vert, color: OneDarkColors.fgDim),
                 color: OneDarkColors.bgDark,
@@ -609,13 +774,20 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
                     case 'refresh':
                       _listFiles();
                       break;
+                    case 'upload':
+                      _uploadFile();
+                      break;
                     case 'select':
                       setState(() => _selectMode = true);
                       break;
                     case 'disconnect':
-                      _currentProvider == CloudProvider.googleDrive
-                          ? _gDrive.disconnect()
-                          : _dropbox.disconnect();
+                      if (_currentProvider == CloudProvider.googleDrive) {
+                        _gDrive.disconnect();
+                      } else if (_currentProvider == CloudProvider.dropbox) {
+                        _dropbox.disconnect();
+                      } else {
+                        _openDrive.disconnect();
+                      }
                       setState(() {});
                       break;
                     case 'google_drive':
@@ -634,10 +806,19 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
                       });
                       if (_dropbox.isConnected) _listFiles();
                       break;
+                    case 'open_drive':
+                      setState(() {
+                        _currentProvider = CloudProvider.openDrive;
+                        _files = [];
+                        _currentPath = '/';
+                      });
+                      if (_openDrive.isConnected) _listFiles();
+                      break;
                   }
                 },
                 itemBuilder: (context) => [
                   PopupMenuItem(value: 'refresh', child: Text('Refresh', style: TextStyle(color: OneDarkColors.fg))),
+                  PopupMenuItem(value: 'upload', child: Text('Upload File', style: TextStyle(color: OneDarkColors.fg))),
                   PopupMenuItem(value: 'select', child: Text('Select', style: TextStyle(color: OneDarkColors.fg))),
                   const PopupMenuDivider(),
                   PopupMenuItem(
@@ -660,6 +841,16 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
                       ],
                     ),
                   ),
+                  PopupMenuItem(
+                    value: 'open_drive',
+                    child: Row(
+                      children: [
+                        Icon(Icons.cloud_sync, size: 18, color: _currentProvider == CloudProvider.openDrive ? OneDarkColors.cyan : OneDarkColors.fgDim),
+                        const SizedBox(width: 8),
+                        Text('OpenDrive', style: TextStyle(color: OneDarkColors.fg)),
+                      ],
+                    ),
+                  ),
                   const PopupMenuDivider(),
                   PopupMenuItem(value: 'disconnect', child: Text('Disconnect', style: TextStyle(color: OneDarkColors.red))),
                 ],
@@ -679,6 +870,8 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
                 _providerChip(CloudProvider.googleDrive, Icons.cloud, 'Google Drive'),
                 const SizedBox(width: 8),
                 _providerChip(CloudProvider.dropbox, Icons.storage, 'Dropbox'),
+                const SizedBox(width: 8),
+                _providerChip(CloudProvider.openDrive, Icons.cloud_sync, 'OpenDrive'),
                 const Spacer(),
                 if (_isConnected)
                   Container(
@@ -738,7 +931,8 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
   Widget _providerChip(CloudProvider provider, IconData icon, String label) {
     final isSelected = _currentProvider == provider;
     final isConnected = (provider == CloudProvider.googleDrive && _gDrive.isConnected) ||
-        (provider == CloudProvider.dropbox && _dropbox.isConnected);
+        (provider == CloudProvider.dropbox && _dropbox.isConnected) ||
+        (provider == CloudProvider.openDrive && _openDrive.isConnected);
 
     return GestureDetector(
       onTap: () {
@@ -929,7 +1123,9 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              _currentProvider == CloudProvider.googleDrive ? Icons.cloud : Icons.storage,
+              _currentProvider == CloudProvider.googleDrive ? Icons.cloud
+                  : _currentProvider == CloudProvider.dropbox ? Icons.storage
+                  : Icons.cloud_sync,
               size: 64,
               color: OneDarkColors.fgDim,
             ),
@@ -937,7 +1133,9 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
             Text(
               _currentProvider == CloudProvider.googleDrive
                   ? 'Google Drive'
-                  : 'Dropbox',
+                  : _currentProvider == CloudProvider.dropbox
+                  ? 'Dropbox'
+                  : 'OpenDrive',
               style: TextStyle(
                 color: OneDarkColors.fg,
                 fontSize: 20,
@@ -955,9 +1153,15 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
               child: ElevatedButton.icon(
                 onPressed: _currentProvider == CloudProvider.googleDrive
                     ? _connectGoogleDrive
-                    : _connectDropbox,
+                    : _currentProvider == CloudProvider.dropbox
+                        ? _connectDropbox
+                        : _connectOpenDrive,
                 icon: Icon(
-                  _currentProvider == CloudProvider.googleDrive ? Icons.cloud : Icons.storage,
+                  _currentProvider == CloudProvider.googleDrive
+                      ? Icons.cloud
+                      : _currentProvider == CloudProvider.dropbox
+                          ? Icons.storage
+                          : Icons.cloud_sync,
                   size: 18,
                 ),
                 label: Text('Connect'),
@@ -975,7 +1179,9 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
             Text(
               _currentProvider == CloudProvider.googleDrive
                   ? 'You need a Google Cloud OAuth Client ID'
-                  : 'You need a Dropbox App Key and Secret',
+                  : _currentProvider == CloudProvider.dropbox
+                      ? 'You need a Dropbox App Key and Secret'
+                      : 'You need an OpenDrive API Key',
               style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
             ),
           ],

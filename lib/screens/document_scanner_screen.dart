@@ -57,10 +57,54 @@ class _ScannerState extends State<DocumentScannerScreen> {
           ),
         );
       }
-      // Save to Documents
-      final dir = await getApplicationDocumentsDirectory();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final outPath = p.join(dir.path, 'scan_$timestamp.pdf');
+      // Ask user for filename before saving
+      final nameController = TextEditingController(
+        text: 'scan_${DateTime.now().millisecondsSinceEpoch}.pdf',
+      );
+      final fileName = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: OneDarkColors.bgDark,
+          title: Text('Save PDF', style: TextStyle(color: OneDarkColors.fg)),
+          content: TextField(
+            controller: nameController,
+            style: TextStyle(color: OneDarkColors.fg),
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'Filename',
+              labelStyle: TextStyle(color: OneDarkColors.fgDim),
+              suffixText: '.pdf',
+              filled: true,
+              fillColor: OneDarkColors.bg,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: OneDarkColors.dim),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Cancel', style: TextStyle(color: OneDarkColors.fgDim)),
+            ),
+            TextButton(
+              onPressed: () {
+                var name = nameController.text.trim();
+                if (!name.endsWith('.pdf')) name = '$name.pdf';
+                Navigator.pop(ctx, name);
+              },
+              child: Text('Save', style: TextStyle(color: OneDarkColors.cyan)),
+            ),
+          ],
+        ),
+      );
+      if (fileName == null) {
+        setState(() => _building = false);
+        return;
+      }
+      // Save to Downloads
+      final dir = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
+      final outPath = p.join(dir.path, fileName);
       final file = File(outPath);
       await file.writeAsBytes(await doc.save());
       if (mounted) {
@@ -68,11 +112,27 @@ class _ScannerState extends State<DocumentScannerScreen> {
         showDialog(
           context: context,
           builder: (_) => AlertDialog(
-            backgroundColor: OneDarkColors.bg,
+            backgroundColor: OneDarkColors.bgDark,
             title: Text('PDF Created', style: TextStyle(color: OneDarkColors.fg)),
-            content: Text(
-              '${_pages.length} pages saved as ${p.basename(outPath)}',
-              style: TextStyle(color: OneDarkColors.fgDim),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_pages.length} page${_pages.length != 1 ? 's' : ''}',
+                  style: TextStyle(color: OneDarkColors.fg, fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Saved to:',
+                  style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+                ),
+                const SizedBox(height: 4),
+                SelectableText(
+                  outPath,
+                  style: TextStyle(color: OneDarkColors.cyan, fontSize: 11),
+                ),
+              ],
             ),
             actions: [
               TextButton(

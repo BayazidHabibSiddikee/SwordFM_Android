@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:xterm/xterm.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/terminal_service.dart';
 import '../theme/theme.dart';
 import '../utils/constants.dart' show AppPaths;
@@ -78,6 +79,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
           'PATH': shellPath,
           'HOME': cwd,
           'LANG': 'en_US.UTF-8',
+          'TMPDIR': Directory.systemTemp.path,
         },
       );
 
@@ -176,19 +178,32 @@ class _TerminalScreenState extends State<TerminalScreen> {
                   const SizedBox(height: 16),
                   FilledButton.icon(
                     onPressed: () async {
+                      // Try Termux first
                       final launched = await TerminalService.openTerminalAt(
                         widget.startPath,
                       );
-                      if (!mounted || launched) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: const Text('Termux is not installed'),
-                          backgroundColor: OneDarkColors.amber,
-                        ),
-                      );
+                      if (!mounted) return;
+                      if (launched) return;
+                      // Termux not found — open Play Store
+                      final url = Uri.parse('https://play.google.com/store/apps/details?id=com.termux');
+                      if (await canLaunchUrl(url)) {
+                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                      }
                     },
-                    icon: const Icon(Icons.terminal, size: 16),
-                    label: const Text('Try Termux instead'),
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    label: const Text('Install Termux'),
+                  ),
+                  const SizedBox(height: 8),
+                  // Retry with internal shell
+                  TextButton(
+                    onPressed: () {
+                      setState(() => _spawnError = null);
+                      _startShell();
+                    },
+                    child: Text(
+                      'Retry with temp directory',
+                      style: TextStyle(color: OneDarkColors.cyan, fontSize: 12),
+                    ),
                   ),
                 ],
               ),

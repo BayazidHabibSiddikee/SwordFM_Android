@@ -35,6 +35,8 @@ class _CastScreenState extends State<CastScreen> {
       if (result != null) {
         _devices = result.cast<Map<String, dynamic>>();
       }
+    } on MissingPluginException catch (_) {
+      _error = 'Cast is not available on this device.\nChromecast/DLNA support requires additional setup.';
     } on PlatformException catch (e) {
       _error = e.message;
     } catch (e) {

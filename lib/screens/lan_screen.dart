@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../services/web_share_server.dart';
+import '../services/ftp_server_service.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 import 'qr_scanner_screen.dart';
@@ -24,7 +25,9 @@ class LANSharingScreen extends StatefulWidget {
 
 class _LANSharingScreenState extends State<LANSharingScreen> {
   late final WebShareServer _server = widget.server ?? WebShareServer();
+  late final FtpServerService _ftpServer = FtpServerService();
   String? _statusMessage;
+  String? _ftpStatus;
 
   @override
   void initState() {
@@ -74,6 +77,28 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
       context: context,
       builder: (_) => _AccessLogDialog(entries: _server.accessLog),
     );
+  }
+
+  // ── FTP Server helpers ──────────────────────────────────────────────
+
+  Future<void> _startFtp() async {
+    setState(() => _ftpStatus = 'Starting FTP server…');
+    try {
+      await _ftpServer.start();
+      if (mounted) {
+        setState(() {
+          _ftpStatus =
+              'Running at ftp://${_ftpServer.currentIp ?? '?'}:${_ftpServer.boundPort}';
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _ftpStatus = 'FTP failed: $e');
+    }
+  }
+
+  void _stopFtp() {
+    _ftpServer.stop();
+    setState(() => _ftpStatus = 'FTP server stopped.');
   }
 
   @override
@@ -204,6 +229,83 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
                         ),
                       ],
                     ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // ── FTP Server Section ────────────────────────────────────────
+            Card(
+              color: OneDarkColors.bgDark,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.dns,
+                          size: 20,
+                          color: _ftpServer.isRunning
+                              ? OneDarkColors.green
+                              : OneDarkColors.fgDim,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'FTP Server',
+                          style: TextStyle(
+                            color: OneDarkColors.fg,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (_ftpServer.isRunning)
+                          Text(
+                            'ftp://${_ftpServer.currentIp ?? '?'}:${_ftpServer.boundPort}',
+                            style: TextStyle(color: OneDarkColors.cyan, fontSize: 12),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _ftpServer.isRunning ? null : () => _startFtp(),
+                            icon: const Icon(Icons.play_arrow, size: 18),
+                            label: const Text('Start FTP'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: !_ftpServer.isRunning ? null : () => _stopFtp(),
+                            icon: const Icon(Icons.stop, size: 18),
+                            label: const Text('Stop FTP'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: OneDarkColors.red,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_ftpStatus != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: OneDarkColors.dim,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          _ftpStatus!,
+                          style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

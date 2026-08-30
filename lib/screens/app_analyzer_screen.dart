@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:installed_apps/installed_apps.dart';
 import '../theme/theme.dart';
 
 /// Shows device information and installed apps with details.
@@ -56,28 +57,18 @@ class _AppAnalyzerState extends State<AppAnalyzerScreen> {
   }
 
   Future<List<_AppInfo>> _getInstalledApps() async {
-    // Use /data/app to list installed apps (requires root or ALL_FILES_ACCESS)
     final apps = <_AppInfo>[];
     try {
-      // Try reading package manager output
-      final result = await Process.run('pm', ['list', 'packages', '-f']);
-      final lines = (result.stdout as String).split('\n');
-      for (final line in lines) {
-        if (!line.startsWith('package:')) continue;
-        final parts = line.substring(8).trim().split('=');
-        if (parts.length >= 2) {
-          final path = parts[0].trim();
-          final pkg = parts[1].trim();
-          apps.add(_AppInfo(
-            name: pkg.split('.').last,
-            pkg: pkg,
-            path: path,
-            isSystem: path.startsWith('/system/'),
-          ));
-        }
+      final installedApps = await InstalledApps.getInstalledApps(true, false);
+      for (final app in installedApps) {
+        apps.add(_AppInfo(
+          name: app.name,
+          pkg: app.packageName,
+          version: app.getVersionInfo(),
+        ));
       }
-    } catch (_) {
-      // Fallback: empty
+    } catch (e) {
+      debugPrint('AppAnalyzer: failed to get installed apps: $e');
     }
     return apps;
   }
@@ -87,10 +78,10 @@ class _AppAnalyzerState extends State<AppAnalyzerScreen> {
       switch (sortBy) {
         case 'name':
           _filteredApps.sort((a, b) => a.name.compareTo(b.name));
-        case 'size':
-          _filteredApps.sort((a, b) => a.name.compareTo(b.name));
         case 'pkg':
           _filteredApps.sort((a, b) => a.pkg.compareTo(b.pkg));
+        case 'version':
+          _filteredApps.sort((a, b) => a.version.compareTo(b.version));
       }
     });
   }
@@ -112,6 +103,7 @@ class _AppAnalyzerState extends State<AppAnalyzerScreen> {
             itemBuilder: (_) => [
               PopupMenuItem(value: 'name', child: Text('Sort by Name', style: TextStyle(color: OneDarkColors.fg))),
               PopupMenuItem(value: 'pkg', child: Text('Sort by Package', style: TextStyle(color: OneDarkColors.fg))),
+              PopupMenuItem(value: 'version', child: Text('Sort by Install Date', style: TextStyle(color: OneDarkColors.fg))),
             ],
           ),
         ],
@@ -187,9 +179,9 @@ class _AppAnalyzerState extends State<AppAnalyzerScreen> {
                       return ListTile(
                         dense: true,
                         leading: Icon(
-                          app.isSystem ? Icons.android : Icons.apps,
+                          Icons.apps,
                           size: 20,
-                          color: app.isSystem ? OneDarkColors.fgDim : OneDarkColors.cyan,
+                          color: OneDarkColors.cyan,
                         ),
                         title: Text(
                           app.name,
@@ -197,20 +189,10 @@ class _AppAnalyzerState extends State<AppAnalyzerScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         subtitle: Text(
-                          app.pkg,
+                          app.version.isNotEmpty ? '${app.pkg}  v${app.version}' : app.pkg,
                           style: TextStyle(color: OneDarkColors.fgDim, fontSize: 10),
                           overflow: TextOverflow.ellipsis,
                         ),
-                        trailing: app.isSystem
-                            ? Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: OneDarkColors.amber.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text('SYS', style: TextStyle(color: OneDarkColors.amber, fontSize: 9)),
-                              )
-                            : null,
                       );
                     },
                   ),
@@ -224,7 +206,6 @@ class _AppAnalyzerState extends State<AppAnalyzerScreen> {
 class _AppInfo {
   final String name;
   final String pkg;
-  final String path;
-  final bool isSystem;
-  const _AppInfo({required this.name, required this.pkg, required this.path, this.isSystem = false});
+  final String version;
+  const _AppInfo({required this.name, required this.pkg, this.version = ''});
 }

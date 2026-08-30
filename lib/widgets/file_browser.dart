@@ -18,6 +18,7 @@ import '../screens/terminal_screen.dart';
 import '../screens/folder_graph_screen.dart';
 import '../screens/lan_screen.dart';
 import '../screens/archive_browser_screen.dart';
+import '../screens/photo_editor_screen.dart';
 import 'preview_panel.dart';
 import 'convert_dialog.dart';
 import 'package:path/path.dart' as p;
@@ -1137,6 +1138,14 @@ class _FileBrowserState extends State<FileBrowser> {
     ).push(MaterialPageRoute(builder: (_) => TerminalScreen(startPath: path)));
   }
 
+  void _openPhotoEditor(FileItem item) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PhotoEditorScreen(filePath: item.path),
+      ),
+    );
+  }
+
   /// Ctrl+L: jump to a typed path.
   void _showGoToPathDialog() {
     final controller = TextEditingController(text: _currentPath);
@@ -1804,6 +1813,12 @@ class _FileBrowserState extends State<FileBrowser> {
             'Open With…',
             Icons.open_with,
             () => _showOpenWithMenu(item, tapPosition),
+          ),
+        if (!item.isDirectory && item.isImage)
+          _menuItem(
+            'Edit Image…',
+            Icons.photo_camera_back,
+            () => _openPhotoEditor(item),
           ),
         if (item.isDirectory)
           _menuItem(
@@ -2705,7 +2720,7 @@ class _FileBrowserState extends State<FileBrowser> {
           padding: const EdgeInsets.all(8),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
-            childAspectRatio: crossAxisCount >= 6 ? 0.75 : 0.85,
+            childAspectRatio: crossAxisCount >= 6 ? 0.65 : 0.72,
             crossAxisSpacing: 4,
             mainAxisSpacing: 4,
           ),
@@ -2739,19 +2754,28 @@ class _FileBrowserState extends State<FileBrowser> {
                         if (item.isImage)
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
-                            child: Image.file(
-                              File(item.path),
-                              height: 96,
-                              width: 96,
-                              fit: BoxFit.cover,
-                              // Decode at thumbnail size — full-res photos are
-                              // slow to decode and would jank the grid.
-                              cacheWidth: 200,
-                              errorBuilder: (_, _, _) => Icon(
-                                item.icon,
-                                size: 32,
-                                color: item.iconColor,
-                              ),
+                            child: LayoutBuilder(
+                              builder: (ctx, constraints) {
+                                final size = constraints.maxWidth > 0
+                                    ? constraints.maxWidth
+                                    : 64.0;
+                                return ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxHeight: size * 0.75,
+                                    maxWidth: size,
+                                  ),
+                                  child: Image.file(
+                                    File(item.path),
+                                    fit: BoxFit.cover,
+                                    cacheWidth: 200,
+                                    errorBuilder: (_, __, ___) => Icon(
+                                      item.icon,
+                                      size: 32,
+                                      color: item.iconColor,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
                           )
                         else

@@ -23,7 +23,6 @@ import 'screens/notepad_screen.dart';
 import 'screens/document_scanner_screen.dart';
 import 'screens/app_analyzer_screen.dart';
 import 'screens/cast_screen.dart';
-import 'screens/ftp_server_screen.dart';
 import 'screens/cloud_browser_screen.dart';
 import 'services/widget_service.dart';
 import 'services/entitlement_service.dart';
@@ -84,7 +83,7 @@ class SwordFM extends StatelessWidget {
                 title: 'SwordFM',
                 debugShowCheckedModeBanner: false,
                 theme: theme,
-                home: MainScreen(key: ValueKey('main_$currentThemeMode')),
+                home: const MainScreen(),
               ),
             );
           },
@@ -503,12 +502,27 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           ),
                                         ),
                                       ),
+                                      const Divider(),
+                                      // ── Network section ─────────────────────
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        child: Text(
+                                          'Network',
+                                          style: TextStyle(
+                                            color: onSurfaceDim,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ),
                                       _sidebarAction(
-                                        Icons.dns,
-                                        'FTP Server',
+                                        Icons.wifi,
+                                        'LAN Sharing',
                                         () => Navigator.of(context).push(
                                           MaterialPageRoute(
-                                            builder: (_) => const FtpServerScreen(),
+                                            builder: (_) => const LANSharingScreen(),
                                           ),
                                         ),
                                       ),
@@ -835,6 +849,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             SettingsScreen(),
             StorageAnalysisScreen(rootPath: AppPaths.home),
             const NetworkScreen(),
+            const CloudBrowserScreen(),
             // Terminal — lazy: only spawns the PTY shell after first visit.
             _terminalVisited
                 ? TerminalScreen(startPath: AppPaths.home)
@@ -861,6 +876,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Storage'),
           NavigationDestination(icon: Icon(Icons.cloud), label: 'Network'),
+          NavigationDestination(icon: Icon(Icons.cloud_queue), label: 'Cloud'),
           NavigationDestination(icon: Icon(Icons.terminal), label: 'Terminal'),
         ],
       ),

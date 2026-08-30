@@ -105,6 +105,8 @@ Future<void> saveThemeMode(String mode) async {
   try {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kThemePref, mode);
+    // Clear manual override so auto-theme can take over again on next schedule change.
+    await prefs.setBool(_kManualOverrideKey, false);
   } catch (_) {}
 }
 
@@ -113,6 +115,9 @@ Future<void> saveThemeMode(String mode) async {
 const _kAutoThemeEnabledKey = 'auto_theme_enabled';
 const _kAutoThemeStartKey = 'auto_theme_start';
 const _kAutoThemeEndKey = 'auto_theme_end';
+// When true, auto-theme is suppressed for the current session so a manual
+// toggle isn't immediately overwritten on app resume.
+const _kManualOverrideKey = 'auto_theme_manual_override';
 
 /// Loads auto-theme settings and returns (enabled, startHour, startMinute, endHour, endMinute).
 Future<(bool, int, int, int, int)> loadAutoThemeSettings() async {
@@ -158,6 +163,12 @@ Future<void> saveAutoThemeSettings({
 Future<bool> checkAutoTheme() async {
   final (enabled, startH, startM, endH, endM) = await loadAutoThemeSettings();
   if (!enabled) return false;
+
+  // Respect a manual override set when the user toggles theme in Settings.
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_kManualOverrideKey) == true) return false;
+  } catch (_) {}
 
   final now = DateTime.now();
   final currentMinutes = now.hour * 60 + now.minute;

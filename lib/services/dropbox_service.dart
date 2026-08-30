@@ -1,46 +1,67 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:dio/dio.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'google_drive_service.dart' show CloudFile;
 
-/// Dropbox service using direct REST API (no SDK dependency).
-/// Uses OAuth2 PKCE flow via browser for authentication.
+/// Dropbox service — direct REST API via Dio, no SDK dependency.
+/// Uses OAuth2 flow initiated via external browser with a custom-scheme redirect.
 class DropboxService {
-  static const _kAccessTokenKey = 'dropbox_access_token';
-  static const _kRefreshTokenKey = 'dropbox_refresh_token';
-  static const _kAppKeyKey = 'dropbox_app_key';
-  static const _kAppSecretKey = 'dropbox_app_secret';
-  static const _kExpiryKey = 'dropbox_token_expiry';
+  static const _kAppKeyKey = 'swordfm_dropbox_app_key';
+  static const _kAppSecretKey = 'swordfm_dropbox_app_secret';
+  static const _kAccessTokenKey = 'swordfm_dropbox_access_token';
+  static const _kRefreshTokenKey = 'swordfm_dropbox_refresh_token';
+  static const _kExpiryMsKey = 'swordfm_dropbox_token_expiry_ms';
+  static const _kAccountInfoKey = 'swordfm_dropbox_account_info';
+
+  /// Custom scheme for OAuth callback — must match AndroidManifest.xml intent-filter.
+  static const String redirectScheme = 'storagesfm';
+  static const String redirectHost = 'dropbox-callback';
+  static String get redirectUri => '$redirectScheme://$redirectHost';
+
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  final Dio _dio = Dio(BaseOptions(
+    baseUrl: 'https://api.dropboxapi.com/2',
+    contentType: 'application/json',
+  ));
 
   String? _appKey;
   String? _appSecret;
   String? _accessToken;
   String? _refreshToken;
-  DateTime? _tokenExpiry;
+  int? _tokenExpiryMs;
+  Map<String, dynamic>? _accountInfo;
   bool _isConnected = false;
 
   bool get isConnected => _isConnected;
   String? get savedAppKey => _appKey;
   String? get savedAppSecret => _appSecret;
+  String? get accountEmail => _accountInfo?['email'] as String?;
+  String? get accountName => _accountInfo?['display_name'] as String?;
 
-  /// Load saved configuration.
+  // ── Config persistence ───────────────────────────────────────────────
+
   Future<void> loadConfig() async {
     final prefs = await SharedPreferences.getInstance();
     _appKey = prefs.getString(_kAppKeyKey);
     _appSecret = prefs.getString(_kAppSecretKey);
-    _accessToken = prefs.getString(_kAccessTokenKey);
-    _refreshToken = prefs.getString(_kRefreshTokenKey);
-    final expiryMs = prefs.getInt(_kExpiryKey);
-    if (expiryMs != null) {
-      _tokenExpiry = DateTime.fromMillisecondsSinceEpoch(expiryMs);
+    _accessToken = await _secureStorage.read(key: _kAccessTokenKey) ?? prefs.getString(_kAccessTokenKey);
+    _refreshToken = await _secureStorage.read(key: _kRefreshTokenKey) ?? prefs.getString(_kRefreshTokenKey);
+    final expiry = prefs.getInt(_kExpiryMsKey);
+    if (expiry != null) _tokenExpiryMs = expiry;
+    final acctJson = prefs.getString(_kAccountInfoKey);
+    if (acctJson != null) {
+      try {
+        _accountInfo = json.decode(acctJson) as Map<String, dynamic>;
+      } catch (_) {}
     }
 
-    // Check if token is still valid
-    if (_accessToken != null && _tokenExpiry != null) {
-      if (DateTime.now().isBefore(_tokenExpiry!)) {
+    if (_accessToken != null && _tokenExpiryMs != null) {
+      if (DateTime.now().millisecondsSinceEpoch < _tokenExpiryMs!) {
         _isConnected = true;
       } else if (_refreshToken != null) {
         await _refreshAccessToken();
@@ -48,7 +69,6 @@ class DropboxService {
     }
   }
 
-  /// Save app credentials.
   Future<void> saveConfig({required String appKey, required String appSecret}) async {
     _appKey = appKey;
     _appSecret = appSecret;
@@ -57,24 +77,45 @@ class DropboxService {
     await prefs.setString(_kAppSecretKey, appSecret);
   }
 
-  /// Start OAuth2 PKCE authorization flow.
+  Future<void> clearConfig() async {
+    _appKey = null;
+    _appSecret = null;
+    _accessToken = null;
+    _refreshToken = null;
+    _tokenExpiryMs = null;
+    _isConnected = false;
+    _accountInfo = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kAppKeyKey);
+    await prefs.remove(_kAppSecretKey);
+    await prefs.remove(_kAccessTokenKey);
+    await prefs.remove(_kRefreshTokenKey);
+    await prefs.remove(_kExpiryMsKey);
+    await prefs.remove(_kAccountInfoKey);
+    await _secureStorage.delete(key: _kAccessTokenKey);
+    await _secureStorage.delete(key: _kRefreshTokenKey);
+  }
+
+  // ── OAuth flow ───────────────────────────────────────────────────────
+
+  /// Open Dropbox OAuth authorize page in an external browser.
+  /// After approval the user is redirected to [redirectUri].
   Future<bool> connect() async {
     if (_appKey == null || _appKey!.isEmpty) return false;
 
+    final state = _randomHex(16);
     try {
-      // Dropbox OAuth2 with PKCE
       final authUrl = Uri.parse(
         'https://www.dropbox.com/oauth2/authorize'
         '?client_id=$_appKey'
         '&response_type=code'
         '&token_access_type=offline'
-        '&redirect_uri=storagesfm://dropbox-callback',
+        '&state=$state'
+        '&redirect_uri=${Uri.encodeComponent(redirectUri)}',
       );
 
       if (await canLaunchUrl(authUrl)) {
         await launchUrl(authUrl, mode: LaunchMode.externalApplication);
-        // Note: In production, you'd use app links / deep links to capture the callback.
-        // For now, user pastes the auth code manually.
         return true;
       }
       return false;
@@ -84,79 +125,77 @@ class DropboxService {
     }
   }
 
-  /// Exchange authorization code for tokens.
-  Future<bool> exchangeCode(String authCode) async {
+  /// Called when the app receives the OAuth redirect URI.
+  /// Parses the authorization code and exchanges it for tokens.
+  Future<bool> handleRedirect(Uri uri) async {
     if (_appKey == null || _appSecret == null) return false;
 
+    final error = uri.queryParameters['error'];
+    if (error != null) {
+      debugPrint('Dropbox OAuth error: $error — ${uri.queryParameters['error_description']}');
+      return false;
+    }
+
+    final code = uri.queryParameters['code'];
+    if (code == null || code.isEmpty) return false;
+
+    return _exchangeCode(code);
+  }
+
+  Future<bool> _exchangeCode(String code) async {
     try {
-      final response = await http.post(
-        Uri.parse('https://api.dropbox.com/oauth2/token'),
-        body: {
-          'code': authCode,
+      final resp = await _dio.post(
+        'https://api.dropbox.com/oauth2/token',
+        data: FormData.fromMap({
+          'code': code,
           'grant_type': 'authorization_code',
           'client_id': _appKey!,
           'client_secret': _appSecret!,
-          'redirect_uri': 'storagesfm://dropbox-callback',
-        },
+          'redirect_uri': redirectUri,
+        }),
       );
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        _accessToken = data['access_token'];
-        _refreshToken = data['refresh_token'];
-        final expiresIn = data['expires_in'] as int? ?? 14400;
-        _tokenExpiry = DateTime.now().add(Duration(seconds: expiresIn));
-        _isConnected = true;
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_kAccessTokenKey, _accessToken!);
-        if (_refreshToken != null) {
-          await prefs.setString(_kRefreshTokenKey, _refreshToken!);
-        }
-        await prefs.setInt(_kExpiryKey, _tokenExpiry!.millisecondsSinceEpoch);
-
-        return true;
+      if (resp.statusCode != 200) {
+        debugPrint('Dropbox token exchange failed: ${resp.data}');
+        return false;
       }
-      debugPrint('Dropbox token exchange failed: ${response.body}');
-      return false;
+
+      final data = resp.data as Map<String, dynamic>;
+      _accessToken = data['access_token'] as String?;
+      _refreshToken = data['refresh_token'] as String?;
+      final expiresIn = (data['expires_in'] as num?)?.toInt() ?? 14400;
+      _tokenExpiryMs = DateTime.now().millisecondsSinceEpoch + expiresIn * 1000;
+      _isConnected = true;
+
+      await _persistTokens();
+      return true;
     } catch (e) {
-      debugPrint('Dropbox exchangeCode error: $e');
+      debugPrint('Dropbox _exchangeCode error: $e');
       return false;
     }
   }
 
-  /// Refresh access token using refresh token.
   Future<bool> _refreshAccessToken() async {
-    if (_refreshToken == null || _appKey == null || _appSecret == null) {
-      return false;
-    }
-
+    if (_refreshToken == null || _appKey == null || _appSecret == null) return false;
     try {
-      final response = await http.post(
-        Uri.parse('https://api.dropbox.com/oauth2/token'),
-        body: {
+      final resp = await _dio.post(
+        'https://api.dropbox.com/oauth2/token',
+        data: FormData.fromMap({
           'grant_type': 'refresh_token',
           'refresh_token': _refreshToken!,
           'client_id': _appKey!,
           'client_secret': _appSecret!,
-        },
+        }),
       );
+      if (resp.statusCode != 200) return false;
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        _accessToken = data['access_token'];
-        final expiresIn = data['expires_in'] as int? ?? 14400;
-        _tokenExpiry = DateTime.now().add(Duration(seconds: expiresIn));
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_kAccessTokenKey, _accessToken!);
-        await prefs.setInt(_kExpiryKey, _tokenExpiry!.millisecondsSinceEpoch);
-
-        _isConnected = true;
-        return true;
-      }
-      _isConnected = false;
-      return false;
+      final data = resp.data as Map<String, dynamic>;
+      _accessToken = data['access_token'] as String?;
+      final expiresIn = (data['expires_in'] as num?)?.toInt() ?? 14400;
+      _tokenExpiryMs = DateTime.now().millisecondsSinceEpoch + expiresIn * 1000;
+      _isConnected = true;
+      await _persistTokens();
+      return true;
     } catch (e) {
       debugPrint('Dropbox _refreshAccessToken error: $e');
       _isConnected = false;
@@ -164,38 +203,48 @@ class DropboxService {
     }
   }
 
-  /// Ensure we have a valid access token.
+  Future<void> _persistTokens() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_accessToken != null) {
+      await _secureStorage.write(key: _kAccessTokenKey, value: _accessToken!);
+      await prefs.setString(_kAccessTokenKey, _accessToken!);
+    }
+    if (_refreshToken != null) {
+      await _secureStorage.write(key: _kRefreshTokenKey, value: _refreshToken!);
+      await prefs.setString(_kRefreshTokenKey, _refreshToken!);
+    }
+    if (_tokenExpiryMs != null) {
+      await prefs.setInt(_kExpiryMsKey, _tokenExpiryMs!);
+    }
+  }
+
   Future<bool> _ensureToken() async {
     if (_accessToken == null) return false;
-    if (_tokenExpiry != null && DateTime.now().isAfter(_tokenExpiry!)) {
+    if (_tokenExpiryMs != null &&
+        DateTime.now().millisecondsSinceEpoch >= _tokenExpiryMs!) {
       return await _refreshAccessToken();
     }
     return true;
   }
 
-  /// Make an authenticated POST request to Dropbox API.
-  Future<Map<String, dynamic>?> _apiPost(String endpoint, {Map<String, dynamic>? body}) async {
+  // ── API helpers ──────────────────────────────────────────────────────
+
+  Future<T?> _apiPost<T>(String endpoint, {Map<String, dynamic>? body}) async {
     if (!await _ensureToken()) return null;
-
     try {
-      final response = await http.post(
-        Uri.parse('https://api.dropboxapi.com/2/$endpoint'),
-        headers: {
-          'Authorization': 'Bearer $_accessToken',
-          'Content-Type': 'application/json',
-        },
-        body: body != null ? json.encode(body) : null,
+      final resp = await _dio.post(
+        '/$endpoint',
+        data: body != null ? json.encode(body) : null,
+        options: Options(headers: {'Authorization': 'Bearer $_accessToken'}),
       );
-
-      if (response.statusCode == 200) {
-        return json.decode(response.body);
-      } else if (response.statusCode == 401) {
-        // Token expired, try refresh
+      if (resp.statusCode == 200) {
+        return resp.data as T?;
+      } else if (resp.statusCode == 401) {
         if (await _refreshAccessToken()) {
-          return _apiPost(endpoint, body: body);
+          return _apiPost<T>(endpoint, body: body);
         }
       }
-      debugPrint('Dropbox API error ($endpoint): ${response.statusCode} ${response.body}');
+      debugPrint('Dropbox API error ($endpoint): ${resp.statusCode} ${resp.data}');
       return null;
     } catch (e) {
       debugPrint('Dropbox _apiPost error: $e');
@@ -203,64 +252,59 @@ class DropboxService {
     }
   }
 
-  /// List files in a folder.
+  // ── Public file operations ───────────────────────────────────────────
+
   Future<List<CloudFile>> listFolder({String? path}) async {
     final folderPath = path ?? '';
-    final result = await _apiPost(
+    final result = await _apiPost<Map<String, dynamic>>(
       'files/list_folder',
       body: {
         'path': folderPath,
+        'recursive': false,
         'include_media_info': true,
         'include_deleted': false,
+        'include_hidden': false,
       },
     );
-
     if (result == null) return [];
 
     final entries = result['entries'] as List? ?? [];
-    return entries.map((entry) {
-      final tag = entry['.tag'] as String? ?? 'file';
+    return entries.map((e) {
+      final tag = e['.tag'] as String? ?? 'file';
       return CloudFile(
-        id: entry['id'] ?? '',
-        name: entry['name'] ?? 'Unknown',
+        id: e['id'] ?? '',
+        name: e['name'] ?? 'Unknown',
         isDirectory: tag == 'folder',
-        size: entry['size'] as int? ?? 0,
-        modifiedTime: entry['server_modified'] != null
-            ? DateTime.tryParse(entry['server_modified'])
+        size: (e['size'] as num?)?.toInt() ?? 0,
+        modifiedTime: e['server_modified'] != null
+            ? DateTime.tryParse(e['server_modified'])
             : null,
         mimeType: tag == 'folder'
             ? 'application/directory'
-            : (entry['content_type'] as String? ?? 'application/octet-stream'),
-        parentPath: folderPath,
+            : (e['content_type'] as String? ?? 'application/octet-stream'),
+        parentPath: folderPath.isEmpty ? '/' : folderPath,
       );
     }).toList();
   }
 
-  /// Create a folder.
-  Future<String?> createFolder(String name, {String? parentPath}) async {
-    final folderPath = '${parentPath ?? ''}/$name';
-    final result = await _apiPost(
+  Future<String?> createFolder(String name, {String parentPath = ''}) async {
+    final fullPath = parentPath.isEmpty ? '/$name' : '$parentPath/$name';
+    final result = await _apiPost<Map<String, dynamic>>(
       'files/create_folder_v2',
-      body: {'path': folderPath},
+      body: {'path': fullPath},
     );
-
     if (result != null) {
-      final metadata = result['metadata'];
-      return metadata?['id'];
+      final metadata = result['metadata'] as Map<String, dynamic>?;
+      return metadata?['path_display'] as String? ?? fullPath;
     }
     return null;
   }
 
-  /// Delete a file/folder.
   Future<bool> delete(String path) async {
-    final result = await _apiPost(
-      'files/delete_v2',
-      body: {'path': path},
-    );
+    final result = await _apiPost('files/delete_v2', body: {'path': path});
     return result != null;
   }
 
-  /// Rename/move a file.
   Future<bool> rename(String fromPath, String toPath) async {
     final result = await _apiPost(
       'files/move_v2',
@@ -269,99 +313,118 @@ class DropboxService {
         'to_path': toPath,
         'allow_shared_folder': true,
         'autorename': false,
-        'allow_ownership_transfer': false,
       },
     );
     return result != null;
   }
 
-  /// Get temporary link for downloading.
   Future<String?> getTemporaryLink(String path) async {
-    final result = await _apiPost(
+    final result = await _apiPost<Map<String, dynamic>>(
       'files/get_temporary_link',
       body: {'path': path},
     );
-
-    if (result != null) {
-      return result['link'];
-    }
-    return null;
+    return result?['link'] as String?;
   }
 
-  /// Get shared link for viewing.
-  Future<String?> getSharedLink(String path) async {
-    try {
-      final response = await http.post(
-        Uri.parse('https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings'),
-        headers: {
-          'Authorization': 'Bearer $_accessToken',
-          'Content-Type': 'application/json',
-        },
-        body: json.encode({
-          'path': path,
-          'settings': {
-            'requested_visibility': 'public',
-          },
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        return data['url'];
-      } else if (response.statusCode == 409) {
-        // Link already exists, get existing one
-        return await _getExistingSharedLink(path);
-      }
-    } catch (e) {
-      debugPrint('Dropbox getSharedLink error: $e');
-    }
-    return null;
-  }
-
-  /// Get existing shared link if one already exists.
-  Future<String?> _getExistingSharedLink(String path) async {
-    try {
-      final response = await http.post(
-        Uri.parse('https://api.dropboxapi.com/2/sharing/list_shared_links'),
-        headers: {
-          'Authorization': 'Bearer $_accessToken',
-          'Content-Type': 'application/json',
-        },
-        body: json.encode({'path': path}),
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final links = data['links'] as List? ?? [];
-        if (links.isNotEmpty) {
-          return links[0]['url'];
-        }
-      }
-    } catch (e) {
-      debugPrint('Dropbox _getExistingSharedLink error: $e');
-    }
-    return null;
-  }
-
-  /// Get account info.
   Future<Map<String, dynamic>?> getAccountInfo() async {
-    return _apiPost('users/get_current_account');
+    if (_accountInfo != null) return _accountInfo;
+    final result = await _apiPost<Map<String, dynamic>>('users/get_current_account');
+    if (result != null) {
+      _accountInfo = result;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kAccountInfoKey, json.encode(result));
+    }
+    return result;
   }
 
-  /// Get space usage.
   Future<Map<String, dynamic>?> getSpaceUsage() async {
-    return _apiPost('users/get_space_usage');
+    return _apiPost<Map<String, dynamic>>('users/get_space_usage');
   }
 
-  /// Disconnect.
+  /// Upload local bytes to Dropbox at [remotePath] (must start with /).
+  Future<CloudFile?> uploadFile(
+    Uint8List data,
+    String remotePath, {
+    String mimeType = 'application/octet-stream',
+  }) async {
+    if (!await _ensureToken()) return null;
+    try {
+      final resp = await _dio.put(
+        '/files/upload',
+        data: data,
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $_accessToken',
+            'Dropbox-API-Arg': json.encode({'path': remotePath, 'mode': 'add'}),
+          },
+        ),
+      );
+      if (resp.statusCode == 200) {
+        final metadata = resp.data as Map<String, dynamic>;
+        final name = metadata['name'] as String? ?? remotePath.split('/').last;
+        final parent = remotePath.contains('/')
+            ? remotePath.substring(0, remotePath.lastIndexOf('/'))
+            : '/';
+        return CloudFile(
+          id: metadata['id'] ?? '',
+          name: name,
+          isDirectory: false,
+          size: (metadata['size'] as num?)?.toInt() ?? 0,
+          modifiedTime: metadata['server_modified'] != null
+              ? DateTime.tryParse(metadata['server_modified'])
+              : null,
+          mimeType: mimeType,
+          parentPath: parent,
+        );
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Dropbox uploadFile error: $e');
+      return null;
+    }
+  }
+
+  /// Download file bytes from Dropbox at [path]. Returns null on failure.
+  Future<Uint8List?> downloadBytes(String path) async {
+    if (!await _ensureToken()) return null;
+    try {
+      final resp = await _dio.get(
+        '/files/download',
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $_accessToken',
+            'Dropbox-API-Arg': json.encode({'path': path}),
+          },
+          responseType: ResponseType.bytes,
+        ),
+      );
+      if (resp.statusCode == 200) return resp.data as Uint8List;
+      return null;
+    } catch (e) {
+      debugPrint('Dropbox downloadBytes error: $e');
+      return null;
+    }
+  }
+
+  // ── Disconnect ───────────────────────────────────────────────────────
+
   Future<void> disconnect() async {
     _accessToken = null;
     _refreshToken = null;
-    _tokenExpiry = null;
+    _tokenExpiryMs = null;
     _isConnected = false;
+    _accountInfo = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kAccessTokenKey);
     await prefs.remove(_kRefreshTokenKey);
-    await prefs.remove(_kExpiryKey);
+    await prefs.remove(_kExpiryMsKey);
+    await prefs.remove(_kAccountInfoKey);
+    await _secureStorage.delete(key: _kAccessTokenKey);
+    await _secureStorage.delete(key: _kRefreshTokenKey);
+  }
+
+  static String _randomHex(int byteCount) {
+    final bytes = List<int>.generate(byteCount, (_) => DateTime.now().millisecond % 256);
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 }

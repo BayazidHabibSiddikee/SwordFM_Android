@@ -145,6 +145,28 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             // APK / XAPK installation via PackageInstaller.
             MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/installer")
                 .setMethodCallHandler(this)
+            // Cloud storage OAuth redirect delivery.
+            MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/cloud")
+                .setMethodCallHandler { call, result ->
+                    if (call.method == "getCloudCallbackScheme") {
+                        result.success("storagesfm://dropbox-callback")
+                    } else {
+                        result.notImplemented()
+                    }
+                    true
+                }
+            // Cast stub — returns empty list until Cast SDK is integrated.
+            MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/cast")
+                .setMethodCallHandler { call, result ->
+                    when (call.method) {
+                        "discoverDevices" -> result.success(emptyList<Map<String, Any>>())
+                        "connect" -> result.success(false)
+                        "disconnect" -> result.success(true)
+                        "castUrl" -> result.success(false)
+                        else -> result.notImplemented()
+                    }
+                    true
+                }
         }
     }
 
@@ -342,6 +364,22 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             else -> {
                 result.notImplemented()
             }
+        }
+    }
+
+    /**
+     * Handles deep-link / OAuth redirect intents.
+     * When Dropbox redirects to storagesfm://dropbox-callback we forward the URI
+     * to Dart so CloudBrowserScreen can complete the token exchange.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val uri = intent.data ?: return
+        if (uri.scheme == "storagesfm" && (uri.host == "dropbox-callback" || uri.host == "opendrive-callback")) {
+            // Use the dedicated cloud channel so MainActivity keeps its
+            // existing bluetooth-channel focus for file-picker calls.
+            MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, "com.swordfm/cloud")
+                .invokeMethod("onOAuthRedirect", mapOf("uri" to uri.toString()))
         }
     }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/theme.dart';
 
 /// QR Scanner screen for receiving files from LAN sharing.
@@ -29,6 +30,10 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     } catch (_) {}
 
     if (url != null && url.scheme.isNotEmpty) {
+      // Launch the URL immediately so the user sees the result.
+      try {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } catch (_) {}
       Navigator.pop(context, code);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fa;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 import '../services/auth_service.dart';
@@ -20,7 +21,6 @@ import 'auth_screen.dart';
 import 'duplicates_screen.dart';
 import 'app_analyzer_screen.dart';
 import 'document_scanner_screen.dart';
-import 'ftp_server_screen.dart';
 import 'cast_screen.dart';
 import 'notepad_screen.dart';
 import 'cloud_browser_screen.dart';
@@ -207,6 +207,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () async {
               final newMode = isDarkTheme ? 'light' : 'dark';
               await saveThemeMode(newMode);
+              // Set manual override so auto-theme doesn't immediately undo it.
+              try {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('auto_theme_manual_override', true);
+              } catch (_) {}
               themeNotifier.value++;
             },
           ),
@@ -449,16 +454,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const DocumentScannerScreen()),
-            ),
-          ),
-          const SizedBox(height: 8),
-          _settingTile(
-            icon: Icons.dns,
-            title: 'FTP Server',
-            subtitle: 'Transfer files from a PC on the same Wi-Fi',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const FtpServerScreen()),
             ),
           ),
           const SizedBox(height: 8),
