@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../theme/theme.dart';
+import '../services/entitlement_service.dart';
 import '../services/donation_service.dart';
 
 /// A widget that gates premium features.
@@ -9,19 +11,53 @@ import '../services/donation_service.dart';
 class PremiumGate extends StatelessWidget {
   final Widget child;
   final String featureName;
-  final VoidCallback onUnlocked;
 
   const PremiumGate({
     super.key,
     required this.child,
     required this.featureName,
-    required this.onUnlocked,
   });
 
   @override
   Widget build(BuildContext context) {
-    // In production, check entitlement here
-    return child;
+    final ent = context.watch<EntitlementService>();
+    if (ent.isPremium) return child;
+
+    return GestureDetector(
+      onTap: () => _showPremiumDialog(context),
+      child: AbsorbPointer(child: Opacity(opacity: 0.5, child: child)),
+    );
+  }
+
+  void _showPremiumDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: Text('Premium Feature', style: TextStyle(color: OneDarkColors.amber)),
+        content: Text(
+          '$featureName is a premium feature. Support development to unlock it.',
+          style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              DonationService.showDonateDialog(context);
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: OneDarkColors.amber,
+              foregroundColor: OneDarkColors.bg,
+            ),
+            child: const Text('Get Premium'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Shows the premium upsell dialog.
