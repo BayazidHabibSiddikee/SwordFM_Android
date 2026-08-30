@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import '../services/entitlement_service.dart';
 import '../theme/theme.dart';
 
 /// Auth screen with Login and Signup tabs.
@@ -75,10 +76,15 @@ class _AuthScreenState extends State<AuthScreen>
       _errorMessage = null;
     });
     try {
-      await AuthService().signIn(
+      final cred = await AuthService().signIn(
         email: _emailCtrl.text.trim(),
         password: _passCtrl.text,
       );
+      // Load entitlement from Firestore after successful sign-in.
+      if (cred?.user != null) {
+        final ent = EntitlementService();
+        await ent.loadEntitlement(cred!.user!.uid);
+      }
       if (mounted) {
         Navigator.pop(context, true);
       }

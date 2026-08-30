@@ -127,12 +127,15 @@ void main() {
       if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
     });
 
-    test('toText reads file and strips markdown', () async {
+    test('toText writes stripped markdown to file', () async {
       final result = await DocConverter.toText(mdFile.path);
       expect(result, isNotNull);
-      expect(result, contains('Sample'));
-      expect(result, contains('world'));
-      expect(result, isNot(contains('**')));
+      expect(result, endsWith('.txt'));
+      expect(File(result!).existsSync(), isTrue);
+      final content = await File(result).readAsString();
+      expect(content, contains('Sample'));
+      expect(content, contains('world'));
+      expect(content, isNot(contains('**')));
     });
 
     test('toPdf generates a PDF file', () async {

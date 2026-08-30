@@ -57,7 +57,10 @@ class DocConverter {
     final file = File(sourcePath);
     if (!await file.exists()) return null;
     final content = await file.readAsString();
-    return markdownToText(_preprocessForMarkdown(sourcePath, content));
+    final text = markdownToText(_preprocessForMarkdown(sourcePath, content));
+    final outPath = p.setExtension(sourcePath, '.txt');
+    await File(outPath).writeAsString(text);
+    return outPath;
   }
 
   /// Extracts the plain text of a `.docx` file (word/document.xml inside the
@@ -620,7 +623,7 @@ class DocConverter {
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        build: (pw.Context context) => widgets,
+        build: (pw.Context context) => widgets.toList(),
       ),
     );
     return doc.save();

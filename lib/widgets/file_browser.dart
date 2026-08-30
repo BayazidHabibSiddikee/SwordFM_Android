@@ -1949,38 +1949,6 @@ class _FileBrowserState extends State<FileBrowser> {
         const PopupMenuDivider(),
         if (item.isText || item.extension == '.docx')
           _menuItem('Convert…', Icons.transform, () {
-            final ent = context.read<EntitlementService>();
-            if (!ent.isPremium) {
-              showDialog(
-                context: context,
-                builder: (_) => AlertDialog(
-                  backgroundColor: OneDarkColors.bg,
-                  title: Text('Premium Feature', style: TextStyle(color: OneDarkColors.amber)),
-                  content: Text(
-                    'File conversion is a premium feature. Support development to unlock PDF, DOCX, HTML and TXT conversions.',
-                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('Close'),
-                    ),
-                    FilledButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        DonationService.showDonateDialog(context);
-                      },
-                      style: FilledButton.styleFrom(
-                        backgroundColor: OneDarkColors.amber,
-                        foregroundColor: OneDarkColors.bg,
-                      ),
-                      child: const Text('Get Premium'),
-                    ),
-                  ],
-                ),
-              );
-              return;
-            }
             Navigator.push(
               context,
               MaterialPageRoute(
