@@ -53,6 +53,10 @@ class _FolderGraphScreenState extends State<FolderGraphScreen> {
   bool _isLoading = true;
   String? _error;
   double _zoom = 1.0;
+  // Pan translation applied to the whole graph (drag on empty space).
+  Offset _panOffset = Offset.zero;
+  // Index of the node currently being dragged (-1 = none, null = panning).
+  int? _dragNodeIndex;
   String? _selectedNodeId;
 
   @override
@@ -273,18 +277,60 @@ class _FolderGraphScreenState extends State<FolderGraphScreen> {
   Widget _buildGraphCanvas() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        return CustomPaint(
-          size: Size(constraints.maxWidth, constraints.maxHeight),
-          painter: FolderGraphPainter(
-            nodes: _nodes,
-            edges: _edges,
-            zoom: _zoom,
-            selectedNodeId: _selectedNodeId,
-            onNodeTap: _onNodeTap,
+        final size = Size(constraints.maxWidth, constraints.maxHeight);
+        // Must match the painter's shift so hit-testing lines up.
+        final shift = Offset(size.width / 2, size.height / 2) * 0.5;
+        return GestureDetector(
+          // Pinch-to-zoom via scale, drag to pan or move nodes.
+          onScaleStart: (details) {
+            final graphPoint =
+                (details.localFocalPoint - shift - _panOffset) / _zoom;
+            _dragNodeIndex = _nodeIndexAt(graphPoint);
+          },
+          onScaleUpdate: (details) {
+            setState(() {
+              // Pinch zoom: clamp between 0.3 and 5.0
+              _zoom = (_zoom * details.scale).clamp(0.3, 5.0);
+              if (_dragNodeIndex != null && _dragNodeIndex! >= 0) {
+                _nodes[_dragNodeIndex!].position += details.focalPointDelta / _zoom;
+              } else {
+                _panOffset += details.focalPointDelta;
+              }
+            });
+          },
+          onScaleEnd: (_) => _dragNodeIndex = null,
+          // Also support tap to select a node.
+          onTapUp: (details) {
+            final graphPoint =
+                (details.localPosition - shift - _panOffset) / _zoom;
+            final idx = _nodeIndexAt(graphPoint);
+            if (idx >= 0) {
+              _onNodeTap(_nodes[idx]);
+            }
+          },
+          child: CustomPaint(
+            size: size,
+            painter: FolderGraphPainter(
+              nodes: _nodes,
+              edges: _edges,
+              zoom: _zoom,
+              panOffset: _panOffset,
+              selectedNodeId: _selectedNodeId,
+              onNodeTap: _onNodeTap,
+            ),
           ),
         );
       },
     );
+  }
+
+  /// Returns the index of the node under [point] (graph coordinates), or
+  /// -1 when the point is on empty space.
+  int _nodeIndexAt(Offset point) {
+    for (var i = _nodes.length - 1; i >= 0; i--) {
+      if ((_nodes[i].position - point).distance <= 14.0) return i;
+    }
+    return -1;
   }
 }
 
@@ -293,6 +339,7 @@ class FolderGraphPainter extends CustomPainter {
   final List<GraphNode> nodes;
   final List<GraphEdge> edges;
   final double zoom;
+  final Offset panOffset;
   final String? selectedNodeId;
   final void Function(GraphNode) onNodeTap;
 
@@ -300,6 +347,7 @@ class FolderGraphPainter extends CustomPainter {
     required this.nodes,
     required this.edges,
     required this.zoom,
+    this.panOffset = Offset.zero,
     required this.selectedNodeId,
     required this.onNodeTap,
   });
@@ -311,8 +359,8 @@ class FolderGraphPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
 
-    // Center the graph
-    final shift = Offset(size.width / 2, size.height / 2) * 0.5;
+    // Center the graph and apply the user's pan translation.
+    final shift = Offset(size.width / 2, size.height / 2) * 0.5 + panOffset;
 
     for (final edge in edges) {
       final a = nodes.where((n) => n.id == edge.from).firstOrNull;
@@ -357,6 +405,7 @@ class FolderGraphPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant FolderGraphPainter oldDelegate) {
     return oldDelegate.zoom != zoom ||
+        oldDelegate.panOffset != panOffset ||
         oldDelegate.selectedNodeId != selectedNodeId ||
         oldDelegate.nodes != nodes ||
         oldDelegate.edges != edges;

@@ -1,5 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_pty/flutter_pty.dart';
@@ -27,6 +28,7 @@ class TerminalScreen extends StatefulWidget {
 class _TerminalScreenState extends State<TerminalScreen> {
   late final Terminal _terminal;
   Pty? _pty;
+  StreamSubscription? _outputSub;
   String? _spawnError;
   final FocusNode _terminalFocusNode = FocusNode();
 
@@ -89,18 +91,24 @@ class _TerminalScreenState extends State<TerminalScreen> {
         },
       );
 
-      // Shell output → terminal renderer.
-      pty.output.listen((data) {
-        _terminal.write(String.fromCharCodes(data));
+      // Cancel any previous output listener to avoid leaks on restart.
+      _outputSub?.cancel();
+
+      // Shell output → terminal renderer. Decode as UTF-8 (allow malformed
+      // bytes) so multi-byte characters survive; String.fromCharCodes on raw
+      // bytes corrupts any non-ASCII output.
+      _outputSub = pty.output.listen((data) {
+        _terminal.write(utf8.decode(data, allowMalformed: true));
       });
       pty.exitCode.then((code) {
         _terminal.write('\r\n\x1b[2m[Process exited with code $code]\x1b[0m\r\n');
         if (mounted) setState(() => _pty = null);
       });
 
-      // Keyboard/IME input → shell.
+      // Keyboard/IME input → shell. Encode as UTF-8 so non-ASCII input is
+      // written correctly (codeUnits would emit raw UTF-16 code units).
       _terminal.onOutput = (data) {
-        _pty?.write(Uint8List.fromList(data.codeUnits));
+        _pty?.write(utf8.encode(data));
       };
 
       if (mounted) setState(() => _pty = pty);
@@ -126,6 +134,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   @override
   void dispose() {
+    _outputSub?.cancel();
     try {
       _pty?.kill();
     } catch (_) {}
@@ -295,8 +304,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 8),
         foregroundColor: OneDarkColors.cyan,
       ),
-      onPressed: () =>
-          _pty?.write(Uint8List.fromList(sequence.codeUnits)),
+      onPressed: () => _pty?.write(utf8.encode(sequence)),
       child: Text(label, style: const TextStyle(fontSize: 12)),
     );
   }
@@ -307,7 +315,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
     if (text == null || text.isEmpty) return;
-    _pty?.write(Uint8List.fromList(text.codeUnits));
+    _pty?.write(utf8.encode(text));
   }
 
   /// One Dark-flavored terminal palette. A getter (not a cached static) so it

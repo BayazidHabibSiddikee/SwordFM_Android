@@ -79,53 +79,84 @@ class _BluetoothScreenState extends State<BluetoothScreen> {
   }
 
   Future<void> _requestPermissions() async {
-    final supported = await _service.isSupported();
-    if (!supported) {
-      setState(
-        () => _statusMessage = 'Bluetooth not supported on this device.',
-      );
-      return;
-    }
-    final granted = await BtPermissions.ensurePermissions();
-    if (granted) {
-      final enabled = await _service.isEnabled();
-      if (!enabled) {
-        await _service.requestEnable();
+    try {
+      final supported = await _service.isSupported();
+      if (!supported) {
+        setState(
+          () => _statusMessage = 'Bluetooth not supported on this device.',
+        );
+        return;
       }
-      await _refreshDevices();
-    }
-    setState(() {
-      _permissionsReady = granted;
-      if (!granted) {
-        _statusMessage = 'Bluetooth permissions were denied.';
-      } else {
-        _statusMessage = null;
+      final granted = await BtPermissions.ensurePermissions();
+      if (granted) {
+        final enabled = await _service.isEnabled();
+        if (!enabled) {
+          await _service.requestEnable();
+        }
+        if (!mounted) return;
+        final nowEnabled = await _service.isEnabled();
+        if (nowEnabled) await _refreshDevices();
       }
-    });
+      if (!mounted) return;
+      setState(() {
+        _permissionsReady = granted;
+        if (!granted) {
+          _statusMessage = 'Bluetooth permissions were denied.';
+        } else {
+          _statusMessage = null;
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _statusMessage = 'BT init error: $e');
+      }
+    }
   }
 
   Future<void> _refreshDevices() async {
-    final devices = await _service.getPairedDevices();
-    setState(() {
-      _devices.clear();
-      _devices.addAll(devices);
-    });
+    try {
+      final devices = await _service.getPairedDevices();
+      if (!mounted) return;
+      setState(() {
+        _devices.clear();
+        _devices.addAll(devices);
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _statusMessage = 'Failed to list devices: $e');
+      }
+    }
   }
 
   Future<void> _startServer() async {
-    setState(() => _statusMessage = 'Waiting for connections...');
-    await _service.startServer();
+    try {
+      setState(() => _statusMessage = 'Waiting for connections...');
+      await _service.startServer();
+    } catch (e) {
+      if (mounted) {
+        setState(() => _statusMessage = 'Server error: $e');
+      }
+    }
   }
 
   Future<void> _stopServer() async {
-    await _service.stopServer();
-    setState(() => _statusMessage = null);
+    try {
+      await _service.stopServer();
+    } catch (_) {}
+    if (mounted) setState(() => _statusMessage = null);
   }
 
   Future<void> _connectToDevice(BluetoothDeviceItem device) async {
-    setState(() => _statusMessage = 'Connecting to ${device.name}...');
-    await _service.connectToDevice(device.address);
-    setState(() => _statusMessage = 'Connected to ${device.name}');
+    try {
+      setState(() => _statusMessage = 'Connecting to ${device.name}...');
+      await _service.connectToDevice(device.address);
+      if (!mounted) return;
+      setState(() => _statusMessage = 'Connected to ${device.name}');
+    } catch (e) {
+      if (mounted) {
+        setState(() => _statusMessage = 'Connection failed: $e');
+      }
+    }
   }
 
   /// Open the native Android file picker and send selected files.

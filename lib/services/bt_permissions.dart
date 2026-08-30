@@ -17,14 +17,16 @@ import 'package:permission_handler/permission_handler.dart';
 class BtPermissions {
   /// Requests all required BT permissions and returns true if granted.
   static Future<bool> ensurePermissions() async {
-    // Check whether the device is on Android 12+; older devices only need
-    // the legacy BLUETOOTH / BLUETOOTH_ADMIN which are granted at install.
-    final scanStatus = await Permission.bluetoothScan.request();
-    final connectStatus = await Permission.bluetoothConnect.request();
-    final advertiseStatus = await Permission.bluetoothAdvertise.request();
-    return scanStatus.isGranted &&
-        connectStatus.isGranted &&
-        advertiseStatus.isGranted;
+    try {
+      final scanStatus = await Permission.bluetoothScan.request();
+      final connectStatus = await Permission.bluetoothConnect.request();
+      final advertiseStatus = await Permission.bluetoothAdvertise.request();
+      return scanStatus.isGranted &&
+          connectStatus.isGranted &&
+          advertiseStatus.isGranted;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Returns whether all Bluetooth permissions are currently granted.

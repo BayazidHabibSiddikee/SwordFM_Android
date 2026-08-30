@@ -467,6 +467,7 @@ class FileItem {
     '.bat',
   ].contains(extension);
   bool get isPdf => extension == '.pdf';
+  bool get isVideo => const ['.mp4', '.mkv', '.avi', '.mov', '.webm'].contains(extension);
 }
 
 /// Sort options for the file browser.
@@ -766,6 +767,26 @@ class FileUtils {
 
   static bool get hasClipboard =>
       _clipboardPaths.isNotEmpty && _clipboardOp != 'none';
+
+  /// Whether the device appears to be rooted (has `su` binary available).
+  static bool? _isRootedCache;
+  static Future<bool> get isRooted async {
+    if (_isRootedCache != null) return _isRootedCache!;
+    const suPaths = [
+      '/system/bin/su',
+      '/system/xbin/su',
+      '/data/data/com.topjohnwu.magisk/su',
+      '/data/adb/magisk/su',
+    ];
+    for (final path in suPaths) {
+      if (File(path).existsSync()) {
+        _isRootedCache = true;
+        return true;
+      }
+    }
+    _isRootedCache = false;
+    return false;
+  }
 
   /// Current clipboard operation ('copy' | 'cut'), or null when empty.
   static String? get clipboardOperation =>

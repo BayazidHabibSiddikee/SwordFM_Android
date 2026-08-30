@@ -197,12 +197,13 @@ class _ConvertDialogState extends State<ConvertDialog> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Saved as ${_lastResultPath!.split('/').last}',
+                        'Saved to: ${_lastResultPath!}',
                         style: TextStyle(
                           color: OneDarkColors.green,
-                          fontSize: 12,
+                          fontSize: 11,
                         ),
                         overflow: TextOverflow.ellipsis,
+                        maxLines: 2,
                       ),
                     ),
                     const SizedBox(width: 8),

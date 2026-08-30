@@ -279,7 +279,8 @@ class BluetoothShareService {
         _updateState(BluetoothState.connected);
         break;
       case 'onTransferError':
-        final msg = call.arguments['message'] as String? ?? '';
+        final args = call.arguments as Map<dynamic, dynamic>? ?? {};
+        final msg = args['message'] as String? ?? '';
         _messageController.add(
           msg.isEmpty ? 'Transfer Error.' : 'Transfer Error: $msg',
         );

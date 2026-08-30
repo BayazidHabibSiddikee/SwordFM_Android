@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:pdfx/pdfx.dart';
@@ -17,12 +18,16 @@ class PreviewPanel extends StatefulWidget {
   /// bottom sheet, or collapses the side panel).
   final VoidCallback? onClose;
 
+  /// Called when the user swipes horizontally on the panel to open full screen.
+  final VoidCallback? onSwipe;
+
   const PreviewPanel({
     super.key,
     required this.item,
     required this.width,
     this.height,
     this.onClose,
+    this.onSwipe,
   });
 
   @override
@@ -37,6 +42,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
   int _pdfPageCount = 0;
   int _currentPdfPage = 1;
   Uint8List? _pdfPageBytes;
+  bool _isVideo = false;
 
   @override
   void didUpdateWidget(covariant PreviewPanel oldWidget) {
@@ -46,6 +52,19 @@ class _PreviewPanelState extends State<PreviewPanel> {
     }
   }
 
+  @override
+  void dispose() {
+    _pdfDocument?.close();
+    super.dispose();
+  }
+
+  void _openFullScreen(FileItem item) {
+    Navigator.of(context).pushNamed(
+      '/video',
+      arguments: item.path,
+    );
+  }
+
   Future<void> _loadContent() async {
     if (widget.item == null) {
       setState(() {
@@ -53,6 +72,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
         _error = null;
         _pdfDocument = null;
         _pdfPageBytes = null;
+        _isVideo = false;
       });
       return;
     }
@@ -62,6 +82,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
       _error = null;
       _pdfDocument = null;
       _pdfPageBytes = null;
+      _isVideo = false;
     });
 
     try {
@@ -76,6 +97,8 @@ class _PreviewPanelState extends State<PreviewPanel> {
           });
           await _renderPdfPage(doc, 1);
         }
+      } else if (widget.item!.isVideo) {
+        _isVideo = true;
       } else if (widget.item!.isMarkdown) {
         final file = File(path);
         if (await file.exists()) {
@@ -83,10 +106,11 @@ class _PreviewPanelState extends State<PreviewPanel> {
         } else {
           _content = '[File not found]';
         }
+      } else if (widget.item!.extension.toLowerCase() == '.docx') {
+        _content = await _extractDocxText(File(path));
       } else if (widget.item!.isText || widget.item!.isCode) {
         final file = File(path);
         if (await file.exists()) {
-          // Cap preview size so huge files don't stall the UI.
           final bytes = await file.length();
           if (bytes > 512 * 1024) {
             final raf = await file.open();
@@ -113,6 +137,38 @@ class _PreviewPanelState extends State<PreviewPanel> {
     }
   }
 
+  /// Extracts readable plain text from a .docx (zip) file by pulling
+  /// word/document.xml and stripping the WordprocessingML tags. Paragraph
+  /// closers become newlines. Returns an error placeholder on failure.
+  Future<String> _extractDocxText(File file) async {
+    try {
+      if (!await file.exists()) return '[File not found]';
+      final bytes = await file.length() > 8 * 1024 * 1024
+          ? null
+          : await file.readAsBytes();
+      if (bytes == null) return '[File too large to preview]';
+      final archive = ZipDecoder().decodeBytes(bytes);
+      final docXml = archive.findFile('word/document.xml');
+      if (docXml == null) return '[No text content found]';
+      var xml = String.fromCharCodes(docXml.content);
+      // Paragraph and row endings → newlines, then strip all remaining tags.
+      xml = xml
+          .replaceAll('</w:p>', '\n')
+          .replaceAll('</w:tr>', '\n')
+          .replaceAll('<w:tab/>', '\t')
+          .replaceAll(RegExp(r'<[^>]+>'), '');
+      return xml
+          .replaceAll('&amp;', '&')
+          .replaceAll('&lt;', '<')
+          .replaceAll('&gt;', '>')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&apos;', "'")
+          .trim();
+    } catch (e) {
+      return '[Could not read document: $e]';
+    }
+  }
+
   Future<void> _renderPdfPage(PdfDocument doc, int page) async {
     try {
       final pdfPage = await doc.getPage(page);
@@ -124,12 +180,6 @@ class _PreviewPanelState extends State<PreviewPanel> {
       }
       await pdfPage.close();
     } catch (_) {}
-  }
-
-  @override
-  void dispose() {
-    _pdfDocument?.close();
-    super.dispose();
   }
 
   @override
@@ -148,6 +198,12 @@ class _PreviewPanelState extends State<PreviewPanel> {
         // Tapping anywhere on the panel closes it (the close button and inner
         // controls still win the gesture arena for their own taps).
         onTap: widget.onClose,
+        onPanUpdate: (details) {
+          // Swipe horizontally to open full screen
+          if (details.delta.dx.abs() > 50) {
+            widget.onSwipe?.call();
+          }
+        },
         child: Card(
           margin: const EdgeInsets.all(8),
           color: cs.surfaceContainerHighest,
@@ -209,10 +265,64 @@ class _PreviewPanelState extends State<PreviewPanel> {
     final item = widget.item!;
     final cs = Theme.of(context).colorScheme;
     if (item.isPdf && _pdfDocument != null) {
-      return _buildPdfPreview();
+      return GestureDetector(
+        onTap: () => _openFullScreen(item),
+        child: _buildPdfPreview(),
+      );
+    }
+    if (item.isVideo) {
+      return GestureDetector(
+        onTap: () => _openFullScreen(item),
+        child: Column(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: Container(
+                  width: double.infinity,
+                  color: OneDarkColors.bgDark,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.movie, size: 64, color: OneDarkColors.cyan),
+                      const SizedBox(height: 8),
+                      Text(
+                        item.name,
+                        style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        padding: const EdgeInsets.all(12),
+                        child: const Icon(
+                          Icons.play_arrow,
+                          color: Colors.white,
+                          size: 40,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Tap to play video',
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+            ),
+          ],
+        ),
+      );
     }
     if (item.isImage) {
-      return Column(
+      return GestureDetector(
+        onTap: () => _openFullScreen(item),
+        child: Column(
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
@@ -252,6 +362,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
             label: const Text('Open with…'),
           ),
         ],
+      ),
       );
     }
     if (item.isMarkdown) {
@@ -268,7 +379,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
         ),
       );
     }
-    if (item.isText) {
+    if (item.isText || item.extension.toLowerCase() == '.docx') {
       return SelectableText(
         _content,
         style: TextStyle(

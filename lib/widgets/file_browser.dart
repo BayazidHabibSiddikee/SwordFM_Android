@@ -711,6 +711,10 @@ class _FileBrowserState extends State<FileBrowser> {
               item: item,
               width: double.infinity,
               onClose: () => Navigator.pop(sheetContext),
+              onSwipe: () {
+                Navigator.pop(sheetContext);
+                _openItem(item);
+              },
             ),
           ),
         ),
@@ -1282,9 +1286,34 @@ class _FileBrowserState extends State<FileBrowser> {
   /// Shares a folder over LAN: opens the LAN screen with this folder as
   /// the share root, so another device can browse/download it in a browser.
   void _shareFolderViaLan(String path) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => LANSharingScreen(initialShareRoot: path),
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.9,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (_, controller) => Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF282C34),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                child: const Text(
+                  'LAN Share',
+                  style: TextStyle(color: Color(0xFF61AFEF), fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                child: LANSharingScreen(initialShareRoot: path, server: null),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1337,9 +1366,33 @@ class _FileBrowserState extends State<FileBrowser> {
     final destDir = toSubfolder
         ? p.join(p.dirname(path), p.basenameWithoutExtension(path))
         : p.dirname(path);
+    // Show a loading dialog while extracting (can be slow for large archives).
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          backgroundColor: OneDarkColors.bg,
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(strokeWidth: 2),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  'Extracting ${p.basename(path)}…',
+                  style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     try {
       await ArchiveService.extract(path, destDir);
       if (mounted) {
+        Navigator.of(context).pop(); // dismiss loading dialog
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -1353,13 +1406,15 @@ class _FileBrowserState extends State<FileBrowser> {
         _loadDirectory();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
+        Navigator.of(context).pop(); // dismiss loading dialog
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Extract failed: $e'),
             backgroundColor: OneDarkColors.red,
           ),
         );
+      }
     }
   }
 
@@ -1956,16 +2011,17 @@ class _FileBrowserState extends State<FileBrowser> {
               ),
             );
           }),
-        _menuItem(
-          'Show QR Code',
-          Icons.qr_code,
-          () {
-            showDialog(
-              context: context,
-              builder: (_) => QrFileScreen(filePath: item.path),
-            );
-          },
-        ),
+        if (!item.isDirectory)
+          _menuItem(
+            'Show QR Code',
+            Icons.qr_code,
+            () {
+              showDialog(
+                context: context,
+                builder: (_) => QrFileScreen(filePath: item.path),
+              );
+            },
+          ),
         _menuItem(
           'Properties',
           Icons.info_outline,
@@ -2776,6 +2832,37 @@ class _FileBrowserState extends State<FileBrowser> {
                               ),
                             ),
                           )
+                        else if (item.isVideo)
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: FittedBox(
+                              fit: BoxFit.cover,
+                              child: SizedBox(
+                                width: 72,
+                                height: 72,
+                                child: Stack(
+                                  children: [
+                                    Image.file(
+                                      File(item.path),
+                                      cacheWidth: 200,
+                                      errorBuilder: (_, __, ___) => Icon(
+                                        item.icon,
+                                        size: 32,
+                                        color: item.iconColor,
+                                      ),
+                                    ),
+                                    Center(
+                                      child: Icon(
+                                        Icons.play_circle,
+                                        size: 36,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
                         else
                           Icon(item.icon, size: 32, color: item.iconColor),
                         const SizedBox(height: 4),
@@ -2976,11 +3063,14 @@ class _FileBrowserState extends State<FileBrowser> {
                   ),
                 Flexible(
                   flex: 3,
-                  child: Text(
-                    item.formattedDate,
-                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 16),
+                    child: Text(
+                      item.formattedDate,
+                      style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                    ),
                   ),
                 ),
               ],
@@ -3022,10 +3112,13 @@ class _FileBrowserState extends State<FileBrowser> {
           ),
         Flexible(
           flex: 3,
-          child: Text(
-            'Date Modified',
-            style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
-            textAlign: TextAlign.right,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Text(
+              'Date Modified',
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+              textAlign: TextAlign.right,
+            ),
           ),
         ),
       ],
