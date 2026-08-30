@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="#282C34">
+
+    <!-- Title -->
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="SwordFM"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="#61AFEF"
+        android:paddingBottom="6dp" />
+
+    <!-- Recent Files Section -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Recent"
+        android:textSize="11sp"
+        android:textColor="#5C6370"
+        android:textStyle="bold"
+        android:paddingBottom="2dp" />
+
+    <TextView
+        android:id="@+id/widget_recent_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="No recent files"
+        android:textSize="11sp"
+        android:textColor="#ABB2BF"
+        android:maxLines="3"
+        android:ellipsize="end"
+        android:paddingBottom="6dp" />
+
+    <!-- Bookmarks Section -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Bookmarks"
+        android:textSize="11sp"
+        android:textColor="#5C6370"
+        android:textStyle="bold"
+        android:paddingBottom="2dp" />
+
+    <TextView
+        android:id="@+id/widget_bookmark_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="No bookmarks"
+        android:textSize="11sp"
+        android:textColor="#ABB2BF"
+        android:maxLines="2"
+        android:ellipsize="end" />
+
+</LinearLayout>

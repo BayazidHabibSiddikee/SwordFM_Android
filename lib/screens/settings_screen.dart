@@ -8,12 +8,19 @@ import '../services/auth_service.dart';
 import '../services/entitlement_service.dart';
 import '../services/donation_service.dart';
 import '../widgets/file_browser.dart'
-    show ViewMode, viewModeNotifier, savePersistedViewMode, showHiddenNotifier;
+    show
+        ViewMode,
+        viewModeNotifier,
+        savePersistedViewMode,
+        showHiddenNotifier,
+        rootModeNotifier,
+        savePersistedRootMode;
 import 'privacy_policy_screen.dart';
 import 'auth_screen.dart';
 import 'duplicates_screen.dart';
 import 'app_analyzer_screen.dart';
 import 'document_scanner_screen.dart';
+import 'ftp_server_screen.dart';
 import 'cast_screen.dart';
 import 'notepad_screen.dart';
 
@@ -34,17 +41,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _bluetoothAutoConnect = false;
   int _lanPort = 8080;
   int _trashAutoEmpty = 0;
+  bool _autoThemeEnabled = false;
+  int _autoThemeStartHour = 19;
+  int _autoThemeStartMinute = 0;
+  int _autoThemeEndHour = 7;
+  int _autoThemeEndMinute = 0;
 
   @override
   void initState() {
     super.initState();
     _refreshAccount();
     _loadTrashAutoEmpty();
+    _loadAutoThemeSettings();
   }
 
   Future<void> _loadTrashAutoEmpty() async {
     final policy = await FileUtils.loadTrashAutoEmpty();
     if (mounted) setState(() => _trashAutoEmpty = policy);
+  }
+
+  Future<void> _loadAutoThemeSettings() async {
+    final (enabled, startH, startM, endH, endM) = await loadAutoThemeSettings();
+    if (mounted) setState(() {
+      _autoThemeEnabled = enabled;
+      _autoThemeStartHour = startH;
+      _autoThemeStartMinute = startM;
+      _autoThemeEndHour = endH;
+      _autoThemeEndMinute = endM;
+    });
   }
 
   Future<void> _refreshAccount() async {
@@ -210,6 +234,94 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
 
+          // Night Mode Schedule
+          const SizedBox(height: 8),
+          _settingTile(
+            icon: Icons.schedule,
+            title: 'Night Mode Schedule',
+            subtitle: _autoThemeEnabled
+                ? 'Dark ${_autoThemeStartHour.toString().padLeft(2, '0')}:${_autoThemeStartMinute.toString().padLeft(2, '0')} \u2013 ${_autoThemeEndHour.toString().padLeft(2, '0')}:${_autoThemeEndMinute.toString().padLeft(2, '0')}'
+                : 'Disabled',
+            trailing: Switch(
+              value: _autoThemeEnabled,
+              onChanged: (v) async {
+                setState(() => _autoThemeEnabled = v);
+                await saveAutoThemeSettings(
+                  enabled: v,
+                  startHour: _autoThemeStartHour,
+                  startMinute: _autoThemeStartMinute,
+                  endHour: _autoThemeEndHour,
+                  endMinute: _autoThemeEndMinute,
+                );
+                if (v) await checkAutoTheme();
+              },
+            ),
+          ),
+          if (_autoThemeEnabled) ...[
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              dense: true,
+              title: Text('Dark starts at', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
+              trailing: TextButton(
+                onPressed: () async {
+                  final picked = await showTimePicker(
+                    context: context,
+                    initialTime: TimeOfDay(hour: _autoThemeStartHour, minute: _autoThemeStartMinute),
+                  );
+                  if (picked != null) {
+                    setState(() {
+                      _autoThemeStartHour = picked.hour;
+                      _autoThemeStartMinute = picked.minute;
+                    });
+                    await saveAutoThemeSettings(
+                      enabled: _autoThemeEnabled,
+                      startHour: picked.hour,
+                      startMinute: picked.minute,
+                      endHour: _autoThemeEndHour,
+                      endMinute: _autoThemeEndMinute,
+                    );
+                    await checkAutoTheme();
+                  }
+                },
+                child: Text(
+                  '${_autoThemeStartHour.toString().padLeft(2, '0')}:${_autoThemeStartMinute.toString().padLeft(2, '0')}',
+                  style: TextStyle(color: OneDarkColors.cyan),
+                ),
+              ),
+            ),
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              dense: true,
+              title: Text('Light starts at', style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12)),
+              trailing: TextButton(
+                onPressed: () async {
+                  final picked = await showTimePicker(
+                    context: context,
+                    initialTime: TimeOfDay(hour: _autoThemeEndHour, minute: _autoThemeEndMinute),
+                  );
+                  if (picked != null) {
+                    setState(() {
+                      _autoThemeEndHour = picked.hour;
+                      _autoThemeEndMinute = picked.minute;
+                    });
+                    await saveAutoThemeSettings(
+                      enabled: _autoThemeEnabled,
+                      startHour: _autoThemeStartHour,
+                      startMinute: _autoThemeStartMinute,
+                      endHour: picked.hour,
+                      endMinute: picked.minute,
+                    );
+                    await checkAutoTheme();
+                  }
+                },
+                child: Text(
+                  '${_autoThemeEndHour.toString().padLeft(2, '0')}:${_autoThemeEndMinute.toString().padLeft(2, '0')}',
+                  style: TextStyle(color: OneDarkColors.cyan),
+                ),
+              ),
+            ),
+          ],
+
           const SizedBox(height: 16),
 
           // File Management
@@ -224,6 +336,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 trailing: Switch(
                   value: showHidden,
                   onChanged: (v) => showHiddenNotifier.value = v,
+                ),
+              );
+            },
+          ),
+          ValueListenableBuilder<bool>(
+            valueListenable: rootModeNotifier,
+            builder: (context, rootMode, _) {
+              return _settingTile(
+                icon: Icons.admin_panel_settings,
+                title: 'Root Mode',
+                subtitle: rootMode
+                    ? 'System dirs (/proc, /sys, /dev) visible — be careful'
+                    : 'Browses system dirs when enabled',
+                trailing: Switch(
+                  value: rootMode,
+                  onChanged: (v) => savePersistedRootMode(v),
                 ),
               );
             },
@@ -310,6 +438,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const DocumentScannerScreen()),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _settingTile(
+            icon: Icons.dns,
+            title: 'FTP Server',
+            subtitle: 'Transfer files from a PC on the same Wi-Fi',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const FtpServerScreen()),
             ),
           ),
           const SizedBox(height: 8),

@@ -7,6 +7,7 @@ import '../services/open_with_service.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 import '../widgets/preview_panel.dart';
+import '../widgets/file_browser.dart' show rootModeNotifier;
 import 'video_player_screen.dart';
 import 'music_player_screen.dart';
 
@@ -30,6 +31,7 @@ class _SearchScreenState extends State<SearchScreen> {
   FileItem? _previewItem;
 
   SearchMode _searchMode = SearchMode.substring;
+  bool _searchContent = false;
   int _minSize = 0;
   int _maxSize = 0;
   final _minSizeController = TextEditingController();
@@ -84,6 +86,8 @@ class _SearchScreenState extends State<SearchScreen> {
         mode: _searchMode,
         minSize: _minSize,
         maxSize: _maxSize,
+        allowRoot: rootModeNotifier.value,
+        searchContent: _searchContent,
       );
       if (mounted) {
         setState(() {
@@ -492,6 +496,40 @@ class _SearchScreenState extends State<SearchScreen> {
                 _modeChip('Regex', SearchMode.regex),
                 const SizedBox(width: 6),
                 _modeChip('Glob', SearchMode.glob),
+                const SizedBox(width: 6),
+                GestureDetector(
+                  onTap: () {
+                    setState(() => _searchContent = !_searchContent);
+                    final q = _controller.text.trim();
+                    if (q.isNotEmpty) _runSearch(q);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _searchContent
+                          ? OneDarkColors.amber.withValues(alpha: 0.2)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: _searchContent
+                            ? OneDarkColors.amber
+                            : OneDarkColors.border,
+                      ),
+                    ),
+                    child: Text(
+                      'Content',
+                      style: TextStyle(
+                        color: _searchContent
+                            ? OneDarkColors.amber
+                            : OneDarkColors.fgDim,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -632,14 +670,39 @@ class _SearchScreenState extends State<SearchScreen> {
                           item.name,
                           style: TextStyle(color: OneDarkColors.fg),
                         ),
-                        subtitle: Text(
-                          '${item.formattedSize} · ${p.dirname(item.path)}',
-                          style: TextStyle(
-                            color: OneDarkColors.fgDim,
-                            fontSize: 11,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        subtitle: item.snippet != null
+                            ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.snippet!,
+                                    style: TextStyle(
+                                      color: OneDarkColors.amber,
+                                      fontSize: 11,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${item.formattedSize} · ${p.dirname(item.path)}',
+                                    style: TextStyle(
+                                      color: OneDarkColors.fgDim,
+                                      fontSize: 11,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              )
+                            : Text(
+                                '${item.formattedSize} · ${p.dirname(item.path)}',
+                                style: TextStyle(
+                                  color: OneDarkColors.fgDim,
+                                  fontSize: 11,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                         selected: isSel,
                         selectedTileColor: OneDarkColors.select.withValues(
                           alpha: 0.3,

@@ -108,6 +108,84 @@ Future<void> saveThemeMode(String mode) async {
   } catch (_) {}
 }
 
+// --- Night Mode Scheduling ---
+
+const _kAutoThemeEnabledKey = 'auto_theme_enabled';
+const _kAutoThemeStartKey = 'auto_theme_start';
+const _kAutoThemeEndKey = 'auto_theme_end';
+
+/// Loads auto-theme settings and returns (enabled, startHour, startMinute, endHour, endMinute).
+Future<(bool, int, int, int, int)> loadAutoThemeSettings() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final enabled = prefs.getBool(_kAutoThemeEnabledKey) ?? false;
+    final start = prefs.getString(_kAutoThemeStartKey) ?? '19:00';
+    final end = prefs.getString(_kAutoThemeEndKey) ?? '07:00';
+    final sp = start.split(':');
+    final ep = end.split(':');
+    return (
+      enabled,
+      int.tryParse(sp[0]) ?? 19,
+      int.tryParse(sp.length > 1 ? sp[1] : '0') ?? 0,
+      int.tryParse(ep[0]) ?? 7,
+      int.tryParse(ep.length > 1 ? ep[1] : '0') ?? 0,
+    );
+  } catch (_) {
+    return (false, 19, 0, 7, 0);
+  }
+}
+
+/// Saves auto-theme settings.
+Future<void> saveAutoThemeSettings({
+  required bool enabled,
+  required int startHour,
+  required int startMinute,
+  required int endHour,
+  required int endMinute,
+}) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kAutoThemeEnabledKey, enabled);
+    await prefs.setString(_kAutoThemeStartKey,
+        '${startHour.toString().padLeft(2, '0')}:${startMinute.toString().padLeft(2, '0')}');
+    await prefs.setString(_kAutoThemeEndKey,
+        '${endHour.toString().padLeft(2, '0')}:${endMinute.toString().padLeft(2, '0')}');
+  } catch (_) {}
+}
+
+/// Checks if auto-theme is enabled and applies the correct theme.
+/// Returns true if theme was changed, false otherwise.
+Future<bool> checkAutoTheme() async {
+  final (enabled, startH, startM, endH, endM) = await loadAutoThemeSettings();
+  if (!enabled) return false;
+
+  final now = DateTime.now();
+  final currentMinutes = now.hour * 60 + now.minute;
+  final startMinutes = startH * 60 + startM;
+  final endMinutes = endH * 60 + endM;
+
+  bool shouldBeDark;
+  if (startMinutes <= endMinutes) {
+    // Same-day range (e.g., 09:00 → 17:00)
+    shouldBeDark = currentMinutes < startMinutes || currentMinutes >= endMinutes;
+  } else {
+    // Overnight range (e.g., 19:00 → 07:00)
+    shouldBeDark = currentMinutes >= startMinutes || currentMinutes < endMinutes;
+  }
+
+  final targetMode = shouldBeDark ? 'dark' : 'light';
+  if (_currentThemeMode != targetMode) {
+    _currentThemeMode = targetMode;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kThemePref, targetMode);
+    } catch (_) {}
+    themeNotifier.value++;
+    return true;
+  }
+  return false;
+}
+
 /// Returns whether the current theme is dark.
 bool get isDarkTheme => _currentThemeMode == 'dark';
 

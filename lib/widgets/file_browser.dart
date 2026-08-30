@@ -7,6 +7,8 @@ import '../screens/video_player_screen.dart';
 import '../screens/music_player_screen.dart';
 import '../screens/notepad_screen.dart';
 import '../screens/pdf_reader_screen.dart';
+import '../screens/qr_file_screen.dart';
+import '../services/widget_service.dart';
 import '../utils/file_utils.dart';
 import '../services/archive_service.dart';
 import '../services/open_with_service.dart';
@@ -31,7 +33,12 @@ final ValueNotifier<ViewMode> viewModeNotifier = ValueNotifier<ViewMode>(
 /// and the Settings screen both write to this notifier.
 final ValueNotifier<bool> showHiddenNotifier = ValueNotifier<bool>(false);
 
+/// When enabled, navigation and search are allowed into the normally blocked
+/// system directories (/proc, /sys, /dev, …). Defaults off.
+final ValueNotifier<bool> rootModeNotifier = ValueNotifier<bool>(false);
+
 const String kViewModePref = 'swordfm_default_view';
+const String kRootModePref = 'swordfm_root_mode';
 
 Future<void> loadPersistedViewMode() async {
   try {
@@ -50,6 +57,21 @@ Future<void> savePersistedViewMode(ViewMode mode) async {
       kViewModePref,
       mode == ViewMode.grid ? 'grid' : 'details',
     );
+  } catch (_) {}
+}
+
+Future<void> loadPersistedRootMode() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    rootModeNotifier.value = prefs.getBool(kRootModePref) ?? false;
+  } catch (_) {}
+}
+
+Future<void> savePersistedRootMode(bool enabled) async {
+  rootModeNotifier.value = enabled;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(kRootModePref, enabled);
   } catch (_) {}
 }
 
@@ -488,7 +510,8 @@ class _FileBrowserState extends State<FileBrowser> {
   Future<void> _loadDirectory({String? path, bool pushHistory = true}) async {
     if (path != null) {
       // Block navigation into system directories (matches Linux SwordFM).
-      if (isBlockedPath(path)) {
+      // Root Mode lifts the guard so /proc, /sys, /dev … can be browsed.
+      if (!rootModeNotifier.value && isBlockedPath(path)) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -632,6 +655,7 @@ class _FileBrowserState extends State<FileBrowser> {
       } catch (e) {
         _openFailed(e);
       }
+      WidgetService.addRecentFile(item.path);
     }
   }
 
@@ -1889,7 +1913,17 @@ class _FileBrowserState extends State<FileBrowser> {
                 builder: (_) => ConvertDialog(filePath: item.path),
               ),
             );
-          }),
+              }),
+        _menuItem(
+          'Show QR Code',
+          Icons.qr_code,
+          () {
+            showDialog(
+              context: context,
+              builder: (_) => QrFileScreen(filePath: item.path),
+            );
+          },
+        ),
         _menuItem(
           'Properties',
           Icons.info_outline,
@@ -2119,6 +2153,11 @@ class _FileBrowserState extends State<FileBrowser> {
             onPressed: () => Navigator.pop(context, 'delete'),
             child: Text('Delete', style: TextStyle(color: OneDarkColors.red)),
           ),
+          if (!item.isDirectory)
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'shred'),
+              child: Text('Shred', style: TextStyle(color: OneDarkColors.amber)),
+            ),
         ],
       ),
     );
@@ -2146,6 +2185,34 @@ class _FileBrowserState extends State<FileBrowser> {
       if (mounted) {
         _loadDirectory();
         _exitSelectMode();
+      }
+    } else if (choice == 'shred' && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Shredding…'), backgroundColor: OneDarkColors.amber),
+      );
+      try {
+        await FileUtils.secureDelete(item.path);
+        _markedPaths.remove(item.path);
+        _notifyMarksChanged();
+        if (mounted) {
+          _loadDirectory();
+          _exitSelectMode();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Shredded "${item.name}"'),
+              backgroundColor: OneDarkColors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Shred failed: $e'),
+              backgroundColor: OneDarkColors.red,
+            ),
+          );
+        }
       }
     }
   }
@@ -3106,9 +3173,92 @@ class _FileBrowserState extends State<FileBrowser> {
               }
             }
           }),
+        if (FileUtils.clipboardHistory.isNotEmpty)
+          _menuItem('Clipboard History', Icons.history, _showClipboardHistory),
         _menuItem('Select All', Icons.select_all, _selectAll),
         _menuItem('Refresh', Icons.refresh, () => _loadDirectory()),
       ],
+    );
+  }
+
+  void _showClipboardHistory() {
+    final history = FileUtils.clipboardHistory;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: Text('Clipboard History', style: TextStyle(color: OneDarkColors.fg)),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 300,
+          child: history.isEmpty
+              ? Center(
+                  child: Text('No history', style: TextStyle(color: OneDarkColors.fgDim)),
+                )
+              : ListView.separated(
+                  itemCount: history.length,
+                  separatorBuilder: (_, i) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final entry = history[i];
+                    final paths = List<String>.from(entry['paths'] ?? []);
+                    final op = entry['op'] as String? ?? '?';
+                    final ts = entry['timestamp'] as int? ?? 0;
+                    final date = DateTime.fromMillisecondsSinceEpoch(ts);
+                    final timeStr = '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+                    final name = paths.length == 1
+                        ? p.basename(paths.first)
+                        : '${paths.length} items';
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        op == 'copy' ? Icons.copy : Icons.cut,
+                        size: 18,
+                        color: op == 'copy' ? OneDarkColors.cyan : OneDarkColors.amber,
+                      ),
+                      title: Text(name, style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
+                        overflow: TextOverflow.ellipsis, maxLines: 1),
+                      subtitle: Text(
+                        '$op \u2022 $timeStr',
+                        style: TextStyle(color: OneDarkColors.fgDim, fontSize: 10),
+                      ),
+                      trailing: IconButton(
+                        icon: Icon(Icons.content_paste, size: 18, color: OneDarkColors.green),
+                        tooltip: 'Restore',
+                        onPressed: () {
+                          FileUtils.restoreFromHistory(i);
+                          _setClipboardInfo(ClipboardInfo(
+                            hasClipboard: true,
+                            operation: FileUtils.clipboardOperation ?? 'copy',
+                            count: FileUtils.clipboardCount,
+                          ));
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Restored ${paths.length} item(s)'),
+                              backgroundColor: OneDarkColors.green,
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          if (history.isNotEmpty)
+            TextButton(
+              onPressed: () async {
+                await FileUtils.clearClipboardHistory();
+                Navigator.pop(context);
+              },
+              child: Text('Clear History', style: TextStyle(color: OneDarkColors.red)),
+            ),
+        ],
+      ),
     );
   }
 }

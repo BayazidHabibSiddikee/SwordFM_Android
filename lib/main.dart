@@ -23,6 +23,8 @@ import 'screens/notepad_screen.dart';
 import 'screens/document_scanner_screen.dart';
 import 'screens/app_analyzer_screen.dart';
 import 'screens/cast_screen.dart';
+import 'screens/ftp_server_screen.dart';
+import 'services/widget_service.dart';
 import 'services/entitlement_service.dart';
 import 'services/device_service.dart';
 import 'services/bookmarks_service.dart';
@@ -44,6 +46,7 @@ Future<void> main() async {
     // Load saved theme mode and view mode
   await loadThemeMode();
   await loadPersistedViewMode();
+  await loadPersistedRootMode();
   runApp(const SwordFM());
 }
 
@@ -141,6 +144,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       _loadHomeDirs();
       _ensureStorageAccess();
       FileUtils.autoEmptyTrashFromPrefs();
+      FileUtils.loadClipboardHistory();
+      checkAutoTheme();
+      _syncWidgetBookmarks();
     });
   }
 
@@ -159,6 +165,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       _ensureStorageAccess();
       _loadVolumes();
       _loadHomeDirs();
+      checkAutoTheme();
     }
   }
 
@@ -213,7 +220,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Future<void> _loadBookmarks() async {
     final bookmarks = await BookmarksService.load();
-    if (mounted) setState(() => _bookmarks = bookmarks);
+    if (mounted) {
+      setState(() => _bookmarks = bookmarks);
+      WidgetService.syncBookmarks(bookmarks);
+    }
+  }
+
+  Future<void> _syncWidgetBookmarks() async {
+    final bookmarks = await BookmarksService.load();
+    WidgetService.syncBookmarks(bookmarks);
   }
 
   Future<void> _loadHomeDirs() async {
@@ -484,6 +499,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         () => Navigator.of(context).push(
                                           MaterialPageRoute(
                                             builder: (_) => const CastScreen(),
+                                          ),
+                                        ),
+                                      ),
+                                      _sidebarAction(
+                                        Icons.dns,
+                                        'FTP Server',
+                                        () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => const FtpServerScreen(),
                                           ),
                                         ),
                                       ),

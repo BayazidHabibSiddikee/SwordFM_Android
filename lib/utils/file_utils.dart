@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
@@ -105,6 +107,51 @@ const Set<String> kAudioExtensions = {
   '.amr',
 };
 
+/// True for files whose contents the content-search can scan (text/code).
+bool isSearchableText(String path) {
+  final ext = p.extension(path).toLowerCase();
+  return const {
+    '.txt',
+    '.md',
+    '.markdown',
+    '.json',
+    '.yaml',
+    '.yml',
+    '.toml',
+    '.xml',
+    '.html',
+    '.htm',
+    '.css',
+    '.js',
+    '.ts',
+    '.jsx',
+    '.tsx',
+    '.py',
+    '.dart',
+    '.cpp',
+    '.c',
+    '.h',
+    '.hpp',
+    '.java',
+    '.kt',
+    '.kotlin',
+    '.rb',
+    '.go',
+    '.rs',
+    '.swift',
+    '.log',
+    '.sh',
+    '.bat',
+    '.ini',
+    '.conf',
+    '.cfg',
+    '.sql',
+    '.csv',
+    '.env',
+    '.diff',
+  }.contains(ext);
+}
+
 /// Represents a single file or directory entry.
 class FileItem {
   final FileSystemEntity entity;
@@ -114,6 +161,9 @@ class FileItem {
   final int size;
   final DateTime lastModified;
 
+  /// Content-search match line (set only for content-search results).
+  final String? snippet;
+
   FileItem({
     required this.entity,
     required this.name,
@@ -121,6 +171,7 @@ class FileItem {
     required this.isDirectory,
     required this.size,
     required this.lastModified,
+    this.snippet,
   });
 
   String get extension => isDirectory ? '' : p.extension(path).toLowerCase();
@@ -729,11 +780,13 @@ class FileUtils {
   static void setClipboard(String path, String op) {
     _clipboardPaths = [path];
     _clipboardOp = op;
+    _addToHistory([path], op);
   }
 
   static void setClipboardMultiple(List<String> paths, String op) {
     _clipboardPaths = List.from(paths);
     _clipboardOp = op;
+    _addToHistory(paths, op);
   }
 
   static Future<void> paste(String destDir) async {
@@ -857,5 +910,120 @@ class FileUtils {
         }
       }
     } catch (_) {}
+  }
+
+  // --- Clipboard History ---
+
+  static const _kClipboardHistoryKey = 'clipboard_history';
+  static const int _maxHistoryEntries = 10;
+  static List<Map<String, dynamic>> _clipboardHistory = [];
+  static bool _historyLoaded = false;
+
+  /// Loads clipboard history from SharedPreferences.
+  static Future<void> loadClipboardHistory() async {
+    if (_historyLoaded) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kClipboardHistoryKey);
+      if (raw != null) {
+        _clipboardHistory = List<Map<String, dynamic>>.from(
+          jsonDecode(raw) as List,
+        );
+      }
+    } catch (_) {
+      _clipboardHistory = [];
+    }
+    _historyLoaded = true;
+  }
+
+  /// Persists clipboard history to SharedPreferences.
+  static Future<void> _saveClipboardHistory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kClipboardHistoryKey, jsonEncode(_clipboardHistory));
+    } catch (_) {}
+  }
+
+  /// Adds a clipboard operation to history.
+  static void _addToHistory(List<String> paths, String op) {
+    _clipboardHistory.removeWhere((e) {
+      final ePaths = List<String>.from(e['paths'] ?? []);
+      return ePaths.length == paths.length &&
+          e['op'] == op &&
+          ePaths.every((p) => paths.contains(p));
+    });
+    _clipboardHistory.insert(0, {
+      'paths': paths,
+      'op': op,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+    if (_clipboardHistory.length > _maxHistoryEntries) {
+      _clipboardHistory = _clipboardHistory.sublist(0, _maxHistoryEntries);
+    }
+    _saveClipboardHistory();
+  }
+
+  /// Returns the clipboard history (list of entries with paths, op, timestamp).
+  static List<Map<String, dynamic>> get clipboardHistory =>
+      List.unmodifiable(_clipboardHistory);
+
+  /// Restores a clipboard history entry as the active clipboard.
+  static void restoreFromHistory(int index) {
+    if (index < 0 || index >= _clipboardHistory.length) return;
+    final entry = _clipboardHistory[index];
+    _clipboardPaths = List<String>.from(entry['paths'] ?? []);
+    _clipboardOp = entry['op'] as String? ?? 'copy';
+  }
+
+  /// Clears clipboard history.
+  static Future<void> clearClipboardHistory() async {
+    _clipboardHistory.clear();
+    await _saveClipboardHistory();
+  }
+
+  // --- File Shredder (Secure Delete) ---
+
+  /// Securely deletes a file by overwriting its contents 3 times before delete.
+  /// Pass 1: random data, Pass 2: complement of random, Pass 3: random + final delete.
+  static Future<void> secureDelete(String path) async {
+    final file = File(path);
+    if (!await file.exists()) return;
+    final length = await file.length();
+    if (length == 0) {
+      await file.delete();
+      return;
+    }
+    final rng = Random.secure();
+    final buffer = Uint8List(min(length, 65536)); // 64KB chunks
+
+    // Pass 1: random data
+    for (var offset = 0; offset < length; offset += buffer.length) {
+      final chunkLen = min(buffer.length, length - offset);
+      for (var i = 0; i < chunkLen; i++) {
+        buffer[i] = rng.nextInt(256);
+      }
+      await file.writeAsBytes(buffer.sublist(0, chunkLen),
+          mode: FileMode.writeOnly, flush: true);
+    }
+    // Pass 2: complement
+    for (var offset = 0; offset < length; offset += buffer.length) {
+      final chunkLen = min(buffer.length, length - offset);
+      for (var i = 0; i < chunkLen; i++) {
+        buffer[i] = 255 - buffer[i];
+      }
+      await file.writeAsBytes(buffer.sublist(0, chunkLen),
+          mode: FileMode.writeOnly, flush: true);
+    }
+    // Pass 3: random again
+    for (var offset = 0; offset < length; offset += buffer.length) {
+      final chunkLen = min(buffer.length, length - offset);
+      for (var i = 0; i < chunkLen; i++) {
+        buffer[i] = rng.nextInt(256);
+      }
+      await file.writeAsBytes(buffer.sublist(0, chunkLen),
+          mode: FileMode.writeOnly, flush: true);
+    }
+
+    await file.delete();
   }
 }
