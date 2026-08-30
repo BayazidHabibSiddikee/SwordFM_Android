@@ -17,6 +17,9 @@ class FtpServerService {
 
   bool get isRunning => _server != null;
 
+  /// The actually-bound port (differs from [port] when 0 = ephemeral).
+  int get boundPort => _server?.port ?? port;
+
   FtpServerService({this.port = 2121});
 
   /// Starts listening. [shareRootOverride] sets the browsable root.
@@ -88,7 +91,12 @@ class _FtpSession {
     final raw = arg.startsWith('/') ? arg : p.posix.join(cwd, arg);
     final normalized = p.posix.normalize(raw);
     if (normalized.contains('\u0000')) return null;
-    final physical = p.join(_root, normalized);
+    // p.join resets the base on absolute segments, so strip the leading '/'
+    // to keep every path anchored under the share root (chroot).
+    final rel = normalized.startsWith('/')
+        ? normalized.substring(1)
+        : normalized;
+    final physical = p.join(_root, rel);
     if (p.isWithin(_root, physical) || physical == _root) return physical;
     return null;
   }
