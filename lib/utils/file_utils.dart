@@ -984,7 +984,10 @@ class FileUtils {
   // --- File Shredder (Secure Delete) ---
 
   /// Securely deletes a file by overwriting its contents 3 times before delete.
-  /// Pass 1: random data, Pass 2: complement of random, Pass 3: random + final delete.
+  /// Pass 1: random, Pass 2: complement of random, Pass 3: random. Written
+  /// in-place in 64KB chunks through one open RandomAccessFile so every byte is
+  /// overwritten without repeatedly reopening the file — the same fast 64KB
+  /// chunked I/O + 3-pass pattern that Linux `shred` uses.
   static Future<void> secureDelete(String path) async {
     final file = File(path);
     if (!await file.exists()) return;
@@ -994,36 +997,26 @@ class FileUtils {
       return;
     }
     final rng = Random.secure();
-    final buffer = Uint8List(min(length, 65536)); // 64KB chunks
-
-    // Pass 1: random data
-    for (var offset = 0; offset < length; offset += buffer.length) {
-      final chunkLen = min(buffer.length, length - offset);
-      for (var i = 0; i < chunkLen; i++) {
-        buffer[i] = rng.nextInt(256);
+    final buffer = Uint8List(65536); // 64KB chunks — minimize syscalls
+    final raf = await file.open(mode: FileMode.write);
+    try {
+      for (var pass = 0; pass < 3; pass++) {
+        for (var offset = 0; offset < length; offset += buffer.length) {
+          final chunkLen = min(buffer.length, length - offset);
+          for (var i = 0; i < chunkLen; i++) {
+            buffer[i] = pass == 1
+                ? 255 - rng.nextInt(256) // complement pass
+                : rng.nextInt(256); // random passes
+          }
+          await raf.setPosition(offset);
+          await raf.writeFrom(buffer, 0, chunkLen);
+        }
+        if (pass < 2) await raf.flush();
       }
-      await file.writeAsBytes(buffer.sublist(0, chunkLen),
-          mode: FileMode.writeOnly, flush: true);
+      await raf.flush();
+    } finally {
+      await raf.close();
     }
-    // Pass 2: complement
-    for (var offset = 0; offset < length; offset += buffer.length) {
-      final chunkLen = min(buffer.length, length - offset);
-      for (var i = 0; i < chunkLen; i++) {
-        buffer[i] = 255 - buffer[i];
-      }
-      await file.writeAsBytes(buffer.sublist(0, chunkLen),
-          mode: FileMode.writeOnly, flush: true);
-    }
-    // Pass 3: random again
-    for (var offset = 0; offset < length; offset += buffer.length) {
-      final chunkLen = min(buffer.length, length - offset);
-      for (var i = 0; i < chunkLen; i++) {
-        buffer[i] = rng.nextInt(256);
-      }
-      await file.writeAsBytes(buffer.sublist(0, chunkLen),
-          mode: FileMode.writeOnly, flush: true);
-    }
-
     await file.delete();
   }
 }

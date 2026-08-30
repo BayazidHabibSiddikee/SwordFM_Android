@@ -2160,6 +2160,20 @@ class _FileBrowserState extends State<FileBrowser> {
           'Delete "${item.name}"?',
           style: TextStyle(color: OneDarkColors.fg),
         ),
+        content: !item.isDirectory
+            ? Text(
+                'The shredder uses a blazing-fast 64KB chunked I/O pattern — '
+                'reads/writes in 64KB blocks to minimize syscalls while still '
+                'securely overwriting every byte. The 3-pass pattern '
+                '(random → complement → random) is the same approach used by '
+                'shred on Linux.',
+                style: TextStyle(
+                  color: OneDarkColors.fgDim,
+                  fontSize: 12,
+                  height: 1.4,
+                ),
+              )
+            : null,
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, 'cancel'),
