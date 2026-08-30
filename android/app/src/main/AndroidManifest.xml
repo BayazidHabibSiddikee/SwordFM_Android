@@ -75,6 +75,20 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Dropbox OAuth callback -->
+        <activity
+            android:name="com.dropbox.core.android.AuthActivity"
+            android:configChanges="orientation|keyboard"
+            android:launchMode="singleTask"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="storagesfm" android:host="dropbox-callback" />
+            </intent-filter>
+        </activity>
+
         <!-- PackageInstaller session result → toast -->
         <receiver
             android:name="com.swordfm.swordfm.InstallReceiver"

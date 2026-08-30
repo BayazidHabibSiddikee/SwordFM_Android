@@ -23,6 +23,7 @@ import 'document_scanner_screen.dart';
 import 'ftp_server_screen.dart';
 import 'cast_screen.dart';
 import 'notepad_screen.dart';
+import 'cloud_browser_screen.dart';
 
 /// Settings screen for configuring the app.
 class SettingsScreen extends StatefulWidget {
@@ -421,6 +422,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => Navigator.of(
               context,
             ).push(MaterialPageRoute(builder: (_) => const DuplicatesScreen())),
+          ),
+          const SizedBox(height: 8),
+          _settingTile(
+            icon: Icons.cloud_sync,
+            title: 'Cloud Storage',
+            subtitle: 'Connect Google Drive or Dropbox',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CloudBrowserScreen()),
+            ),
           ),
           const SizedBox(height: 8),
           _settingTile(

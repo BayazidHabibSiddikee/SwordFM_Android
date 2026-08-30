@@ -24,6 +24,7 @@ import 'screens/document_scanner_screen.dart';
 import 'screens/app_analyzer_screen.dart';
 import 'screens/cast_screen.dart';
 import 'screens/ftp_server_screen.dart';
+import 'screens/cloud_browser_screen.dart';
 import 'services/widget_service.dart';
 import 'services/entitlement_service.dart';
 import 'services/device_service.dart';
@@ -584,6 +585,31 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           ),
                                         ),
                                       const Divider(),
+                                      // ── Cloud Storage section ──────────────────
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        child: Text(
+                                          'Cloud',
+                                          style: TextStyle(
+                                            color: onSurfaceDim,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ),
+                                      _sidebarAction(
+                                        Icons.cloud,
+                                        'Cloud Storage',
+                                        () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => const CloudBrowserScreen(),
+                                          ),
+                                        ),
+                                      ),
+                                      const Divider(),
+                                      // ── Bookmarks section ──────────────────────
                                       Padding(
                                         padding: const EdgeInsets.symmetric(
                                           horizontal: 12,
