@@ -59,6 +59,7 @@ class _AppAnalyzerState extends State<AppAnalyzerScreen> {
   Future<List<_AppInfo>> _getInstalledApps() async {
     final apps = <_AppInfo>[];
     try {
+      // Query ALL apps — system + user
       final installedApps = await InstalledApps.getInstalledApps(true, false);
       for (final app in installedApps) {
         apps.add(_AppInfo(

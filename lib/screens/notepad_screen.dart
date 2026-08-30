@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
+import '../utils/constants.dart' show AppPaths;
 
 /// Notepad screen — create and edit plain text documents.
 class NotepadScreen extends StatefulWidget {
@@ -16,18 +18,26 @@ class _NotepadScreenState extends State<NotepadScreen> {
   late TextEditingController _controller;
   bool _dirty = false;
   String _currentPath = '';
+  String _lastSaveDir = '';
   bool _loaded = false;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController();
+    _loadLastDir();
     if (widget.filePath != null) {
       _currentPath = widget.filePath!;
       _loadFile();
     } else {
+      _currentPath = p.join(AppPaths.documents, 'untitled.txt');
       _loaded = true;
     }
+  }
+
+  Future<void> _loadLastDir() async {
+    final prefs = await SharedPreferences.getInstance();
+    _lastSaveDir = prefs.getString('notepad_last_dir') ?? AppPaths.documents;
   }
 
   Future<void> _loadFile() async {
@@ -55,6 +65,10 @@ class _NotepadScreenState extends State<NotepadScreen> {
     }
     try {
       await File(_currentPath).writeAsString(_controller.text);
+      // Remember the directory for next time
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('notepad_last_dir', p.dirname(_currentPath));
+      _lastSaveDir = p.dirname(_currentPath);
       setState(() => _dirty = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -107,8 +121,8 @@ class _NotepadScreenState extends State<NotepadScreen> {
       ),
     );
     if (choice == null || choice.isEmpty) return;
-    final dir = _currentPath.isNotEmpty
-        ? p.dirname(_currentPath)
+    final dir = _lastSaveDir.isNotEmpty
+        ? _lastSaveDir
         : AppPaths.documents;
     _currentPath = p.join(dir, choice);
     await _save();

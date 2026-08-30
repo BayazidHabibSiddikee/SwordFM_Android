@@ -1,8 +1,12 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:qr_flutter/qr_flutter.dart';
 import '../services/web_share_server.dart';
 import '../services/ftp_server_service.dart';
+import '../services/bluetooth_share_service.dart';
+import '../services/bt_permissions.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 import 'qr_scanner_screen.dart';
@@ -29,9 +33,27 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
   String? _statusMessage;
   String? _ftpStatus;
 
+  // ── Bluetooth state ───────────────────────────────────────────────────
+  final BluetoothShareService _btService = BluetoothShareService();
+  final List<BluetoothDeviceItem> _btDevices = [];
+  final List<StreamSubscription<dynamic>> _btSubs = [];
+  String? _btStatusMessage;
+  BluetoothTransferProgress? _btLastProgress;
+  String? _btLastSha256;
+  bool _btLastVerified = false;
+  bool _btPermissionsReady = false;
+  List<String> _btSendingFiles = [];
+
   @override
   void initState() {
     super.initState();
+    _listenBtStreams();
+  }
+
+  @override
+  void dispose() {
+    for (final sub in _btSubs) sub.cancel();
+    super.dispose();
   }
 
   Future<void> _startServer() async {
@@ -99,6 +121,142 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
   void _stopFtp() {
     _ftpServer.stop();
     setState(() => _ftpStatus = 'FTP server stopped.');
+  }
+
+  // ── Bluetooth helpers ─────────────────────────────────────────────────
+
+  void _listenBtStreams() {
+    _btSubs.add(_btService.stateStream.listen((state) {
+      if (mounted) setState(() {});
+    }));
+    _btSubs.add(_btService.progressStream.listen((progress) {
+      if (mounted) {
+        setState(() {
+          _btLastProgress = progress;
+          _btStatusMessage =
+              '${progress.filename}: ${(progress.percentage * 100).toStringAsFixed(0)}%';
+        });
+      }
+    }));
+    _btSubs.add(_btService.messageStream.listen((msg) {
+      if (mounted) {
+        setState(() {
+          _btStatusMessage = msg;
+          final match = RegExp(r'\b[0-9a-f]{64}\b').firstMatch(msg);
+          _btLastSha256 = match?.group(0);
+          _btLastVerified = _btService.lastTransferVerified;
+        });
+      }
+    }));
+    _btSubs.add(_btService.filePickedStream.listen((paths) {
+      if (mounted) {
+        setState(() {
+          _btSendingFiles = paths.map((path) => p.basename(path)).toList();
+        });
+      }
+    }));
+  }
+
+  Future<void> _requestBtPermissions() async {
+    final supported = await _btService.isSupported();
+    if (!supported) {
+      if (mounted) setState(() => _btStatusMessage = 'Bluetooth not supported.');
+      return;
+    }
+    final granted = await BtPermissions.ensurePermissions();
+    if (granted) {
+      final enabled = await _btService.isEnabled();
+      if (!enabled) await _btService.requestEnable();
+      await _refreshBtDevices();
+    }
+    if (mounted) {
+      setState(() {
+        _btPermissionsReady = granted;
+        _btStatusMessage = granted ? null : 'Bluetooth permissions denied.';
+      });
+    }
+  }
+
+  Future<void> _refreshBtDevices() async {
+    final devices = await _btService.getPairedDevices();
+    if (mounted) {
+      _btDevices.clear();
+      setState(() => _btDevices.addAll(devices));
+    }
+  }
+
+  Future<void> _startBtListening() async {
+    await _btService.startServer();
+  }
+
+  Future<void> _stopBtListening() async {
+    await _btService.stopServer();
+    if (mounted) setState(() => _btStatusMessage = null);
+  }
+
+  Future<void> _connectToDevice(BluetoothDeviceItem device) async {
+    if (mounted) setState(() => _btStatusMessage = 'Connecting to ${device.name}...');
+    await _btService.connectToDevice(device.address);
+    if (mounted) setState(() => _btStatusMessage = 'Connected to ${device.name}');
+  }
+
+  Future<void> _pickAndSendFiles() async {
+    if (_btService.state != BluetoothState.connected) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Connect to a device first.')),
+      );
+      return;
+    }
+    if (_btService.isSending) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Transfer in progress — please wait or cancel.')),
+      );
+      return;
+    }
+    try {
+      await _btService.pickFile();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open file picker: $e')),
+      );
+    }
+  }
+
+  void _cancelBtTransfer() {
+    _btService.cancelTransfer();
+  }
+
+  Color _btStateColor(BluetoothState s) {
+    switch (s) {
+      case BluetoothState.disconnected: return OneDarkColors.dim;
+      case BluetoothState.listening: return OneDarkColors.green;
+      case BluetoothState.connecting: return OneDarkColors.amber;
+      case BluetoothState.connected: return OneDarkColors.cyan;
+      case BluetoothState.sending: return OneDarkColors.purple;
+      case BluetoothState.receiving: return OneDarkColors.cyan;
+    }
+  }
+
+  IconData _btStateIcon(BluetoothState s) {
+    switch (s) {
+      case BluetoothState.disconnected: return Icons.bluetooth_disabled;
+      case BluetoothState.listening: return Icons.bluetooth_searching;
+      case BluetoothState.connecting: return Icons.sync;
+      case BluetoothState.connected: return Icons.bluetooth_connected;
+      case BluetoothState.sending: return Icons.upload_file;
+      case BluetoothState.receiving: return Icons.file_download;
+    }
+  }
+
+  String _btStateLabel(BluetoothState s) {
+    switch (s) {
+      case BluetoothState.disconnected: return 'Disconnected';
+      case BluetoothState.listening: return 'Listening for connections…';
+      case BluetoothState.connecting: return 'Connecting…';
+      case BluetoothState.connected: return 'Connected';
+      case BluetoothState.sending: return 'Sending file…';
+      case BluetoothState.receiving: return 'Receiving file…';
+    }
   }
 
   @override
@@ -303,6 +461,187 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
                         child: Text(
                           _ftpStatus!,
                           style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // ── Bluetooth Section ─────────────────────────────────────────
+            Card(
+              color: OneDarkColors.bgDark,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          _btStateIcon(_btService.state),
+                          size: 20,
+                          color: _btStateColor(_btService.state),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Bluetooth',
+                          style: TextStyle(
+                            color: OneDarkColors.fg,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (_btStatusMessage != null &&
+                            _btService.state != BluetoothState.disconnected)
+                          Flexible(
+                            child: Text(
+                              _btStatusMessage!,
+                              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (_btLastSha256 != null &&
+                        _btService.state != BluetoothState.disconnected)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          'SHA-256: ${_btLastSha256!}${_btLastVerified ? ' ✓ verified' : ' (not verified)'}',
+                          style: TextStyle(
+                            color: _btLastVerified ? OneDarkColors.green : OneDarkColors.amber,
+                            fontSize: 10,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    if (_btSendingFiles.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          'Queue: ${_btSendingFiles.join(", ")}',
+                          style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+                        ),
+                      ),
+                    if (_btLastProgress != null) ...[
+                      LinearProgressIndicator(
+                        value: _btLastProgress!.percentage,
+                        minHeight: 6,
+                        borderRadius: BorderRadius.circular(4),
+                        backgroundColor: OneDarkColors.dim,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          _btService.state == BluetoothState.sending
+                              ? OneDarkColors.purple
+                              : OneDarkColors.cyan,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _requestBtPermissions,
+                            icon: const Icon(Icons.privacy_tip, size: 18),
+                            label: const Text('Request Permissions'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: OneDarkColors.cyan,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _btPermissionsReady &&
+                                    _btService.state == BluetoothState.disconnected
+                                ? _startBtListening
+                                : null,
+                            icon: const Icon(Icons.bluetooth_connected, size: 18),
+                            label: const Text('Start Listening'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: OneDarkColors.green,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (_btService.state == BluetoothState.connected &&
+                        !_btService.isSending)
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _pickAndSendFiles,
+                          icon: const Icon(Icons.upload_file, size: 18),
+                          label: const Text('Send Files'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: OneDarkColors.amber,
+                          ),
+                        ),
+                      ),
+                    if (_btService.state == BluetoothState.sending)
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _cancelBtTransfer,
+                          icon: const Icon(Icons.close, size: 18),
+                          label: const Text('Cancel Transfer'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: OneDarkColors.red,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    if (_btDevices.isNotEmpty) ...[
+                      Text(
+                        'Paired Devices',
+                        style: TextStyle(
+                          color: OneDarkColors.cyan,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 160),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: _btDevices.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final device = _btDevices[index];
+                            return ListTile(
+                              dense: true,
+                              leading: Icon(
+                                Icons.bluetooth,
+                                size: 18,
+                                color: OneDarkColors.cyan,
+                              ),
+                              title: Text(
+                                device.name,
+                                style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
+                              ),
+                              subtitle: Text(
+                                device.address,
+                                style: TextStyle(color: OneDarkColors.fgDim, fontSize: 10),
+                              ),
+                              trailing: _btService.state == BluetoothState.listening
+                                  ? ElevatedButton(
+                                      onPressed: () => _connectToDevice(device),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: OneDarkColors.green,
+                                        minimumSize: const Size(56, 28),
+                                      ),
+                                      child: const Text('Connect', style: TextStyle(fontSize: 10)),
+                                    )
+                                  : null,
+                            );
+                          },
                         ),
                       ),
                     ],

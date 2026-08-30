@@ -2784,33 +2784,28 @@ class _FileBrowserState extends State<FileBrowser> {
                     ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         // Image files show a real thumbnail instead of an icon.
                         if (item.isImage)
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
-                            child: LayoutBuilder(
-                              builder: (ctx, constraints) {
-                                final size = constraints.maxWidth > 0
-                                    ? constraints.maxWidth
-                                    : 64.0;
-                                return ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    maxHeight: size * 0.75,
-                                    maxWidth: size,
+                            child: FittedBox(
+                              fit: BoxFit.cover,
+                              child: SizedBox(
+                                width: 72,
+                                height: 72,
+                                child: Image.file(
+                                  File(item.path),
+                                  cacheWidth: 200,
+                                  errorBuilder: (_, __, ___) => Icon(
+                                    item.icon,
+                                    size: 32,
+                                    color: item.iconColor,
                                   ),
-                                  child: Image.file(
-                                    File(item.path),
-                                    fit: BoxFit.cover,
-                                    cacheWidth: 200,
-                                    errorBuilder: (_, __, ___) => Icon(
-                                      item.icon,
-                                      size: 32,
-                                      color: item.iconColor,
-                                    ),
-                                  ),
-                                );
-                              },
+                                ),
+                              ),
                             ),
                           )
                         else

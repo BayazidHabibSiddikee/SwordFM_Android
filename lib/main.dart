@@ -12,7 +12,6 @@ import 'utils/file_utils.dart' show FileItem, FileUtils;
 import 'widgets/preview_panel.dart';
 import 'screens/search_screen.dart';
 import 'screens/trash_screen.dart';
-import 'screens/bluetooth_screen.dart';
 import 'screens/lan_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
@@ -526,6 +525,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           ),
                                         ),
                                       ),
+                                      _sidebarAction(
+                                        Icons.cloud,
+                                        'Network (FTP/WebDAV)',
+                                        () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => const NetworkScreen(),
+                                          ),
+                                        ),
+                                      ),
                                       const Divider(),
                                       // ── Devices section ──────────────────────
                                       if (_volumes != null &&
@@ -844,7 +852,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               ],
             ),
             // Tab 1-6: Full-screen screens.
-            BluetoothScreen(),
             LANSharingScreen(),
             SettingsScreen(),
             StorageAnalysisScreen(rootPath: AppPaths.home),
@@ -868,10 +875,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         indicatorColor: cs.primaryContainer,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.folder), label: 'Files'),
-          NavigationDestination(
-            icon: Icon(Icons.bluetooth),
-            label: 'BT',
-          ),
           NavigationDestination(icon: Icon(Icons.wifi), label: 'LAN'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Storage'),

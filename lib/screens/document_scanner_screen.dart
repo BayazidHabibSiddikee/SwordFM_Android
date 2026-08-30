@@ -5,8 +5,10 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:open_file/open_file.dart';
 import '../theme/theme.dart';
+import '../utils/constants.dart' show AppPaths;
 
 /// Document scanner — capture pages from camera or gallery, assemble into PDF.
 class DocumentScannerScreen extends StatefulWidget {
@@ -57,54 +59,30 @@ class _ScannerState extends State<DocumentScannerScreen> {
           ),
         );
       }
+      // Remember last save directory
+      final prefs = await SharedPreferences.getInstance();
+      final lastDir = prefs.getString('scanner_last_dir') ?? AppPaths.downloads;
+
       // Ask user for filename before saving
       final nameController = TextEditingController(
         text: 'scan_${DateTime.now().millisecondsSinceEpoch}.pdf',
       );
-      final fileName = await showDialog<String>(
+      final result = await showDialog<Map<String, String>>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: OneDarkColors.bgDark,
-          title: Text('Save PDF', style: TextStyle(color: OneDarkColors.fg)),
-          content: TextField(
-            controller: nameController,
-            style: TextStyle(color: OneDarkColors.fg),
-            autofocus: true,
-            decoration: InputDecoration(
-              labelText: 'Filename',
-              labelStyle: TextStyle(color: OneDarkColors.fgDim),
-              suffixText: '.pdf',
-              filled: true,
-              fillColor: OneDarkColors.bg,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: OneDarkColors.dim),
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('Cancel', style: TextStyle(color: OneDarkColors.fgDim)),
-            ),
-            TextButton(
-              onPressed: () {
-                var name = nameController.text.trim();
-                if (!name.endsWith('.pdf')) name = '$name.pdf';
-                Navigator.pop(ctx, name);
-              },
-              child: Text('Save', style: TextStyle(color: OneDarkColors.cyan)),
-            ),
-          ],
+        builder: (ctx) => _SaveDialog(
+          nameController: nameController,
+          initialDir: lastDir,
         ),
       );
-      if (fileName == null) {
+      if (result == null) {
         setState(() => _building = false);
         return;
       }
-      // Save to Downloads
-      final dir = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
-      final outPath = p.join(dir.path, fileName);
+      final fileName = result['name']!;
+      final saveDir = result['dir']!;
+      // Remember this directory for next time
+      await prefs.setString('scanner_last_dir', saveDir);
+      final outPath = p.join(saveDir, fileName);
       final file = File(outPath);
       await file.writeAsBytes(await doc.save());
       if (mounted) {
@@ -319,4 +297,119 @@ class _ScannerState extends State<DocumentScannerScreen> {
 class _ScannedPage {
   final String path;
   const _ScannedPage({required this.path});
+}
+
+/// Save dialog that remembers the last used directory.
+class _SaveDialog extends StatefulWidget {
+  final TextEditingController nameController;
+  final String initialDir;
+  const _SaveDialog({required this.nameController, required this.initialDir});
+
+  @override
+  State<_SaveDialog> createState() => _SaveDialogState();
+}
+
+class _SaveDialogState extends State<_SaveDialog> {
+  late String _saveDir;
+
+  @override
+  void initState() {
+    super.initState();
+    _saveDir = widget.initialDir;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: OneDarkColors.bgDark,
+      title: Text('Save PDF', style: TextStyle(color: OneDarkColors.fg)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: widget.nameController,
+            style: TextStyle(color: OneDarkColors.fg),
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'Filename',
+              labelStyle: TextStyle(color: OneDarkColors.fgDim),
+              suffixText: '.pdf',
+              filled: true,
+              fillColor: OneDarkColors.bg,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: OneDarkColors.dim),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          InkWell(
+            onTap: _pickFolder,
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: OneDarkColors.bg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: OneDarkColors.dim),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.folder, size: 18, color: OneDarkColors.amber),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _saveDir,
+                      style: TextStyle(color: OneDarkColors.fg, fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, size: 18, color: OneDarkColors.fgDim),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('Cancel', style: TextStyle(color: OneDarkColors.fgDim)),
+        ),
+        TextButton(
+          onPressed: () {
+            var name = widget.nameController.text.trim();
+            if (!name.endsWith('.pdf')) name = '$name.pdf';
+            Navigator.pop(context, {'name': name, 'dir': _saveDir});
+          },
+          child: Text('Save', style: TextStyle(color: OneDarkColors.cyan)),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickFolder() async {
+    final dirs = [
+      AppPaths.downloads,
+      AppPaths.documents,
+      AppPaths.home,
+    ];
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bgDark,
+        title: Text('Save to', style: TextStyle(color: OneDarkColors.fg)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: dirs.map((d) => ListTile(
+            dense: true,
+            leading: Icon(Icons.folder, size: 18, color: OneDarkColors.amber),
+            title: Text(d.split('/').last, style: TextStyle(color: OneDarkColors.fg, fontSize: 13)),
+            subtitle: Text(d, style: TextStyle(color: OneDarkColors.fgDim, fontSize: 10)),
+            onTap: () => Navigator.pop(context, d),
+          )).toList(),
+        ),
+      ),
+    );
+    if (picked != null) setState(() => _saveDir = picked);
+  }
 }

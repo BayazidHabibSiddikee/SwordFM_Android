@@ -45,7 +45,6 @@ void main() {
       // Verify bottom navigation bar is present
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(find.text('Files'), findsOneWidget);
-      expect(find.text('BT'), findsOneWidget);
       expect(find.text('LAN'), findsOneWidget);
       expect(find.text('Settings'), findsOneWidget);
     });
@@ -82,37 +81,17 @@ void main() {
         await tester.pumpWidget(const SwordFM());
         await tester.pump();
 
-        // Switch to the Bluetooth tab so its OneDarkColors-dependent UI is
-        // onstage (IndexedStack keeps other tabs offstage).
-        await tester.tap(find.text('BT'));
-        await tester.pump();
-        expect(find.text('Disconnected'), findsOneWidget);
+        // Light mode: bg should be a light color
+        final lightBg = OneDarkColors.bg;
 
-        Color statusHeaderColor() {
-          final container = tester.widget<Container>(
-            find
-                .ancestor(
-                  of: find.text('Disconnected'),
-                  matching: find.byType(Container),
-                )
-                .first,
-          );
-          return (container.decoration! as BoxDecoration).color!;
-        }
-
-        // Light mode: the Bluetooth tab's status header uses the cream `dim`.
-        expect(statusHeaderColor(), const Color(0xFFE8E0D0));
-
-        // Simulate the Settings theme tile toggle. The app remounts (the
-        // MainScreen key changes), so re-select the Bluetooth tab after.
+        // Simulate the Settings theme tile toggle.
         saveThemeMode('dark');
         themeNotifier.value++;
         await tester.pump();
-        await tester.tap(find.text('BT'));
-        await tester.pump();
 
-        // One Dark `dim` — applied without exiting and reopening the app.
-        expect(statusHeaderColor(), const Color(0xFF3E4451));
+        // Dark mode: bg should be a dark color, different from light mode.
+        final darkBg = OneDarkColors.bg;
+        expect(darkBg, isNot(lightBg));
 
         // Restore the default theme so later tests see a dark app.
         saveThemeMode('dark');

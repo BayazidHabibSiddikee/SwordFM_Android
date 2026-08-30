@@ -43,9 +43,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
   Future<void> _startShell() async {
     // Prefer the requested directory; fall back to home, never '/' — root is
-    // read-only/locked on Android and makes the shell unusable. Home is only
-    // used when it is actually writable (needs "All files access"), otherwise
-    // the shell lands in the app's own writable temp dir.
+    // read-only/locked on Android and makes the shell unusable.
     var cwd = widget.startPath;
     if (cwd.isEmpty ||
         cwd == '/' ||
@@ -56,14 +54,21 @@ class _TerminalScreenState extends State<TerminalScreen> {
           ? home
           : Directory.systemTemp.path;
     }
-    // Prefer Termux's shell when installed — it ships a package manager
-    // (pkg/apt), so `pkg install python` / `pkg install cmatrix` work. The
-    // bare /system/bin/sh has no package manager at all.
-    const termuxShell = '/data/data/com.termux/files/usr/bin/bash';
-    final usingTermux = File(termuxShell).existsSync();
-    final shell = usingTermux
-        ? termuxShell
-        : (File('/system/bin/sh').existsSync() ? '/system/bin/sh' : '/bin/sh');
+
+    // Try multiple shell paths in order of preference
+    const shells = <String>[
+      '/data/data/com.termux/files/usr/bin/bash',
+      '/data/data/com.termux/files/usr/bin/sh',
+      '/system/bin/sh',
+      '/system/xbin/sh',
+      '/bin/sh',
+    ];
+    String shell = shells.firstWhere(
+      (s) => File(s).existsSync(),
+      orElse: () => '/system/bin/sh',
+    );
+
+    final usingTermux = shell.startsWith('/data/data/com.termux');
     final shellPath = usingTermux
         ? '/data/data/com.termux/files/usr/bin:'
               '/data/data/com.termux/files/usr/bin/applets:'
@@ -80,6 +85,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
           'HOME': cwd,
           'LANG': 'en_US.UTF-8',
           'TMPDIR': Directory.systemTemp.path,
+          'SHELL': shell,
         },
       );
 
