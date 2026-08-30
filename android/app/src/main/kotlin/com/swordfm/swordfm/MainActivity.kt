@@ -10,12 +10,17 @@ package com.swordfm.swordfm
 // Sender MUST include "checksum"; receiver verifies and deletes on mismatch.
 // ============================================================================
 
+import android.app.PendingIntent
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.os.Build
+import android.os.ParcelFileDescriptor
 import android.provider.Settings
 import android.net.Uri
 import android.os.Bundle
@@ -24,6 +29,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.storage.StorageManager
 import android.webkit.MimeTypeMap
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodCall
@@ -133,6 +139,9 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                 .setMethodCallHandler(this)
             // Storage volumes + "All files access" permission live here.
             MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/devices")
+                .setMethodCallHandler(this)
+            // APK / XAPK installation via PackageInstaller.
+            MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/installer")
                 .setMethodCallHandler(this)
         }
     }
@@ -315,8 +324,90 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     result.error("SHARE_FAILED", e.message, null)
                 }
             }
+            "installApk" -> {
+                val path = call.argument<String>("path") ?: ""
+                result.success(installApks(listOf(path)))
+            }
+            "installApks" -> {
+                @Suppress("UNCHECKED_CAST")
+                val paths = call.argument<List<String>>("paths") ?: emptyList()
+                result.success(installApks(paths))
+            }
             else -> {
                 result.notImplemented()
+            }
+        }
+    }
+
+    /** True when this app may create PackageInstaller sessions (API 26+). */
+    private fun installPermissionGranted(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            packageManager.canRequestPackageInstalls()
+        } else {
+            true
+        }
+    }
+
+    /**
+     * Installs [paths] (a single APK, or base + split APKs for XAPK) via
+     * PackageInstaller, streaming each file. A single APK without install
+     * permission falls back to the system installer UI (ACTION_VIEW).
+     */
+    private fun installApks(paths: List<String>): Boolean {
+        val files = paths.filter { File(it).exists() }
+        if (files.isEmpty()) return false
+        if (files.size == 1 && !installPermissionGranted()) {
+            return try {
+                openFileWithChooser(files.first())
+            } catch (_: Exception) {
+                false
+            }
+        }
+        return try {
+            val packageInstaller = packageManager.packageInstaller
+            val params = PackageInstaller.SessionParams(
+                PackageInstaller.SessionParams.MODE_FULL_INSTALL
+            )
+            val sessionId = packageInstaller.createSession(params)
+            val session = packageInstaller.openSession(sessionId)
+            // Stream every APK (base + splits) into the session — the
+            // installer infers split roles from the file names.
+            for (path in files) {
+                val file = File(path)
+                val pfd = ParcelFileDescriptor.open(
+                    file,
+                    ParcelFileDescriptor.MODE_READ_ONLY
+                )
+                val stream = session.openWrite(file.name, 0, file.length())
+                FileInputStream(file).use { input ->
+                    val buffer = ByteArray(65536)
+                    var n: Int
+                    while (input.read(buffer).also { n = it } != -1) {
+                        stream.write(buffer, 0, n)
+                    }
+                }
+                session.fsync(stream)
+                stream.close()
+                pfd.close()
+            }
+            val pi = PendingIntent.getBroadcast(
+                this,
+                sessionId,
+                Intent(this, InstallReceiver::class.java)
+                    .putExtra("sessionId", sessionId),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            session.commit(pi.intentSender)
+            session.close()
+            true
+        } catch (_: Exception) {
+            // Missing "Install unknown apps" permission — fall back to the
+            // system installer UI for a single APK.
+            try {
+                if (files.size == 1) openFileWithChooser(files.first())
+                false
+            } catch (_: Exception) {
+                false
             }
         }
     }
@@ -767,5 +858,24 @@ private fun readFully(stream: InputStream, buffer: ByteArray) {
         val read = stream.read(buffer, offset, buffer.size - offset)
         if (read == -1) throw IOException("Stream closed while reading")
         offset += read
+    }
+}
+
+/** Receives the PackageInstaller session result broadcast and surfaces it. */
+class InstallReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -1)
+        val message = when (status) {
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+                if (confirm != null) {
+                    context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+                return
+            }
+            PackageInstaller.STATUS_SUCCESS -> "App installed"
+            else -> "Install failed ($status)"
+        }
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 }

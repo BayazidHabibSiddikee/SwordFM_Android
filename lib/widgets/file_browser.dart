@@ -12,6 +12,7 @@ import '../services/widget_service.dart';
 import '../utils/file_utils.dart';
 import '../services/archive_service.dart';
 import '../services/open_with_service.dart';
+import '../services/installer_service.dart';
 import '../services/share_service.dart';
 import '../screens/terminal_screen.dart';
 import '../screens/folder_graph_screen.dart';
@@ -1904,6 +1905,12 @@ class _FileBrowserState extends State<FileBrowser> {
           Icons.archive,
           () => _compressSelection([item.path]),
         ),
+        if (item.extension == '.apk' || item.extension == '.xapk')
+          _menuItem(
+            'Install',
+            Icons.system_update_alt,
+            () => _installPackage(item),
+          ),
         const PopupMenuDivider(),
         if (item.isText || item.extension == '.docx')
           _menuItem('Convert…', Icons.transform, () {
@@ -2063,6 +2070,19 @@ class _FileBrowserState extends State<FileBrowser> {
       SnackBar(
         content: Text('Cannot open: $e'),
         backgroundColor: OneDarkColors.red,
+      ),
+    );
+  }
+
+  Future<void> _installPackage(FileItem item) async {
+    final error = item.extension == '.xapk'
+        ? await InstallerService.installXapk(item.path)
+        : await InstallerService.installApk(item.path);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(error ?? 'Installing…'),
+        backgroundColor: error == null ? OneDarkColors.cyan : OneDarkColors.red,
       ),
     );
   }

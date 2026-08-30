@@ -75,6 +75,11 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- PackageInstaller session result → toast -->
+        <receiver
+            android:name="com.swordfm.swordfm.InstallReceiver"
+            android:exported="false" />
+
         <!-- Home Screen Widget -->
         <receiver
             android:name=".SwordFmWidgetProvider"
