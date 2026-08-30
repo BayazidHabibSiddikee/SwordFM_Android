@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,7 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
+import 'package:pointycastle/export.dart';
 
 /// Connection profile for remote servers (WebDAV or SFTP).
 class NetworkProfile {
@@ -58,50 +60,76 @@ class NetworkProfile {
 
 /// Service managing WebDAV and SFTP connections.
 /// Provides listing, uploading, and downloading over remote protocols.
-/// AES-256 encryption helpers for secure credential storage.
-/// Uses flutter_secure_storage for key storage and crypto package for encryption.
+/// AES-256-GCM encryption helpers for secure credential storage.
+/// Uses flutter_secure_storage for key/IV storage and pointycastle for AES-GCM.
 class _CryptoHelper {
   static const _keyStorage = FlutterSecureStorage();
-  static const _keyName = 'swordfm_net_key';
+  static const _keyName = 'swordfm_net_key_v3';
+  static const _ivName = 'swordfm_net_iv_v3';
+  static const _keyLength = 32;
+  static const _ivLength = 12;
 
-  /// Generate and store a random 32-byte AES key.
+  /// Generate and store a random 32-byte AES key + 12-byte IV if not present.
   static Future<void> initKey() async {
     final existing = await _keyStorage.read(key: _keyName);
     if (existing != null) return;
-    final key = List<int>.generate(
-      32,
-      (_) => DateTime.now().millisecondsSinceEpoch % 256,
+    final secureRandom = Random.secure();
+    final keyBytes = Uint8List.fromList(
+      List<int>.generate(_keyLength, (_) => secureRandom.nextInt(256)),
     );
-    await _keyStorage.write(key: _keyName, value: base64Encode(key));
+    final ivBytes = Uint8List.fromList(
+      List<int>.generate(_ivLength, (_) => secureRandom.nextInt(256)),
+    );
+    await _keyStorage.write(key: _keyName, value: base64Encode(keyBytes));
+    await _keyStorage.write(key: _ivName, value: base64Encode(ivBytes));
   }
 
-  /// Encrypt plaintext with the stored key.
+  /// Encrypt plaintext with AES-256-GCM.
   static Future<String> encrypt(String plaintext) async {
     await initKey();
     final keyStr = await _keyStorage.read(key: _keyName);
-    if (keyStr == null) throw Exception('Encryption key not found');
+    final ivStr = await _keyStorage.read(key: _ivName);
+    if (keyStr == null || ivStr == null) throw Exception('Encryption key not found');
     final keyBytes = base64Decode(keyStr);
-    // Simple XOR-based obfuscation (not production-grade, sufficient for local storage)
-    final plainBytes = utf8.encode(plaintext);
-    final encrypted = <int>[];
-    for (int i = 0; i < plainBytes.length; i++) {
-      encrypted.add(plainBytes[i] ^ keyBytes[i % keyBytes.length]);
-    }
-    return base64Encode(encrypted);
+    final ivBytes = base64Decode(ivStr);
+
+    final cipher = GCMBlockCipher(AESEngine())
+      ..init(
+        true,
+        AEADParameters(
+          KeyParameter(keyBytes),
+          128, // MAC tag length in bits
+          ivBytes,
+          Uint8List(0),
+        ),
+      );
+    final plainBytes = Uint8List.fromList(utf8.encode(plaintext));
+    final encryptedBytes = cipher.process(plainBytes);
+    return base64Encode(encryptedBytes);
   }
 
-  /// Decrypt ciphertext with the stored key.
+  /// Decrypt AES-256-GCM ciphertext.
   static Future<String> decrypt(String ciphertext) async {
     await initKey();
     final keyStr = await _keyStorage.read(key: _keyName);
-    if (keyStr == null) throw Exception('Decryption key not found');
+    final ivStr = await _keyStorage.read(key: _ivName);
+    if (keyStr == null || ivStr == null) throw Exception('Decryption key not found');
     final keyBytes = base64Decode(keyStr);
+    final ivBytes = base64Decode(ivStr);
+
+    final cipher = GCMBlockCipher(AESEngine())
+      ..init(
+        false,
+        AEADParameters(
+          KeyParameter(keyBytes),
+          128,
+          ivBytes,
+          Uint8List(0),
+        ),
+      );
     final encBytes = base64Decode(ciphertext);
-    final decrypted = <int>[];
-    for (int i = 0; i < encBytes.length; i++) {
-      decrypted.add(encBytes[i] ^ keyBytes[i % keyBytes.length]);
-    }
-    return utf8.decode(decrypted);
+    final decryptedBytes = cipher.process(encBytes);
+    return utf8.decode(decryptedBytes);
   }
 }
 

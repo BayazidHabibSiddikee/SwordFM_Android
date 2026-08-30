@@ -51,3 +51,5 @@ Thumbs.db
 .env.local
 .env.*.local
 .flutter-plugins-dependencies
+google-services.json
+firebase_local.properties

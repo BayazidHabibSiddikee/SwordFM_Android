@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'google_drive_service.dart' show CloudFile;
 
@@ -14,6 +14,8 @@ class OpenDriveService {
   static const _kApiKeyKey = 'opendrive_api_key';
   static const _kExpiryKey = 'opendrive_token_expiry';
   static const _kBaseUrl = 'https://dev.openrazer.com/api';
+
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
   String? _apiKey;
   String? _accessToken;
@@ -26,13 +28,12 @@ class OpenDriveService {
 
   /// Load saved config.
   Future<void> loadConfig() async {
-    final prefs = await SharedPreferences.getInstance();
-    _apiKey = prefs.getString(_kApiKeyKey);
-    _accessToken = prefs.getString(_kAccessTokenKey);
-    _refreshToken = prefs.getString(_kRefreshTokenKey);
-    final expiryMs = prefs.getInt(_kExpiryKey);
+    _apiKey = await _secureStorage.read(key: _kApiKeyKey);
+    _accessToken = await _secureStorage.read(key: _kAccessTokenKey);
+    _refreshToken = await _secureStorage.read(key: _kRefreshTokenKey);
+    final expiryMs = await _secureStorage.read(key: _kExpiryKey);
     if (expiryMs != null) {
-      _tokenExpiry = DateTime.fromMillisecondsSinceEpoch(expiryMs);
+      _tokenExpiry = DateTime.fromMillisecondsSinceEpoch(int.parse(expiryMs));
     }
 
     if (_accessToken != null && _tokenExpiry != null) {
@@ -47,8 +48,7 @@ class OpenDriveService {
   /// Save API key.
   Future<void> saveApiKey(String apiKey) async {
     _apiKey = apiKey;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kApiKeyKey, apiKey);
+    await _secureStorage.write(key: _kApiKeyKey, value: apiKey);
   }
 
   /// Connect using OAuth2 with API key.
@@ -99,12 +99,11 @@ class OpenDriveService {
         _tokenExpiry = DateTime.now().add(Duration(seconds: expiresIn));
         _isConnected = true;
 
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_kAccessTokenKey, _accessToken!);
+        await _secureStorage.write(key: _kAccessTokenKey, value: _accessToken!);
         if (_refreshToken != null) {
-          await prefs.setString(_kRefreshTokenKey, _refreshToken!);
+          await _secureStorage.write(key: _kRefreshTokenKey, value: _refreshToken!);
         }
-        await prefs.setInt(_kExpiryKey, _tokenExpiry!.millisecondsSinceEpoch);
+        await _secureStorage.write(key: _kExpiryKey, value: _tokenExpiry!.millisecondsSinceEpoch.toString());
         return true;
       }
       return false;
@@ -134,9 +133,8 @@ class OpenDriveService {
         final expiresIn = data['expires_in'] as int? ?? 3600;
         _tokenExpiry = DateTime.now().add(Duration(seconds: expiresIn));
 
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_kAccessTokenKey, _accessToken!);
-        await prefs.setInt(_kExpiryKey, _tokenExpiry!.millisecondsSinceEpoch);
+        await _secureStorage.write(key: _kAccessTokenKey, value: _accessToken!);
+        await _secureStorage.write(key: _kExpiryKey, value: _tokenExpiry!.millisecondsSinceEpoch.toString());
         _isConnected = true;
         return true;
       }
@@ -312,9 +310,8 @@ class OpenDriveService {
     _refreshToken = null;
     _tokenExpiry = null;
     _isConnected = false;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kAccessTokenKey);
-    await prefs.remove(_kRefreshTokenKey);
-    await prefs.remove(_kExpiryKey);
+    await _secureStorage.delete(key: _kAccessTokenKey);
+    await _secureStorage.delete(key: _kRefreshTokenKey);
+    await _secureStorage.delete(key: _kExpiryKey);
   }
 }

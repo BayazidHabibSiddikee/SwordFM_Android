@@ -1,0 +1,11 @@
+1. I don't know where does it saves the scanned documents, neither it give chances to rename the file 
+2. cast doesn't work 
+3. app analyzer doesn't work properly 
+4. Insert the FTP server inside LAN section
+5. problem with the changing of theme 
+6. While seeing pictures in GRID view it has red marks as bottom overflowed by 2
+7. terminal is not working 
+8. In cloud storage add opendrive too 
+9. Add photo editing options too with some basic tools 
+10. Open QR code didn't worked 
+11. PDF and other conversions where ??

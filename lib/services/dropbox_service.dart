@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'google_drive_service.dart' show CloudFile;
 
 /// Dropbox service — direct REST API via Dio, no SDK dependency.
@@ -46,14 +46,13 @@ class DropboxService {
   // ── Config persistence ───────────────────────────────────────────────
 
   Future<void> loadConfig() async {
-    final prefs = await SharedPreferences.getInstance();
-    _appKey = prefs.getString(_kAppKeyKey);
-    _appSecret = prefs.getString(_kAppSecretKey);
-    _accessToken = await _secureStorage.read(key: _kAccessTokenKey) ?? prefs.getString(_kAccessTokenKey);
-    _refreshToken = await _secureStorage.read(key: _kRefreshTokenKey) ?? prefs.getString(_kRefreshTokenKey);
-    final expiry = prefs.getInt(_kExpiryMsKey);
-    if (expiry != null) _tokenExpiryMs = expiry;
-    final acctJson = prefs.getString(_kAccountInfoKey);
+    _appKey = await _secureStorage.read(key: _kAppKeyKey);
+    _appSecret = await _secureStorage.read(key: _kAppSecretKey);
+    _accessToken = await _secureStorage.read(key: _kAccessTokenKey);
+    _refreshToken = await _secureStorage.read(key: _kRefreshTokenKey);
+    final expiryStr = await _secureStorage.read(key: _kExpiryMsKey);
+    if (expiryStr != null) _tokenExpiryMs = int.tryParse(expiryStr);
+    final acctJson = await _secureStorage.read(key: _kAccountInfoKey);
     if (acctJson != null) {
       try {
         _accountInfo = json.decode(acctJson) as Map<String, dynamic>;
@@ -72,9 +71,8 @@ class DropboxService {
   Future<void> saveConfig({required String appKey, required String appSecret}) async {
     _appKey = appKey;
     _appSecret = appSecret;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kAppKeyKey, appKey);
-    await prefs.setString(_kAppSecretKey, appSecret);
+    await _secureStorage.write(key: _kAppKeyKey, value: appKey);
+    await _secureStorage.write(key: _kAppSecretKey, value: appSecret);
   }
 
   Future<void> clearConfig() async {
@@ -85,15 +83,12 @@ class DropboxService {
     _tokenExpiryMs = null;
     _isConnected = false;
     _accountInfo = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kAppKeyKey);
-    await prefs.remove(_kAppSecretKey);
-    await prefs.remove(_kAccessTokenKey);
-    await prefs.remove(_kRefreshTokenKey);
-    await prefs.remove(_kExpiryMsKey);
-    await prefs.remove(_kAccountInfoKey);
+    await _secureStorage.delete(key: _kAppKeyKey);
+    await _secureStorage.delete(key: _kAppSecretKey);
     await _secureStorage.delete(key: _kAccessTokenKey);
     await _secureStorage.delete(key: _kRefreshTokenKey);
+    await _secureStorage.delete(key: _kExpiryMsKey);
+    await _secureStorage.delete(key: _kAccountInfoKey);
   }
 
   // ── OAuth flow ───────────────────────────────────────────────────────
@@ -204,17 +199,14 @@ class DropboxService {
   }
 
   Future<void> _persistTokens() async {
-    final prefs = await SharedPreferences.getInstance();
     if (_accessToken != null) {
       await _secureStorage.write(key: _kAccessTokenKey, value: _accessToken!);
-      await prefs.setString(_kAccessTokenKey, _accessToken!);
     }
     if (_refreshToken != null) {
       await _secureStorage.write(key: _kRefreshTokenKey, value: _refreshToken!);
-      await prefs.setString(_kRefreshTokenKey, _refreshToken!);
     }
     if (_tokenExpiryMs != null) {
-      await prefs.setInt(_kExpiryMsKey, _tokenExpiryMs!);
+      await _secureStorage.write(key: _kExpiryMsKey, value: _tokenExpiryMs.toString());
     }
   }
 
@@ -331,8 +323,7 @@ class DropboxService {
     final result = await _apiPost<Map<String, dynamic>>('users/get_current_account');
     if (result != null) {
       _accountInfo = result;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_kAccountInfoKey, json.encode(result));
+      await _secureStorage.write(key: _kAccountInfoKey, value: json.encode(result));
     }
     return result;
   }
@@ -414,17 +405,14 @@ class DropboxService {
     _tokenExpiryMs = null;
     _isConnected = false;
     _accountInfo = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_kAccessTokenKey);
-    await prefs.remove(_kRefreshTokenKey);
-    await prefs.remove(_kExpiryMsKey);
-    await prefs.remove(_kAccountInfoKey);
     await _secureStorage.delete(key: _kAccessTokenKey);
     await _secureStorage.delete(key: _kRefreshTokenKey);
+    await _secureStorage.delete(key: _kExpiryMsKey);
   }
 
   static String _randomHex(int byteCount) {
-    final bytes = List<int>.generate(byteCount, (_) => DateTime.now().millisecond % 256);
+    final secureRandom = Random.secure();
+    final bytes = List<int>.generate(byteCount, (_) => secureRandom.nextInt(256));
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 }
