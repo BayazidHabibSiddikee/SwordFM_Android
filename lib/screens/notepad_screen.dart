@@ -21,6 +21,10 @@ class _NotepadScreenState extends State<NotepadScreen> {
   String _currentPath = '';
   String _lastSaveDir = '';
   bool _loaded = false;
+  /// True for a brand-new document (not opened from a file) — the first Save
+  /// runs Save As so the user explicitly chooses name and location, and always
+  /// knows where the file lands.
+  bool _isNewDocument = false;
 
   @override
   void initState() {
@@ -32,6 +36,7 @@ class _NotepadScreenState extends State<NotepadScreen> {
       _loadFile();
     } else {
       _currentPath = p.join(AppPaths.documents, 'untitled.txt');
+      _isNewDocument = true;
       _loaded = true;
     }
   }
@@ -60,33 +65,63 @@ class _NotepadScreenState extends State<NotepadScreen> {
   }
 
   Future<void> _save() async {
-    if (_currentPath.isEmpty) {
+    if (_currentPath.isEmpty || _isNewDocument) {
       await _saveAs();
       return;
     }
     try {
+      // Ensure the target directory exists before writing — on Android the
+      // Documents folder is often created lazily and a missing parent makes
+      // the write throw PathNotFoundException.
+      final saveDir = p.dirname(_currentPath);
+      await Directory(saveDir).create(recursive: true);
       await File(_currentPath).writeAsString(_controller.text);
       // Remember the directory for next time
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('notepad_last_dir', p.dirname(_currentPath));
-      _lastSaveDir = p.dirname(_currentPath);
+      await prefs.setString('notepad_last_dir', saveDir);
+      _lastSaveDir = saveDir;
       setState(() => _dirty = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Saved: ${p.basename(_currentPath)}'),
+            // Show the full path so the user always knows where the file
+            // was written (a bare filename made saves feel lost).
+            content: Text('Saved to: $_currentPath'),
             backgroundColor: OneDarkColors.green,
           ),
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Save failed: $e'),
-            backgroundColor: OneDarkColors.red,
-          ),
-        );
+      // The chosen location is unwritable (e.g. scoped storage on Android
+      // without MANAGE_EXTERNAL_STORAGE). Fall back to the SwiftFM downloads
+      // folder, which is always writable, rather than losing the edit.
+      final fallbackDir = AppPaths.swordfmDownloads;
+      try {
+        await Directory(fallbackDir).create(recursive: true);
+        final fallback = p.join(fallbackDir, p.basename(_currentPath));
+        await File(fallback).writeAsString(_controller.text);
+        _currentPath = fallback;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('notepad_last_dir', fallbackDir);
+        _lastSaveDir = fallbackDir;
+        setState(() => _dirty = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Saved to: $fallback'),
+              backgroundColor: OneDarkColors.green,
+            ),
+          );
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Save failed: $e'),
+              backgroundColor: OneDarkColors.red,
+            ),
+          );
+        }
       }
     }
   }
@@ -174,6 +209,7 @@ class _NotepadScreenState extends State<NotepadScreen> {
     if (!name.endsWith('.txt')) name = '$name.txt';
     final dir = choice['dir'] ?? AppPaths.documents;
     _currentPath = p.join(dir, name);
+    _isNewDocument = false;
     await _save();
   }
 

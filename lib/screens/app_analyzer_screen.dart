@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:installed_apps/installed_apps.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../services/device_service.dart';
 import '../theme/theme.dart';
 
 /// Shows device information and installed apps with details.
@@ -98,14 +98,19 @@ class _AppAnalyzerState extends State<AppAnalyzerScreen> {
     });
   }
 
-  /// Opens the system settings page for a specific app.
+  /// Opens the system settings page for a specific app (Android app-info
+  /// screen via the native `com.swordfm/devices` channel — a `package:` URI
+  /// cannot be launched through url_launcher reliably).
   Future<void> _openAppSettings(String packageName) async {
-    final uri = Uri.parse('package:$packageName');
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
-    } catch (_) {}
+    final ok = await openAppInfoSettings(packageName);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not open settings for $packageName'),
+          backgroundColor: OneDarkColors.red,
+        ),
+      );
+    }
   }
 
   /// Stops (force-stops) an application. Works for user apps without

@@ -24,10 +24,17 @@ import 'document_scanner_screen.dart';
 import 'cast_screen.dart';
 import 'notepad_screen.dart';
 import 'cloud_browser_screen.dart';
+import 'storage_analysis_screen.dart';
 
 /// Settings screen for configuring the app.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  /// Callback fired when a settings button maps to an existing bottom-bar tab
+  /// (Storage=3, Cloud=5, App Analyzer=2+tool, Terminal=6). Instead of pushing
+  /// a full-screen route (which hides the bottom navigation bar), the caller
+  /// switches the bottom tab via this callback.
+  final void Function(int index)? onToolTap;
+
+  const SettingsScreen({super.key, this.onToolTap});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -42,6 +49,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _bluetoothAutoConnect = false;
   int _lanPort = 8080;
   int _trashAutoEmpty = 0;
+  bool _deleteConfirmation = true;
   bool _autoThemeEnabled = false;
   int _autoThemeStartHour = 19;
   int _autoThemeStartMinute = 0;
@@ -53,7 +61,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _refreshAccount();
     _loadTrashAutoEmpty();
+    _loadDeleteConfirmation();
     _loadAutoThemeSettings();
+  }
+
+  Future<void> _loadDeleteConfirmation() async {
+    final value = await FileUtils.loadDeleteConfirmation();
+    if (mounted) setState(() => _deleteConfirmation = value);
   }
 
   Future<void> _loadTrashAutoEmpty() async {
@@ -384,8 +398,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _settingTile(
             icon: Icons.delete_outline,
             title: 'Delete Confirmation',
-            subtitle: 'Ask before deleting',
-            trailing: Switch(value: true, onChanged: (_) {}),
+            subtitle: 'Ask before deleting files',
+            trailing: Switch(
+              value: _deleteConfirmation,
+              activeColor: OneDarkColors.cyan,
+              onChanged: (v) async {
+                await FileUtils.saveDeleteConfirmation(v);
+                if (mounted) setState(() => _deleteConfirmation = v);
+              },
+            ),
           ),
           _trashAutoEmptyTile(),
 
@@ -412,7 +433,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 16),
 
-          // Tools
+                  // Tools
           _sectionTitle('Tools'),
           _settingTile(
             icon: Icons.bar_chart,
@@ -420,14 +441,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'See disk usage by folder',
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
-              // Navigate to Storage tab (index 4)
-              Navigator.of(context).popUntil((route) => route.isFirst);
-              // The caller needs to switch tabs — use a callback approach
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Tap the Storage tab in the bottom bar'),
-                ),
-              );
+              if (widget.onToolTap != null) {
+                widget.onToolTap!(3);
+              } else {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          StorageAnalysisScreen(rootPath: AppPaths.home),
+                    ),
+                  );
+              }
             },
           ),
           const SizedBox(height: 8),
@@ -446,9 +469,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Cloud Storage',
             subtitle: 'Connect Google Drive or Dropbox',
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const CloudBrowserScreen()),
-            ),
+            onTap: () {
+              if (widget.onToolTap != null) {
+                widget.onToolTap!(5);
+              } else {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const CloudBrowserScreen()),
+                  );
+              }
+            },
           ),
           const SizedBox(height: 8),
           _settingTile(

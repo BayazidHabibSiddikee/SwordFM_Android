@@ -61,3 +61,19 @@ Future<bool> requestAllFilesAccess() async {
     return false;
   }
 }
+
+/// Opens the system "App info" settings page for [packageName] (used by the
+/// app analyzer's "App settings" action). Reliable on Android 12+ — a plain
+/// `package:` URI via url_launcher does not resolve to an activity.
+Future<bool> openAppInfoSettings(String packageName) async {
+  const _channel = MethodChannel('com.swordfm/devices');
+  try {
+    return await _channel.invokeMethod<bool>(
+          'openAppSettings',
+          {'package': packageName},
+        ) ??
+        false;
+  } catch (_) {
+    return false;
+  }
+}

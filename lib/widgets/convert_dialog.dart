@@ -24,7 +24,7 @@ class _ConvertDialogState extends State<ConvertDialog> {
       _error = null;
       _lastResultPath = null;
     });
-    try {
+        try {
       final String? outPath;
       switch (format) {
         case 'PDF':
@@ -47,7 +47,12 @@ class _ConvertDialogState extends State<ConvertDialog> {
       if (outPath != null) {
         if (mounted) setState(() => _lastResultPath = outPath);
       } else {
-        if (mounted) setState(() => _error = 'Conversion failed');
+        if (mounted) {
+          setState(() => _error =
+              'Conversion failed — the source may be empty, encrypted, '
+              'or the output folder is not writable. Try saving to SwordFM '
+              'Downloads.');
+        }
       }
     } catch (e) {
       if (mounted) setState(() => _error = 'Error: $e');
@@ -77,6 +82,10 @@ class _ConvertDialogState extends State<ConvertDialog> {
         .split('/')
         .last
         .replaceAll(RegExp(r'\.[^.]+$'), '');
+    // PDF sources can only be converted to TXT (text extraction); offering
+    // PDF/DOCX/HTML targets for a .pdf previously always ended in
+    // "Conversion failed".
+    final isPdfSource = widget.filePath.toLowerCase().endsWith('.pdf');
     return AlertDialog(
       backgroundColor: OneDarkColors.bg,
       title: Text(
@@ -94,77 +103,136 @@ class _ConvertDialogState extends State<ConvertDialog> {
               style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _converting ? null : () => _convert('PDF'),
-                    icon: Icon(
-                      Icons.picture_as_pdf,
-                      size: 18,
-                      color: OneDarkColors.red,
-                    ),
-                    label: const Text('PDF'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: OneDarkColors.red,
-                      side: BorderSide(color: OneDarkColors.red),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _converting ? null : () => _convert('DOCX'),
-                    icon: Icon(
-                      Icons.description,
-                      size: 18,
-                      color: OneDarkColors.cyan,
-                    ),
-                    label: const Text('DOCX'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: OneDarkColors.cyan,
-                      side: BorderSide(color: OneDarkColors.cyan),
+            if (isPdfSource) ...[
+              // PDF source: convert its extracted text to DOCX/HTML/TXT.
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _converting ? null : () => _convert('DOCX'),
+                      icon: Icon(
+                        Icons.description,
+                        size: 18,
+                        color: OneDarkColors.cyan,
+                      ),
+                      label: const Text('DOCX'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: OneDarkColors.cyan,
+                        side: BorderSide(color: OneDarkColors.cyan),
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _converting ? null : () => _convert('HTML'),
-                    icon: Icon(
-                      Icons.html,
-                      size: 18,
-                      color: OneDarkColors.amber,
-                    ),
-                    label: const Text('HTML'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: OneDarkColors.amber,
-                      side: BorderSide(color: OneDarkColors.amber),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _converting ? null : () => _convert('HTML'),
+                      icon: Icon(
+                        Icons.html,
+                        size: 18,
+                        color: OneDarkColors.amber,
+                      ),
+                      label: const Text('HTML'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: OneDarkColors.amber,
+                        side: BorderSide(color: OneDarkColors.amber),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _converting ? null : () => _convert('TXT'),
-                    icon: Icon(
-                      Icons.text_fields,
-                      size: 18,
-                      color: OneDarkColors.green,
-                    ),
-                    label: const Text('TXT'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: OneDarkColors.green,
-                      side: BorderSide(color: OneDarkColors.green),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _converting ? null : () => _convert('TXT'),
+                      icon: Icon(
+                        Icons.text_fields,
+                        size: 18,
+                        color: OneDarkColors.green,
+                      ),
+                      label: const Text('TXT'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: OneDarkColors.green,
+                        side: BorderSide(color: OneDarkColors.green),
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ] else ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _converting ? null : () => _convert('PDF'),
+                      icon: Icon(
+                        Icons.picture_as_pdf,
+                        size: 18,
+                        color: OneDarkColors.red,
+                      ),
+                      label: const Text('PDF'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: OneDarkColors.red,
+                        side: BorderSide(color: OneDarkColors.red),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _converting ? null : () => _convert('DOCX'),
+                      icon: Icon(
+                        Icons.description,
+                        size: 18,
+                        color: OneDarkColors.cyan,
+                      ),
+                      label: const Text('DOCX'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: OneDarkColors.cyan,
+                        side: BorderSide(color: OneDarkColors.cyan),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _converting ? null : () => _convert('HTML'),
+                      icon: Icon(
+                        Icons.html,
+                        size: 18,
+                        color: OneDarkColors.amber,
+                      ),
+                      label: const Text('HTML'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: OneDarkColors.amber,
+                        side: BorderSide(color: OneDarkColors.amber),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _converting ? null : () => _convert('TXT'),
+                      icon: Icon(
+                        Icons.text_fields,
+                        size: 18,
+                        color: OneDarkColors.green,
+                      ),
+                      label: const Text('TXT'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: OneDarkColors.green,
+                        side: BorderSide(color: OneDarkColors.green),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 12),
               Container(

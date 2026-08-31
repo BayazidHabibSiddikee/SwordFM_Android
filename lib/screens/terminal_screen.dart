@@ -33,8 +33,13 @@ class _TerminalScreenState extends State<TerminalScreen> {
   late final Terminal _terminal;
   Pty? _pty;
   StreamSubscription? _outputSub;
-  bool _shellExited = false;
+  // Kept for potential diagnostics; no longer drives the error flow (the
+  // spawn-time check in the exit handler replaced it).
+  // ignore: unused_field
   String? _spawnError;
+  /// True while an intentional restart is in flight so the old shell's exit
+  /// doesn't trigger the auto-fallthrough logic.
+  bool _restarting = false;
   final FocusNode _terminalFocusNode = FocusNode();
   bool _isRoot = false;
 
@@ -60,7 +65,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
     }
   }
 
-  Future<void> _startShell() async {
+  Future<void> _startShell({int attempt = 0}) async {
     // Prefer the requested directory; fall back to home, never '/' — root is
     // read-only/locked on Android and makes the shell unusable.
     var cwd = widget.startPath;
@@ -77,6 +82,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
     String shell;
     String envHome;
     String shellPath;
+    final spawnTime = DateTime.now();
 
     if (_isRoot) {
       // Use su so the shell runs as root — grants access to package managers
@@ -92,18 +98,27 @@ class _TerminalScreenState extends State<TerminalScreen> {
       // default interactive shell and works under a PTY; toybox sh usually is
       // not interactive and exits immediately. Termux's bash is preferred when
       // installed because it ships a working package manager.
-      const shells = <String>[
+      const candidates = <String>[
         '/data/data/com.termux/files/usr/bin/bash',
         '/data/data/com.termux/files/usr/bin/sh',
         '/system/bin/mksh',
+        '/system/xbin/mksh',
         '/system/bin/sh',
         '/system/xbin/sh',
         '/bin/sh',
       ];
-      shell = shells.firstWhere(
-        (s) => File(s).existsSync(),
-        orElse: () => '/system/bin/sh',
-      );
+      final usable = candidates.where((s) => File(s).existsSync()).toList();
+      if (attempt >= usable.length) {
+        if (mounted) {
+          setState(() {
+            _spawnError = 'No interactive shell found on this device.\n\n'
+                'Install Termux for a full bash shell with a package '
+                'manager, or try "Restart shell" after installing it.';
+          });
+        }
+        return;
+      }
+      shell = usable[attempt];
       final usingTermux = shell.startsWith('/data/data/com.termux');
       envHome = cwd;
       shellPath = usingTermux
@@ -113,11 +128,13 @@ class _TerminalScreenState extends State<TerminalScreen> {
           : '/system/bin:/system/xbin:/product/bin:/vendor/bin';
     }
 
+    if (mounted) setState(() => _spawnError = null);
+
     try {
-      final List<String> args =
-          _isRoot ? <String>['sh', '-c', 'exec sh'] : const <String>[];
+      final String execShell = _isRoot ? 'su' : shell;
+      final List<String> args = const <String>[];
       final pty = Pty.start(
-        shell,
+        execShell,
         arguments: args,
         workingDirectory: cwd,
         environment: {
@@ -140,27 +157,27 @@ class _TerminalScreenState extends State<TerminalScreen> {
         _terminal.write(utf8.decode(data, allowMalformed: true));
       });
 
-      // Track when the shell exits — if it dies within 1 second the system
-      // shell (toybox) is likely not interactive under PTY.
-      _shellExited = false;
+      // Track when the shell exits. A shell that dies within 1.5s of spawn is
+      // not usable as an interactive terminal — instead of dead-ending with an
+      // error, automatically fall through to the next candidate shell (this is
       pty.exitCode.then((code) {
-        _shellExited = true;
+        if (_restarting) return; // intentional restart — handled separately
         _terminal.write(
             '\r\n\x1b[2m[Process exited with code $code]\x1b[0m\r\n');
         if (mounted) setState(() => _pty = null);
-      });
-
-      // If the shell exits within 1 second, show the Termux suggestion.
-      Future.delayed(const Duration(seconds: 1), () {
-        if (mounted && _pty != null && !_shellExited) return;
-        if (mounted && _shellExited && _spawnError == null) {
-          setState(() {
-            _spawnError = _isRoot
-                ? 'Root shell exited immediately. Device may not be rooted or su is unavailable.'
-                : 'System shell exited immediately. This device uses toybox '
-                    'which does not work as an interactive terminal.\n\n'
-                    'Install Termux for a full bash shell with package manager.';
-          });
+        final ranMs = DateTime.now().difference(spawnTime).inMilliseconds;
+        if (ranMs < 1500 && mounted) {
+          if (_isRoot) {
+            if (mounted) {
+              setState(() {
+                _spawnError =
+                    'Root shell exited immediately. Device may not be rooted '
+                    'or su is unavailable.';
+              });
+            }
+          } else {
+            _startShell(attempt: attempt + 1);
+          }
         }
       });
 
@@ -172,8 +189,12 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
       if (mounted) setState(() => _pty = pty);
     } catch (e) {
-      debugPrint('Terminal spawn error: $e');
-      if (mounted) {
+      debugPrint('Terminal spawn error ($shell): $e');
+      // Spawn failure — fall through to the next candidate shell before
+      // giving up (unless this was the root path).
+      if (mounted && !_isRoot) {
+        _startShell(attempt: attempt + 1);
+      } else if (mounted) {
         setState(() => _spawnError = e.toString());
       }
     }
@@ -183,10 +204,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
   /// allow media writes reject plain file creation.
   static bool _canWrite(String dirPath) {
     try {
-      final probe = File(
-          '$dirPath/.swordfm_write_probe_${DateTime.now().millisecondsSinceEpoch}');
-      probe.createSync();
-      probe.deleteSync();
+      final dir = Directory(dirPath);
+      if (!dir.existsSync()) return false;
+      // Just check directory exists and is listable — probe files fail on
+      // Android scoped storage even for writable dirs.
+      dir.listSync();
       return true;
     } catch (_) {
       return false;
@@ -220,8 +242,9 @@ class _TerminalScreenState extends State<TerminalScreen> {
           IconButton(
             icon: const Icon(Icons.refresh, size: 20),
             onPressed: () {
+              _restarting = true;
               _pty?.kill();
-              _startShell();
+              _startShell().then((_) => _restarting = false);
             },
             tooltip: 'Restart shell',
           ),

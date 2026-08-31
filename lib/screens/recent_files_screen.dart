@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
@@ -51,29 +52,25 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
         '$home/WhatsApp',
       ];
 
-      final entries = <_RecentEntry>[];
-      for (final dirPath in dirs) {
-        final dir = Directory(dirPath);
-        if (!await dir.exists()) continue;
-        try {
-          await for (final entity in dir.list(recursive: true)) {
-            if (entity is! File) continue;
-            try {
-              final stat = await entity.stat();
-              if (stat.modified.isAfter(cutoff)) {
-                entries.add(
-                  _RecentEntry(
-                    path: entity.path,
-                    name: p.basename(entity.path),
-                    size: stat.size,
-                    modified: stat.modified,
-                  ),
-                );
-              }
-            } catch (_) {}
-          }
-        } catch (_) {}
-      }
+      // Run the recursive scan in a background isolate: on-device media
+      // folders hold thousands of files and scanning on the UI isolate froze
+      // the app. The isolate uses sync I/O (cheap there) with a depth cap and
+      // a result cap so even huge trees return quickly.
+      final rawEntries = await Isolate.run(
+        () => _scanRecent(dirs, cutoff.millisecondsSinceEpoch),
+      );
+      final entries = rawEntries
+          .map(
+            (e) => _RecentEntry(
+              path: e['path']! as String,
+              name: p.basename(e['path']! as String),
+              size: e['size']! as int,
+              modified: DateTime.fromMillisecondsSinceEpoch(
+                e['modified']! as int,
+              ),
+            ),
+          )
+          .toList();
 
       // Sort newest first
       entries.sort((a, b) => b.modified.compareTo(a.modified));
@@ -201,7 +198,7 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
                 if (_previewItem != null)
                   PreviewPanel(
                     item: _previewItem,
-                    width: 340,
+                    width: 460,
                     onClose: () => setState(() => _previewItem = null),
                   ),
               ],
@@ -322,6 +319,50 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
     if (diff.inDays < 7) return '${diff.inDays}d ago';
     return DateFormat('MMM d').format(dt);
   }
+}
+
+/// Scans [dirs] recursively for files modified after [cutoffMs].
+/// Runs inside a background isolate: sync I/O, depth-capped (3 levels) and
+/// result-capped (500 entries) so the scan always terminates quickly.
+List<Map<String, Object>> _scanRecent(List<String> dirs, int cutoffMs) {
+  final cutoff = DateTime.fromMillisecondsSinceEpoch(cutoffMs);
+  final entries = <Map<String, Object>>[];
+  const maxEntries = 500;
+  const maxDepth = 3;
+
+  void scan(String dirPath, int depth) {
+    if (entries.length >= maxEntries) return;
+    List<FileSystemEntity> children;
+    try {
+      children = Directory(dirPath).listSync(followLinks: false);
+    } catch (_) {
+      return; // unreadable directory — skip
+    }
+    for (final entity in children) {
+      if (entries.length >= maxEntries) return;
+      final name = entity.path.split(Platform.pathSeparator).last;
+      if (name.startsWith('.')) continue;
+      if (entity is Directory) {
+        if (depth < maxDepth) scan(entity.path, depth + 1);
+        continue;
+      }
+      try {
+        final stat = entity.statSync();
+        if (stat.modified.isAfter(cutoff)) {
+          entries.add({
+            'path': entity.path,
+            'size': stat.size,
+            'modified': stat.modified.millisecondsSinceEpoch,
+          });
+        }
+      } catch (_) {}
+    }
+  }
+
+  for (final dir in dirs) {
+    scan(dir, 0);
+  }
+  return entries;
 }
 
 class _RecentEntry {

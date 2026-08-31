@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import '../utils/constants.dart' show AppPaths;
 
 /// Document conversion utilities for SwordFM Android.
 ///
@@ -20,18 +22,24 @@ class DocConverter {
   /// Supported Markdown constructs: headings (h1-h6), paragraphs, fenced and
   /// inline code, unordered lists, ordered lists, blockquotes, and horizontal
   /// rules.
-  static Future<String?> toPdf(String sourcePath) async {
+    static Future<String?> toPdf(String sourcePath) async {
     if (!canConvert(sourcePath)) return null;
     final file = File(sourcePath);
     if (!await file.exists()) return null;
-    final content = await file.readAsString();
-    final bytes = await _buildPdfBytes(_preprocessForMarkdown(
-      sourcePath,
-      content,
-    ));
-    final outPath = p.setExtension(sourcePath, '.pdf');
-    await File(outPath).writeAsBytes(bytes);
-    return outPath;
+    try {
+      final content = await _readSourceText(sourcePath);
+      final bytes = await _buildPdfBytes(_preprocessForMarkdown(
+        sourcePath,
+        content,
+      ));
+      final outPath = _resolveOutputPath(sourcePath, '.pdf');
+      await _writeOutput(outPath, bytes);
+      return outPath;
+    } catch (e) {
+      // Surface the real reason instead of silently returning null.
+      debugPrint('toPdf failed for $sourcePath: $e');
+      return null;
+    }
   }
 
   /// Converts a Markdown/text file to a real DOCX (OOXML ZIP), writing
@@ -41,26 +49,219 @@ class DocConverter {
     if (!canConvert(sourcePath)) return null;
     final file = File(sourcePath);
     if (!await file.exists()) return null;
-    final content = await file.readAsString();
-    final bytes = await _buildDocxBytes(_preprocessForMarkdown(
-      sourcePath,
-      content,
-    ));
-    final outPath = p.setExtension(sourcePath, '.docx');
-    await File(outPath).writeAsBytes(bytes);
-    return outPath;
+    try {
+      final content = await _readSourceText(sourcePath);
+      final bytes = await _buildDocxBytes(_preprocessForMarkdown(
+        sourcePath,
+        content,
+      ));
+      final outPath = _resolveOutputPath(sourcePath, '.docx');
+      await _writeOutput(outPath, bytes);
+      return outPath;
+    } catch (e) {
+      debugPrint('toDocx failed for $sourcePath: $e');
+      return null;
+    }
   }
 
-  /// Converts a file to plain text (Markdown stripped).
+  /// Converts a file to plain text (Markdown stripped). PDF sources are
+  /// handled by [fromPdf] (crude text extraction from content streams).
   static Future<String?> toText(String sourcePath) async {
+    if (sourcePath.toLowerCase().endsWith('.pdf')) return fromPdf(sourcePath);
     if (!canConvert(sourcePath)) return null;
     final file = File(sourcePath);
     if (!await file.exists()) return null;
-    final content = await file.readAsString();
-    final text = markdownToText(_preprocessForMarkdown(sourcePath, content));
-    final outPath = p.setExtension(sourcePath, '.txt');
-    await File(outPath).writeAsString(text);
-    return outPath;
+    try {
+      final content = await _readSourceText(sourcePath);
+      final text = markdownToText(_preprocessForMarkdown(sourcePath, content));
+      final outPath = _resolveOutputPath(sourcePath, '.txt');
+      await _writeOutput(outPath, text.codeUnits);
+      return outPath;
+    } catch (e) {
+      debugPrint('toText failed for $sourcePath: $e');
+      return null;
+    }
+  }
+
+  /// Reads any convertible source as text. `.docx` sources are ZIP binaries —
+  /// the text is pulled from `word/document.xml`; everything else is decoded
+  /// as UTF-8 with malformed bytes tolerated (previously a strict
+  /// `readAsString` threw FormatException on DOCX or non-UTF-8 files, making
+  /// conversion fail).
+  static Future<String> _readSourceText(String sourcePath) async {
+    final ext = p.extension(sourcePath).toLowerCase();
+    if (ext == '.docx') {
+      // DOCX is a ZIP binary — pull the text out of word/document.xml
+      // directly (without writing anything).
+      try {
+        final bytes = await File(sourcePath).readAsBytes();
+        final archive = ZipDecoder().decodeBytes(bytes);
+        final docXml = archive.files
+            .where((f) => f.name == 'word/document.xml')
+            .firstOrNull;
+        if (docXml == null) return '';
+        final xml = utf8.decode(docXml.content as List<int>, allowMalformed: true);
+        return xml
+            .replaceAll('</w:p>', '\n')
+            .replaceAll('</w:tr>', '\n')
+            .replaceAll('<w:tab/>', '\t')
+            .replaceAll(RegExp(r'<[^>]+>'), '')
+            .replaceAll('&amp;', '&')
+            .replaceAll('&lt;', '<')
+            .replaceAll('&gt;', '>')
+            .replaceAll('&quot;', '"')
+            .replaceAll('&apos;', "'")
+            .trim();
+      } catch (_) {
+        return '';
+      }
+    }
+    if (ext == '.pdf') {
+      return _extractPdfTextSync(sourcePath) ?? '';
+    }
+    final bytes = await File(sourcePath).readAsBytes();
+    return utf8.decode(bytes, allowMalformed: true);
+  }
+
+  /// Extracts the plain text of a `.pdf` file, writing `<base>.txt` next to
+  /// the source. Text is recovered by decompressing the FlateDecode content
+  /// streams and pulling the literal strings from the text-showing operators
+  /// (Tj / TJ). Encrypted or image-only PDFs yield null.
+  static Future<String?> fromPdf(String sourcePath) async {
+    final text = _extractPdfTextSync(sourcePath);
+    if (text == null || text.isEmpty) return null;
+    try {
+      final outPath = _resolveOutputPath(sourcePath, '.txt');
+      await _writeOutput(outPath, text.codeUnits);
+      return outPath;
+    } catch (e) {
+      debugPrint('fromPdf write failed for $sourcePath: $e');
+      return null;
+    }
+  }
+
+  /// Synchronous PDF text extraction. Handles both `(…)Tj` literal strings and
+  /// `<hex>Tj` hex strings from TJ/Tj operators, tries every content stream
+  /// (Flate-compressed with an uncompressed fallback), and tolerates the
+  /// font/graphics operators mixed in so real-world PDFs convert reliably.
+  static String? _extractPdfTextSync(String sourcePath) {
+    try {
+      final file = File(sourcePath);
+      if (!file.existsSync()) return null;
+      if (file.lengthSync() > 32 * 1024 * 1024) return null;
+      final bytes = file.readAsBytesSync();
+      // Latin-1 round-trips every byte 1:1, letting us slice raw stream
+      // boundaries on a String without corrupting binary data.
+      final raw = latin1.decode(bytes, allowInvalid: true);
+      final out = StringBuffer();
+      for (final part in raw.split('endstream')) {
+        final s = part.indexOf('stream');
+        if (s < 0) continue;
+        var data = part.substring(s + 'stream'.length);
+        if (data.startsWith('\r\n')) {
+          data = data.substring(2);
+        } else if (data.startsWith('\n') || data.startsWith('\r')) {
+          data = data.substring(1);
+        }
+        String content;
+        try {
+          final inflated = ZLibDecoder().decodeBytes(data.codeUnits);
+          content = latin1.decode(inflated, allowInvalid: true);
+        } catch (_) {
+          // Not FlateDecode — try the raw data as the content stream.
+          content = latin1.decode(data.codeUnits, allowInvalid: true);
+        }
+        // Only text-showing content streams matter.
+        if (!content.contains('BT') || !RegExp(r'\bTj\b|\bTJ\b').hasMatch(content)) {
+          continue;
+        }
+        final chunk = StringBuffer();
+        // Literal strings: ( ... )
+        for (final m
+            in RegExp(r'\(((?:\\.|[^()\\])*)\)').allMatches(content)) {
+          chunk.write(_unescapePdfString(m.group(1)!));
+          chunk.write(' ');
+        }
+        // Hex strings: < ... >
+        for (final m in RegExp(r'<([0-9a-fA-F\s]+)>').allMatches(content)) {
+          chunk.write(_decodePdfHex(m.group(1)!));
+          chunk.write(' ');
+        }
+        final line = chunk.toString().trim();
+        if (line.isNotEmpty) out.writeln(line);
+      }
+      final text = out.toString().trim();
+      return text.isEmpty ? null : text;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Decodes a PDF hex string (`<414243>` → `ABC`). Digits are pairs of hex
+  /// bytes; whitespace is ignored.
+  static String _decodePdfHex(String hex) {
+    final buf = StringBuffer();
+    final cleaned = hex.replaceAll(RegExp(r'\s+'), '');
+    for (var i = 0; i + 1 < cleaned.length; i += 2) {
+      final byte = int.tryParse(cleaned.substring(i, i + 2), radix: 16);
+      if (byte == null) continue;
+      if (byte >= 0x20 && byte <= 0x7e) {
+        buf.writeCharCode(byte);
+      } else {
+        buf.writeCharCode(byte.toUnsigned(8));
+      }
+    }
+    return buf.toString();
+  }
+
+  /// Resolves PDF literal-string escapes (\n \r \t \b \f \( \) \\ and octal).
+  static String _unescapePdfString(String s) {
+    final buf = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      final ch = s[i];
+      if (ch == r'\' && i + 1 < s.length) {
+        final next = s[++i];
+        switch (next) {
+          case 'n':
+            buf.write('\n');
+            break;
+          case 'r':
+            buf.write('\r');
+            break;
+          case 't':
+            buf.write('\t');
+            break;
+          case 'b':
+            buf.write('\b');
+            break;
+          case 'f':
+            buf.write('\f');
+            break;
+          case '(':
+          case ')':
+          case r'\':
+            buf.write(next);
+            break;
+          default:
+            if (next.codeUnitAt(0) >= 0x30 && next.codeUnitAt(0) <= 0x37) {
+              // Octal escape: up to 3 digits.
+              var oct = next;
+              while (oct.length < 3 &&
+                  i + 1 < s.length &&
+                  s[i + 1].codeUnitAt(0) >= 0x30 &&
+                  s[i + 1].codeUnitAt(0) <= 0x37) {
+                oct += s[++i];
+              }
+              buf.writeCharCode(int.parse(oct, radix: 8));
+            } else {
+              buf.write(next);
+            }
+        }
+      } else {
+        buf.write(ch);
+      }
+    }
+    return buf.toString();
   }
 
   /// Extracts the plain text of a `.docx` file (word/document.xml inside the
@@ -83,12 +284,50 @@ class DocConverter {
           .replaceAll(RegExp(r'<[^>]+>'), '')
           .replaceAll(RegExp(r'\n{3,}'), '\n\n')
           .trim();
-      final outPath = p.setExtension(sourcePath, '.txt');
-      await File(outPath).writeAsString(text);
+      final outPath = _resolveOutputPath(sourcePath, '.txt');
+      await _writeOutput(outPath, text.codeUnits);
       return outPath;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('fromDocx failed for $sourcePath: $e');
       return null;
     }
+  }
+
+  /// Resolves a writable output path for a converted file. Prefers the source
+  /// directory (output next to the original) but falls back to a dedicated,
+  /// guaranteed-writable folder when the source directory cannot be written
+  /// (e.g. a read-only scoped-storage location on Android without
+  /// MANAGE_EXTERNAL_STORAGE). Returns an absolute path that may not yet exist.
+  static String _resolveOutputPath(String sourcePath, String newExt) {
+    final sourceDir = p.dirname(sourcePath);
+    final base = p.basenameWithoutExtension(sourcePath);
+    // Try writing next to the source only if that directory is writable;
+    // otherwise fall back to the SwiftFM downloads folder.
+    final dir = _isWritable(sourceDir) ? sourceDir : AppPaths.swordfmDownloads;
+    Directory(dir).createSync(recursive: true);
+    return p.join(dir, '$base$newExt');
+  }
+
+  static bool _isWritable(String dir) {
+    try {
+      final probe = File(
+        p.join(dir, '.swordfm_probe_${DateTime.now().millisecondsSinceEpoch}'),
+      );
+      probe.createSync();
+      probe.deleteSync();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Writes bytes to [path], creating the parent directory if needed.
+  static Future<void> _writeOutput(String path, List<int> bytes) async {
+    final dir = p.dirname(path);
+    try {
+      await Directory(dir).create(recursive: true);
+    } catch (_) {}
+    await File(path).writeAsBytes(bytes);
   }
 
   /// Prepares the raw file content for the shared markdown pipeline:
@@ -179,22 +418,32 @@ class DocConverter {
     return result;
   }
 
-  /// Reads a Markdown/text file and returns full HTML document.
+  /// Reads a Markdown/text file, renders it to a full HTML document, and
+  /// writes `<base>.html` to the resolved output directory. Returns the output
+  /// path (or null if the source is missing).
   static Future<String?> markdownFileToHtml(String path) async {
     final file = File(path);
     if (!await file.exists()) return null;
-    final content = await file.readAsString();
-    final title = p.basenameWithoutExtension(path);
-    final body = markdownToHtml(content);
-    return '<!DOCTYPE html>\n<html>\n<head>\n'
-        '<meta charset="utf-8">\n<title>$title</title>\n'
-        '<style>'
-        'body{font-family:-apple-system,sans-serif;line-height:1.6;'
-        'max-width:760px;margin:32px auto;padding:0 20px;color:#333}'
-        'pre{background:#f4f4f4;padding:12px;border-radius:6px;overflow:auto}'
-        'code{background:#f4f4f4;padding:2px 4px;border-radius:3px}'
-        'blockquote{border-left:4px solid #61afef;margin:0;padding-left:12px;color:#555}'
-        '</style>\n</head>\n<body>\n$body\n</body>\n</html>\n';
+    try {
+      final content = await _readSourceText(path);
+      final title = p.basenameWithoutExtension(path);
+      final body = markdownToHtml(content);
+      final html = '<!DOCTYPE html>\n<html>\n<head>\n'
+          '<meta charset="utf-8">\n<title>$title</title>\n'
+          '<style>'
+          'body{font-family:-apple-system,sans-serif;line-height:1.6;'
+          'max-width:760px;margin:32px auto;padding:0 20px;color:#333}'
+          'pre{background:#f4f4f4;padding:12px;border-radius:6px;overflow:auto}'
+          'code{background:#f4f4f4;padding:2px 4px;border-radius:3px}'
+          'blockquote{border-left:4px solid #61afef;margin:0;padding-left:12px;color:#555}'
+          '</style>\n</head>\n<body>\n$body\n</body>\n</html>\n';
+      final outPath = _resolveOutputPath(path, '.html');
+      await _writeOutput(outPath, utf8.encode(html));
+      return outPath;
+    } catch (e) {
+      debugPrint('markdownFileToHtml failed for $path: $e');
+      return null;
+    }
   }
 
   /// Converts Markdown content to a full HTML string.
@@ -410,15 +659,18 @@ class DocConverter {
       '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.conf', '.cfg',
       '.log', '.css', '.js', '.ts', '.jsx', '.tsx', '.py', '.dart',
       '.java', '.kt', '.c', '.cpp', '.h', '.rs', '.go', '.sh', '.bat',
-      '.sql', '.env', '.gitignore', '.diff', '.docx',
+      '.sql', '.env', '.gitignore', '.diff', '.docx', '.pdf',
     };
     return textExts.contains(ext);
   }
 
-  /// Lists available output formats for a given file.
+  /// Lists available output formats for a given file (PDF→PDF is not offered —
+  /// the source is already a PDF).
   static List<String> getAvailableFormats(String path) {
     if (!canConvert(path)) return [];
-    return ['PDF', 'DOCX', 'HTML', 'TXT'];
+    final list = ['PDF', 'DOCX', 'HTML', 'TXT'];
+    if (p.extension(path).toLowerCase() == '.pdf') list.remove('PDF');
+    return list;
   }
 
   // ---------------------------------------------------------------------------
@@ -579,9 +831,11 @@ class DocConverter {
   }
 
   static pw.Widget _pdfBulletList(List<String> items) {
+    // NB: '•' (U+2022) is not encodable by the default Helvetica base font
+    // and made doc.save() throw — plain ASCII bullets keep conversion working.
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: items.map((i) => pw.Text('• $i')).toList(),
+      children: items.map((i) => pw.Text('- $i')).toList(),
     );
   }
 
@@ -614,22 +868,28 @@ class DocConverter {
     for (final n in nodes) {
       switch (n.kind) {
         case 'heading':
-          widgets.add(pw.Header(level: _pdfHeaderLevel(n.level), text: n.text));
+          widgets.add(
+            pw.Header(level: _pdfHeaderLevel(n.level), text: _pdfSafe(n.text)),
+          );
           break;
         case 'paragraph':
-          widgets.add(pw.Text(n.text));
+          widgets.add(pw.Text(_pdfSafe(n.text)));
           break;
         case 'code':
-          widgets.add(_pdfCode(n.text));
+          widgets.add(_pdfCode(_pdfSafe(n.text)));
           break;
         case 'ul':
-          widgets.add(_pdfBulletList(n.items));
+          widgets.add(
+            _pdfBulletList(n.items.map(_pdfSafe).toList(growable: false)),
+          );
           break;
         case 'ol':
-          widgets.add(_pdfNumberedList(n.items));
+          widgets.add(
+            _pdfNumberedList(n.items.map(_pdfSafe).toList(growable: false)),
+          );
           break;
         case 'blockquote':
-          widgets.add(_pdfBlockquote(n.text));
+          widgets.add(_pdfBlockquote(_pdfSafe(n.text)));
           break;
         case 'hr':
           widgets.add(pw.Divider());
@@ -643,6 +903,32 @@ class DocConverter {
       ),
     );
     return doc.save();
+  }
+
+  /// Makes text encodable by the default Helvetica base 14 font. Any code
+  /// point outside Latin-1 previously made `doc.save()` throw, failing the
+  /// whole conversion. Common typographic characters are mapped to ASCII
+  /// equivalents; the rest become '?'.
+  static String _pdfSafe(String text) {
+    const map = {
+      '\u2013': '-', // en dash
+      '\u2014': '-', // em dash
+      '\u2018': "'", '\u2019': "'", '\u201A': ',',
+      '\u201C': '"', '\u201D': '"',
+      '\u2022': '-', '\u2026': '...',
+      '\u00A0': ' ', '\u2192': '->', '\u2190': '<-',
+      '\t': '    ',
+    };
+    final buf = StringBuffer();
+    for (final rune in text.runes) {
+      if (rune <= 0xFF) {
+        buf.writeCharCode(rune);
+      } else {
+        final ch = String.fromCharCode(rune);
+        buf.write(map[ch] ?? '?');
+      }
+    }
+    return buf.toString();
   }
 
   static String _docxHeadingLevel(int level) => level.clamp(1, 9).toString();

@@ -465,6 +465,17 @@ class FileItem {
     '.log',
     '.sh',
     '.bat',
+    '.csv',
+    '.tsv',
+    '.rst',
+    '.nfo',
+    '.conf',
+    '.cfg',
+    '.ini',
+    '.env',
+    '.gitignore',
+    '.sql',
+    '.diff',
   ].contains(extension);
   bool get isPdf => extension == '.pdf';
   bool get isVideo => const ['.mp4', '.mkv', '.avi', '.mov', '.webm'].contains(extension);
@@ -901,6 +912,23 @@ class FileUtils {
   static Future<void> saveTrashAutoEmpty(int policy) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_kTrashAutoEmptyKey, policy);
+  }
+
+  // --- Delete confirmation ---
+
+  /// Whether the app asks before deleting/moving files to trash.
+  static const _kDeleteConfirmationKey = 'delete_confirmation';
+
+  /// Loads the "ask before delete" preference (default true).
+  static Future<bool> loadDeleteConfirmation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kDeleteConfirmationKey) ?? true;
+  }
+
+  /// Persists the "ask before delete" preference.
+  static Future<void> saveDeleteConfirmation(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kDeleteConfirmationKey, value);
   }
 
   /// Deletes trash items older than the current policy threshold.

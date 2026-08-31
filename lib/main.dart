@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import 'theme/theme.dart';
 import 'package:dynamic_color/dynamic_color.dart';
@@ -107,11 +106,21 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   bool _sidebarVisible = true;
+  /// Collapsible sidebar sections (SwordFM-style headers with chevrons).
+  /// 'places' starts open; the rest are collapsed until tapped.
+  final Set<String> _openSections = {'places'};
   bool _previewVisible = true;
   String _currentPath = ''; // resolved in initState for Android
   FileItem? _selectedItem;
 
   int _itemCount = 0; // item count in the current directory
+
+  /// When a tool from the left sidebar (Scanner, Notepad, App Analyzer, Cast)
+  /// is opened, it is embedded here inside the Files tab so the bottom
+  /// navigation bar stays visible instead of being covered by a pushed full
+  /// screen route. LAN/Network/Cloud map to their existing bottom-bar tabs.
+  Widget? _sidebarTool;
+  bool _toolFullscreen = false;
 
   // The Terminal tab is built lazily on first visit (the IndexedStack builds
   // all children eagerly, and spawning a PTY at app start would be wasteful).
@@ -136,9 +145,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Listen for swordfm:// deep links (from "Show QR Code") so scanning the
-    // QR navigates the browser to the shared path.
-    _setupDeepLinkHandler();
     // On Android, resolve the actual storage root synchronously after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _currentPath = AppPaths.home);
@@ -150,26 +156,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       FileUtils.loadClipboardHistory();
       checkAutoTheme();
       _syncWidgetBookmarks();
-    });
-  }
-
-  /// Registers a handler for the native `com.swordfm/deeplink` channel which
-  /// delivers the path encoded in `swordfm://open?path=...` QR codes.
-  void _setupDeepLinkHandler() {
-    const channel = MethodChannel('com.swordfm/deeplink');
-    channel.setMethodCallHandler((call) async {
-      if (call.method == 'onOpenPath') {
-        final path = (call.arguments as Map?)?['path'] as String?;
-        if (path != null && mounted) {
-          final dir = FileSystemEntity.isDirectorySync(path)
-              ? path
-              : p.dirname(path);
-          setState(() {
-            _selectedIndex = 0; // switch to Files tab
-            _currentPath = dir;
-          });
-        }
-      }
     });
   }
 
@@ -346,34 +332,17 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                             shape: const RoundedRectangleBorder(),
                             child: Column(
                               children: [
-                                // Sidebar header
-                                Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        Icons.folder_special,
-                                        color: cs.primary,
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        'Places',
-                                        style: TextStyle(
-                                          color: onSurfaceDim,
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const Divider(height: 1),
+                                // Sidebar header — collapsible "Places"
+                                _sectionHeader('places', 'Places',
+                                    Icons.folder_special),
 
                                 // Places list — scrolls when the drawer is short
                                 Expanded(
                                   child: ListView(
                                     children: [
-                                      _sidebarTile(
+                                      if (_openSections
+                                          .contains('places')) ...[
+                                        _sidebarTile(
                                         0,
                                         Icons.home,
                                         'Home',
@@ -395,7 +364,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           'Recent',
                                           style: TextStyle(
                                             color: cs.onSurface,
-                                            fontSize: 13,
+                                            fontSize: 14,
                                           ),
                                         ),
                                         onTap: () => Navigator.of(context)
@@ -465,7 +434,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           'Trash',
                                           style: TextStyle(
                                             color: onSurfaceDim,
-                                            fontSize: 13,
+                                            fontSize: 14,
                                           ),
                                         ),
                                         onTap: () => Navigator.of(context).push(
@@ -474,124 +443,95 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           ),
                                         ),
                                       ),
+                                      ], // places
                                       const Divider(),
                                       // ── Tools section ──────────────────────
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 6,
-                                        ),
-                                        child: Text(
-                                          'Tools',
-                                          style: TextStyle(
-                                            color: onSurfaceDim,
-                                            fontSize: 11,
+                                      _sectionHeader(
+                                          'tools', 'Tools', Icons.build_rounded),
+                                      if (_openSections.contains('tools')) ...[
+                                        _sidebarAction(
+                                          Icons.document_scanner,
+                                          'Scanner',
+                                          () => _openSidebarTool(
+                                            const DocumentScannerScreen(),
                                           ),
                                         ),
-                                      ),
-                                      _sidebarAction(
-                                        Icons.document_scanner,
-                                        'Scanner',
-                                        () => Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => const DocumentScannerScreen(),
-                                          ),
-                                        ),
-                                      ),
                                       _sidebarAction(
                                         Icons.note_add,
                                         'Notepad',
-                                        () => Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => const NotepadScreen(),
-                                          ),
+                                        () => _openSidebarTool(
+                                          const NotepadScreen(),
                                         ),
                                       ),
                                       _sidebarAction(
                                         Icons.apps,
                                         'App Analyzer',
-                                        () => Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => const AppAnalyzerScreen(),
-                                          ),
+                                        () => _openSidebarTool(
+                                          const AppAnalyzerScreen(),
                                         ),
                                       ),
                                       _sidebarAction(
                                         Icons.cast,
                                         'Cast',
-                                        () => Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => const CastScreen(),
-                                          ),
+                                        () => _openSidebarTool(
+                                          const CastScreen(),
                                         ),
                                       ),
+                                      ], // tools
                                       const Divider(),
                                       // ── Network section ─────────────────────
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 6,
+                                      _sectionHeader('network', 'Network',
+                                          Icons.lan_rounded),
+                                      if (_openSections
+                                          .contains('network')) ...[
+                                        _sidebarAction(
+                                          Icons.wifi,
+                                          'LAN Sharing',
+                                          () => _openSidebarTab(1),
                                         ),
-                                        child: Text(
-                                          'Network',
-                                          style: TextStyle(
-                                            color: onSurfaceDim,
-                                            fontSize: 11,
-                                          ),
+                                        _sidebarAction(
+                                          Icons.cloud,
+                                          'Network (FTP/WebDAV)',
+                                          () => _openSidebarTab(4),
                                         ),
-                                      ),
-                                      _sidebarAction(
-                                        Icons.wifi,
-                                        'LAN Sharing',
-                                        () => Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => const LANSharingScreen(),
-                                          ),
-                                        ),
-                                      ),
-                                      _sidebarAction(
-                                        Icons.cloud,
-                                        'Network (FTP/WebDAV)',
-                                        () => Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => const NetworkScreen(),
-                                          ),
-                                        ),
-                                      ),
+                                      ], // network
                                       const Divider(),
                                       // ── Devices section ──────────────────────
-                                      if (_volumes != null &&
-                                          _volumes!.isNotEmpty)
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 6,
-                                          ),
-                                        child: Text(
-                                          'Devices',
-                                          style: TextStyle(
-                                            color: onSurfaceDim,
-                                            fontSize: 11,
-                                          ),
-                                          ),
-                                        ),
-                                      if (_volumes == null)
-                                        const Padding(
-                                          padding: EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 4,
-                                          ),
-                                          child: SizedBox(
-                                            height: 16,
-                                            child: Center(
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
+                                      _sectionHeader('devices', 'Devices',
+                                          Icons.storage_rounded),
+                                      if (_openSections
+                                          .contains('devices')) ...[
+                                        if (_volumes == null)
+                                          const Padding(
+                                            padding: EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 4,
+                                            ),
+                                            child: SizedBox(
+                                              height: 16,
+                                              child: Center(
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                        )
-                                      else
-                                        ..._volumes!.map(
+                                          )
+                                        else if (_volumes!.isEmpty)
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 4,
+                                            ),
+                                            child: Text(
+                                              'No removable devices',
+                                              style: TextStyle(
+                                                color: onSurfaceDim,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          )
+                                        else
+                                          ..._volumes!.map(
                                           (vol) => ListTile(
                                             dense: true,
                                             contentPadding:
@@ -613,14 +553,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                                   : 'Storage',
                                               style: TextStyle(
                                                 color: onSurface,
-                                                fontSize: 13,
+                                                fontSize: 14,
                                               ),
                                             ),
                                             subtitle: Text(
                                               _shortPath(vol.path),
                                               style: TextStyle(
                                                 color: onSurfaceDim,
-                                                fontSize: 10,
+                                                fontSize: 11,
                                               ),
                                             ),
                                             onTap: () {
@@ -630,45 +570,24 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                             },
                                           ),
                                         ),
+                                      ], // devices
                                       const Divider(),
                                       // ── Cloud Storage section ──────────────────
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 6,
+                                      _sectionHeader('cloud', 'Cloud',
+                                          Icons.cloud_rounded),
+                                      if (_openSections.contains('cloud')) ...[
+                                        _sidebarAction(
+                                          Icons.cloud,
+                                          'Cloud Storage',
+                                          () => _openSidebarTab(5),
                                         ),
-                                        child: Text(
-                                          'Cloud',
-                                          style: TextStyle(
-                                            color: onSurfaceDim,
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                      ),
-                                      _sidebarAction(
-                                        Icons.cloud,
-                                        'Cloud Storage',
-                                        () => Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => const CloudBrowserScreen(),
-                                          ),
-                                        ),
-                                      ),
+                                      ], // cloud
                                       const Divider(),
                                       // ── Bookmarks section ──────────────────────
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 6,
-                                        ),
-                                        child: Text(
-                                          'Bookmarks',
-                                          style: TextStyle(
-                                            color: onSurfaceDim,
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                      ),
+                                      _sectionHeader('bookmarks', 'Bookmarks',
+                                          Icons.bookmark_rounded),
+                                      if (_openSections
+                                          .contains('bookmarks')) ...[
                                       // Add bookmark button
                                       ListTile(
                                         contentPadding:
@@ -686,7 +605,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           'Add Bookmark',
                                           style: TextStyle(
                                             color: onSurfaceDim,
-                                            fontSize: 12,
+                                            fontSize: 14,
                                           ),
                                         ),
                                         onTap: _addBookmark,
@@ -710,7 +629,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                             _shortPath(path),
                                             style: TextStyle(
                                               color: onSurface,
-                                              fontSize: 13,
+                                              fontSize: 14,
                                             ),
                                           ),
                                           onTap: () => setState(
@@ -720,6 +639,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                               _confirmRemoveBookmark(path),
                                         ),
                                       ),
+                                      ], // bookmarks
                                     ],
                                   ),
                                 ),
@@ -739,7 +659,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         '$_itemCount items',
                                         style: TextStyle(
                                           color: onSurfaceDim,
-                                          fontSize: 10,
+                                          fontSize: 11,
                                         ),
                                       ),
                                     ],
@@ -840,22 +760,34 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                           ],
                         ),
                       ),
-                      // File browser — persists across path changes (no key).
-                      // Sidebar/breadcrumb navigation pushes path via initialPath;
-                      // internal navigation fires onPathChanged to sync breadcrumbs.
                       Expanded(
-                        child: FileBrowser(
-                          initialPath: _currentPath,
-                          onItemSelected: (item) =>
-                              setState(() => _selectedItem = item),
-                          onPathChanged: (path) => setState(() {
-                            _currentPath = path;
-                            _selectedItem = null;
-                          }),
-                          onItemCountChanged: (count) =>
-                              setState(() => _itemCount = count),
-                          onBookmarkCurrentPath: (path) => _addBookmark(path),
-                        ),
+                        child: _sidebarTool != null
+                            // Tool opened from the sidebar (Scanner, Notepad, …).
+                            // Rendered inside the Files tab so the bottom
+                            // navigation bar stays visible. No key: the widget
+                            // is rebuilt on each open so state starts fresh.
+                            ? _buildSidebarToolView()
+                            : GestureDetector(
+                                behavior: HitTestBehavior.translucent,
+                                onTap: _sidebarVisible
+                                    ? () => setState(
+                                        () => _sidebarVisible = false,
+                                      )
+                                    : null,
+                                child: FileBrowser(
+                                  initialPath: _currentPath,
+                                  onItemSelected: (item) =>
+                                      setState(() => _selectedItem = item),
+                                  onPathChanged: (path) => setState(() {
+                                    _currentPath = path;
+                                    _selectedItem = null;
+                                  }),
+                                  onItemCountChanged: (count) =>
+                                      setState(() => _itemCount = count),
+                                  onBookmarkCurrentPath: (path) =>
+                                      _addBookmark(path),
+                                ),
+                              ),
                       ),
                     ],
                   ),
@@ -877,7 +809,17 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             ),
             // Tab 1-6: Full-screen screens.
             LANSharingScreen(),
-            SettingsScreen(),
+                        SettingsScreen(
+              onToolTap: (index) {
+                // Navigate to the corresponding bottom-bar tab instead of
+                // pushing a full-screen route that hides the nav bar.
+                setState(() {
+                  _selectedIndex = index;
+                  _sidebarTool = null;
+                  if (index == 0) _previewVisible = true;
+                });
+              },
+            ),
             StorageAnalysisScreen(rootPath: AppPaths.home),
             const NetworkScreen(),
             const CloudBrowserScreen(),
@@ -947,6 +889,42 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Expandable sidebar section header — tap to show/hide the items below
+  /// it (like the desktop SwordFM sidebar's collapsible groups).
+  Widget _sectionHeader(String key, String title, IconData icon) {
+    final cs = Theme.of(context).colorScheme;
+    final open = _openSections.contains(key);
+    return InkWell(
+      onTap: () => setState(() {
+        open ? _openSections.remove(key) : _openSections.add(key);
+      }),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: cs.primary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14),
+              ),
+            ),
+            AnimatedRotation(
+              turns: open ? 0 : -0.25,
+              duration: const Duration(milliseconds: 150),
+              child: Icon(
+                Icons.expand_more,
+                size: 18,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _sidebarTile(int index, IconData icon, String label, String path) {
     final cs = Theme.of(context).colorScheme;
     final onSurface = cs.onSurface;
@@ -961,9 +939,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         contentPadding: const EdgeInsets.symmetric(horizontal: 8),
         minLeadingWidth: 0,
         horizontalTitleGap: 6,
-        leading: Icon(
+                leading: Icon(
           icon,
-          size: 18,
+          size: 20,
           color: isActive ? cs.primary : onSurface,
         ),
         tileColor: _hoveredIndex.contains(index)
@@ -974,9 +952,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             Flexible(
               child: Text(
                 label,
-                style: TextStyle(
+                                 style: TextStyle(
                   color: isActive ? cs.primary : onSurface,
-                  fontSize: 13,
+                  fontSize: 16,
                 ),
                 overflow: TextOverflow.ellipsis,
                 maxLines: 1,
@@ -991,18 +969,93 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _sidebarAction(IconData icon, String label, VoidCallback onTap) {
+    Widget _sidebarAction(IconData icon, String label, VoidCallback onTap) {
     final onSurfaceDim = Theme.of(context).colorScheme.onSurfaceVariant;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 8),
       minLeadingWidth: 0,
       horizontalTitleGap: 6,
-      leading: Icon(icon, size: 18, color: onSurfaceDim),
+      leading: Icon(icon, size: 20, color: onSurfaceDim),
       title: Text(
         label,
-        style: TextStyle(color: onSurfaceDim, fontSize: 13),
+        style: TextStyle(color: onSurfaceDim, fontSize: 16),
       ),
       onTap: onTap,
+    );
+  }
+
+  /// Opens a sidebar tool embedded in the Files tab so the bottom navigation
+  /// bar stays visible (instead of pushing a full-screen route over it).
+  void _openSidebarTool(Widget tool) {
+    setState(() {
+      _selectedIndex = 0; // stay on Files
+      _toolFullscreen = false;
+      _sidebarTool = tool;
+    });
+  }
+
+  /// Switches to an existing bottom-bar tab (LAN=1, Network=4, Cloud=5) so the
+  /// bottom navigation bar remains visible when opened from the left sidebar.
+  void _openSidebarTab(int index) {
+    setState(() {
+      _sidebarTool = null;
+      _selectedIndex = index;
+      if (index == 0) _previewVisible = true;
+    });
+  }
+
+  void _closeSidebarTool() {
+    setState(() => _sidebarTool = null);
+  }
+
+  /// Toggles the embedded tool between the browser area and full screen.
+  /// Full screen also collapses the sidebar for maximum width; switching to
+  /// another bottom-bar tab always clears the embedded tool so navigation
+  /// never gets stuck on a tool.
+  void _toggleToolFullscreen() {
+    setState(() {
+      _toolFullscreen = !_toolFullscreen;
+      if (_toolFullscreen) _sidebarVisible = false;
+    });
+  }
+
+  /// Renders a sidebar-launched tool inside the Files tab. The slim header
+  /// offers a Back (close) button and a full-screen toggle, and the tool sits
+  /// below it — all while the bottom navigation bar remains visible.
+  Widget _buildSidebarToolView() {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      children: [
+        Container(
+          color: cs.surfaceContainerHighest,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
+            children: [
+              IconButton(
+                icon: Icon(Icons.arrow_back, color: cs.onSurface),
+                tooltip: 'Back to files',
+                onPressed: _closeSidebarTool,
+              ),
+              Expanded(
+                child: Text(
+                  _toolFullscreen ? 'Full screen' : 'Tool',
+                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                icon: Icon(
+                  _toolFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                  color: cs.onSurfaceVariant,
+                ),
+                tooltip: _toolFullscreen ? 'Exit full screen' : 'Full screen',
+                onPressed: _toggleToolFullscreen,
+              ),
+            ],
+          ),
+        ),
+        Expanded(child: _sidebarTool!),
+      ],
     );
   }
 

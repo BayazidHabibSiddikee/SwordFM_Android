@@ -83,6 +83,10 @@ class WebShareServer {
   Future<String?> start({String? shareRootOverride}) async {
     try {
       _currentIp = await _networkInfo.getWifiIP();
+      // Fallback: scan network interfaces if WiFi IP is null (e.g. hotspot, USB)
+      if (_currentIp == null) {
+        _currentIp = await _getLocalIp();
+      }
       if (_currentIp == null) return null;
 
       _shareRoot = shareRootOverride ?? '${AppPaths.downloads}/SwordFM';
@@ -631,6 +635,34 @@ class WebShareServer {
   }
 
   // ---- UI ------------------------------------------------------------------
+
+  /// Fallback IP detection when NetworkInfo.getWifiIP() returns null
+  /// (hotspot, USB tethering, non-WiFi networks).
+  static Future<String?> _getLocalIp() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLinkLocal: false,
+      );
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (!addr.isLoopback &&
+              (addr.address.startsWith('192.168.') ||
+                  addr.address.startsWith('10.') ||
+                  addr.address.startsWith('172.'))) {
+            return addr.address;
+          }
+        }
+      }
+      // Last resort: any non-loopback IPv4
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (!addr.isLoopback) return addr.address;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
 
   void stop() {
     _server?.close(force: true).catchError((_) {});

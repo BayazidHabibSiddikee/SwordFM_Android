@@ -6,10 +6,8 @@ import '../theme/theme.dart';
 import '../screens/video_player_screen.dart';
 import '../screens/music_player_screen.dart';
 import '../screens/notepad_screen.dart';
-import '../screens/pdf_reader_screen.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'dart:typed_data';
-import '../screens/qr_file_screen.dart';
 import '../services/widget_service.dart';
 import '../utils/file_utils.dart';
 import '../services/archive_service.dart';
@@ -373,6 +371,10 @@ class _FileBrowserState extends State<FileBrowser> {
   Set<String> _selectedPaths = {};
   final Set<String> _markedPaths =
       {}; // persistent mark state across directory changes
+  /// When true, tapping any item toggles its mark (like the top "Select"
+  /// button) — entered after marking an item via long-press so the user can
+  /// continue marking other documents by tapping them.
+  bool _markMode = false;
   final Map<String, int> _folderSizes = {};
   final Set<String> _loadingFolders = {};
 
@@ -754,9 +756,7 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   void _openPdf(String path) {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => PdfReaderScreen(filePath: path)));
+    OpenWithService.openDefault(path);
   }
 
   /// Opens [item] in the music player, seeding a playlist with the other
@@ -787,7 +787,11 @@ class _FileBrowserState extends State<FileBrowser> {
   /// checkbox; folders keep select-then-open; a single tap on a file opens
   /// the preview (side panel on desktop, bottom sheet on phones).
   void _handleItemTap(FileItem item, bool isSelected) {
-    if (_selectionMode == SelectionMode.multi) {
+    if (_markMode) {
+      // Mark mode: every tap toggles the mark so more documents can be marked
+      // one after another (same affordance as the top "Select" button).
+      _toggleMarkItem(item.path);
+    } else if (_selectionMode == SelectionMode.multi) {
       _toggleSelection(item.path);
     } else if (item.isDirectory) {
       if (isSelected) {
@@ -862,9 +866,50 @@ class _FileBrowserState extends State<FileBrowser> {
     _notifyMarksChanged();
   }
 
+  /// Toggles the mark on a single item — used by the long-press context menu
+  /// and by mark mode. Exits mark mode automatically when the last mark is
+  /// cleared.
+  void _toggleMarkItem(String path) {
+    setState(() {
+      if (_markedPaths.contains(path)) {
+        _markedPaths.remove(path);
+        if (_markedPaths.isEmpty) _markMode = false;
+      } else {
+        _markedPaths.add(path);
+      }
+    });
+    _notifyMarksChanged();
+  }
+
   void _clearMarks() {
     if (_markedPaths.isEmpty) return;
-    setState(() => _markedPaths.clear());
+    setState(() {
+      _markedPaths.clear();
+      _markMode = false;
+    });
+    _notifyMarksChanged();
+  }
+
+  /// Marks every item currently visible in the folder (matching Linux
+  /// SwordFM's "Marked → Mark all files").
+  void _markAllInFolder() {
+    final paths = _filteredItems.map((i) => i.path);
+    setState(() => _markedPaths.addAll(paths));
+    _notifyMarksChanged();
+  }
+
+  /// Inverts the mark on every item currently visible in the folder.
+  void _invertMarks() {
+    final paths = _filteredItems.map((i) => i.path).toSet();
+    setState(() {
+      for (final path in paths) {
+        if (_markedPaths.contains(path)) {
+          _markedPaths.remove(path);
+        } else {
+          _markedPaths.add(path);
+        }
+      }
+    });
     _notifyMarksChanged();
   }
 
@@ -1218,6 +1263,28 @@ class _FileBrowserState extends State<FileBrowser> {
   Future<void> _deleteSelected() async {
     final paths = _actionPaths;
     if (paths.isEmpty) return;
+    // Honor the "Delete Confirmation" setting: when off, send straight to
+    // trash without the dialog.
+    if (!await FileUtils.loadDeleteConfirmation()) {
+      for (final path in paths) {
+        try {
+          await FileUtils.moveToTrash(path);
+        } catch (_) {}
+      }
+      _selectedPaths.clear();
+      _markedPaths.removeAll(paths);
+      _notifySelectionChanged();
+      _notifyMarksChanged();
+      if (mounted) _loadDirectory();
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Moved ${paths.length} item(s) to trash'),
+            backgroundColor: OneDarkColors.amber,
+          ),
+        );
+      return;
+    }
     final choice = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
@@ -1989,15 +2056,33 @@ class _FileBrowserState extends State<FileBrowser> {
             }
           }),
         const PopupMenuDivider(),
+        if (_markedPaths.contains(item.path))
+          _menuItem(
+            'Unmark',
+            Icons.check_circle,
+            () => _toggleMarkItem(item.path),
+          )
+        else
+          _menuItem(
+            'Mark',
+            Icons.check_circle_outline,
+            () {
+              // Enter mark mode so the user can keep tapping other documents
+              // to mark them (same flow as the top "Select" button), instead
+              // of being limited to one mark per long-press.
+              setState(() => _markMode = true);
+              _toggleMarkItem(item.path);
+            },
+          ),
         _menuItem(
-          _markedPaths.contains(item.path) ? 'Unmark (Space)' : 'Mark (Space)',
-          _markedPaths.contains(item.path)
-              ? Icons.check_circle_outline
-              : Icons.check_circle,
-          () {
-            _selectedPaths.add(item.path);
-            _toggleMarkSelection();
-          },
+          'Mark all in folder',
+          Icons.done_all,
+          _markAllInFolder,
+        ),
+        _menuItem(
+          'Invert marks in folder',
+          Icons.flip,
+          _invertMarks,
         ),
         if (_markedPaths.isNotEmpty)
           _menuItem(
@@ -2052,16 +2137,6 @@ class _FileBrowserState extends State<FileBrowser> {
               builder: (_) => ConvertDialog(filePath: item.path),
             );
           }),
-        _menuItem(
-          'Show QR Code',
-          Icons.qr_code,
-          () {
-            showDialog(
-              context: context,
-              builder: (_) => QrFileScreen(filePath: item.path),
-            );
-          },
-        ),
         _menuItem(
           'Properties',
           Icons.info_outline,
@@ -2283,6 +2358,27 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   Future<void> _confirmDelete(FileItem item) async {
+    // Honor the "Delete Confirmation" setting: when off, send straight to
+    // trash without the dialog.
+    if (!await FileUtils.loadDeleteConfirmation()) {
+      try {
+        await FileUtils.moveToTrash(item.path);
+      } catch (_) {}
+      _markedPaths.remove(item.path);
+      _notifyMarksChanged();
+      if (mounted) {
+        _loadDirectory();
+        _exitSelectMode();
+      }
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Moved to trash'),
+            backgroundColor: OneDarkColors.amber,
+          ),
+        );
+      return;
+    }
     final choice = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
@@ -2819,7 +2915,7 @@ class _FileBrowserState extends State<FileBrowser> {
           padding: const EdgeInsets.all(8),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
-            childAspectRatio: crossAxisCount >= 6 ? 0.72 : 0.8,
+            childAspectRatio: crossAxisCount >= 6 ? 0.7 : 0.75,
             crossAxisSpacing: 4,
             mainAxisSpacing: 4,
           ),
@@ -2829,8 +2925,17 @@ class _FileBrowserState extends State<FileBrowser> {
             final isSelected = _selectedPaths.contains(item.path);
             final isMarked = _markedPaths.contains(item.path);
             return GestureDetector(
-              onLongPressStart: (details) =>
-                  _showContextMenu(item, details.globalPosition),
+              onLongPressStart: (details) {
+                // In mark mode, long-press toggles the mark so the user can
+                // mark multiple documents by long-pressing each one (same
+                // affordance as the top "Select" button). Otherwise, open
+                // the context menu.
+                if (_markMode) {
+                  _toggleMarkItem(item.path);
+                } else {
+                  _showContextMenu(item, details.globalPosition);
+                }
+              },
               onSecondaryTapDown: (details) =>
                   _showContextMenu(item, details.globalPosition),
               onTap: () => _handleItemTap(item, isSelected),
@@ -2957,8 +3062,17 @@ class _FileBrowserState extends State<FileBrowser> {
         final isSelected = _selectedPaths.contains(item.path);
         final isMarked = _markedPaths.contains(item.path);
         return GestureDetector(
-          onLongPressStart: (details) =>
-              _showContextMenu(item, details.globalPosition),
+          onLongPressStart: (details) {
+            // In mark mode, long-press toggles the mark so the user can
+            // mark multiple documents by long-pressing each one (same
+            // affordance as the top "Select" button). Otherwise, open
+            // the context menu.
+            if (_markMode) {
+              _toggleMarkItem(item.path);
+            } else {
+              _showContextMenu(item, details.globalPosition);
+            }
+          },
           onSecondaryTapDown: (details) =>
               _showContextMenu(item, details.globalPosition),
           onTap: () => _handleItemTap(item, isSelected),
@@ -3291,7 +3405,99 @@ class _FileBrowserState extends State<FileBrowser> {
                     : _buildGridView(),
               ),
             ),
+          // SwordFM-style marks action bar: visible whenever items are marked,
+          // with the clipboard/delete actions users expect.
+          if (_markedPaths.isNotEmpty) _buildMarksBar(),
         ],
+      ),
+    );
+  }
+
+  /// SwordFM-style bottom bar for marked items: count + quick actions
+  /// (Copy / Move / Delete / Compress / Clear). Mirrors the desktop app's
+  /// marked-items behaviour on touch devices.
+  Widget _buildMarksBar() {
+    final paths = _markedPaths.toList();
+    return Container(
+      color: OneDarkColors.bgDark,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            Icon(Icons.check_circle, size: 16, color: OneDarkColors.amber),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _markMode
+                    ? '${paths.length} marked — tap more documents to mark'
+                    : '${paths.length} marked',
+                style:
+                    TextStyle(color: OneDarkColors.fg, fontSize: 13),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+              ),
+            ),
+            if (_markMode)
+              TextButton.icon(
+                onPressed: () => setState(() => _markMode = false),
+                icon: const Icon(Icons.check, size: 16),
+                label: const Text('Done'),
+              ),
+            TextButton.icon(
+              onPressed: () {
+                FileUtils.setClipboardMultiple(paths, 'copy');
+                _setClipboardInfo(
+                  ClipboardInfo(
+                    hasClipboard: true,
+                    operation: 'copy',
+                    count: paths.length,
+                  ),
+                );
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('${paths.length} item(s) copied — use Paste'),
+                    backgroundColor: OneDarkColors.green,
+                  ),
+                );
+              },
+              icon: Icon(Icons.content_copy, size: 16),
+              label: const Text('Copy'),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                FileUtils.setClipboardMultiple(paths, 'cut');
+                _setClipboardInfo(
+                  ClipboardInfo(
+                    hasClipboard: true,
+                    operation: 'cut',
+                    count: paths.length,
+                  ),
+                );
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content:
+                        Text('${paths.length} item(s) cut — use Paste to move'),
+                    backgroundColor: OneDarkColors.amber,
+                  ),
+                );
+              },
+              icon: Icon(Icons.content_cut, size: 16),
+              label: const Text('Move'),
+            ),
+            TextButton.icon(
+              onPressed: _deleteSelected,
+              icon: Icon(Icons.delete_outline, size: 16),
+              label: const Text('Delete'),
+              style: TextButton.styleFrom(foregroundColor: OneDarkColors.red),
+            ),
+            TextButton.icon(
+              onPressed: _clearMarks,
+              icon: Icon(Icons.clear_all, size: 16),
+              label: const Text('Clear'),
+            ),
+          ],
+        ),
       ),
     );
   }

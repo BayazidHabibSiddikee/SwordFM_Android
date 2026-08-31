@@ -18,6 +18,21 @@ class OpenWithService {
     }
   }
 
+  /// Opens the system App Info / settings page for [packageName] via the
+  /// native channel (url_launcher cannot launch "package:…" URIs on Android
+  /// 11+ without a matching <queries> entry, which made the old
+  /// app-settings button silently do nothing).
+  static Future<bool> openAppSettings(String packageName) async {
+    try {
+      return await _channel.invokeMethod<bool>('openAppSettings', {
+            'package': packageName,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Launches the chooser for [path]. Throws [Exception] if nothing could be
   /// opened (including the fallback).
   static Future<void> openWithChooser(String path) async {

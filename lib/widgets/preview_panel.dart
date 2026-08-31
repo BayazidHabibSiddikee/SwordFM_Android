@@ -1,11 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:isolate';
 import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:pdfx/pdfx.dart';
 import '../services/open_with_service.dart';
-import '../screens/pdf_reader_screen.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 
@@ -39,11 +38,12 @@ class _PreviewPanelState extends State<PreviewPanel> {
   String _content = '';
   bool _loading = false;
   String? _error;
-  PdfDocument? _pdfDocument;
-  int _pdfPageCount = 0;
-  int _currentPdfPage = 1;
-  Uint8List? _pdfPageBytes;
-  bool _isVideo = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadContent();
+  }
 
   @override
   void didUpdateWidget(covariant PreviewPanel oldWidget) {
@@ -53,27 +53,8 @@ class _PreviewPanelState extends State<PreviewPanel> {
     }
   }
 
-  @override
-  void dispose() {
-    _pdfDocument?.close();
-    super.dispose();
-  }
-
   void _openFullScreen(FileItem item) {
-    final ext = item.extension.toLowerCase();
-    if (ext == '.pdf') {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => PdfReaderScreen(filePath: item.path),
-        ),
-      );
-    } else if (ext == '.docx' || item.isText || item.isMarkdown) {
-      // For text-based docs, open with default app for full viewing
-      OpenWithService.openDefault(item.path);
-    } else {
-      // Fallback: try opening with default app
-      OpenWithService.openDefault(item.path);
-    }
+    OpenWithService.openDefault(item.path);
   }
 
   Future<void> _loadContent() async {
@@ -81,9 +62,6 @@ class _PreviewPanelState extends State<PreviewPanel> {
       setState(() {
         _content = '';
         _error = null;
-        _pdfDocument = null;
-        _pdfPageBytes = null;
-        _isVideo = false;
       });
       return;
     }
@@ -91,77 +69,74 @@ class _PreviewPanelState extends State<PreviewPanel> {
       _loading = true;
       _content = '';
       _error = null;
-      _pdfDocument = null;
-      _pdfPageBytes = null;
-      _isVideo = false;
     });
 
     try {
       final path = widget.item!.path;
-      if (widget.item!.isPdf) {
-        final doc = await PdfDocument.openFile(path);
-        if (mounted) {
-          setState(() {
-            _pdfDocument = doc;
-            _pdfPageCount = doc.pagesCount;
-            _currentPdfPage = 1;
-          });
-          await _renderPdfPage(doc, 1);
-        }
-      } else if (widget.item!.isVideo) {
-        _isVideo = true;
+      if (widget.item!.isVideo) {
+        // Videos are opened via external player — nothing to load for preview
+      } else if (widget.item!.isPdf) {
+        // PDFs are opened via external app — nothing to load for preview
       } else if (widget.item!.isMarkdown) {
-        final file = File(path);
-        if (await file.exists()) {
-          _content = await file.readAsString();
-        } else {
-          _content = '[File not found]';
-        }
+        _content = await _readTextInIsolate(path);
       } else if (widget.item!.extension.toLowerCase() == '.docx') {
-        _content = await _extractDocxText(File(path));
+        // DOCX is a ZIP binary — pull the text out in a background isolate so
+        // the (potentially large) ZIP decode + XML regex never blocks the UI.
+        _content = await Isolate.run(() => _extractDocxTextSync(path));
       } else if (widget.item!.isText || widget.item!.isCode) {
-        final file = File(path);
-        if (await file.exists()) {
-          final bytes = await file.length();
-          if (bytes > 512 * 1024) {
-            final raf = await file.open();
-            try {
-              final data = await raf.read(512 * 1024);
-              _content = '${String.fromCharCodes(data)}\n… (truncated)';
-            } finally {
-              await raf.close();
-            }
-          } else {
-            _content = await file.readAsString();
-          }
-        }
+        _content = await _readTextInIsolate(path);
       }
     } catch (e) {
       setState(() {
         _error = 'Failed to load preview: $e';
       });
     } finally {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _loading = false;
         });
+      }
     }
   }
 
-  /// Extracts readable plain text from a .docx (zip) file by pulling
-  /// word/document.xml and stripping the WordprocessingML tags. Paragraph
-  /// closers become newlines. Returns an error placeholder on failure.
-  Future<String> _extractDocxText(File file) async {
+  /// Reads a text/code/markdown file off the UI isolate. Passes only the path
+  /// (isolates cannot receive a [File] object) and caps reads at 512 KB so a
+  /// huge file never stalls either thread. Returns a trimmed marker when the
+  /// file is bigger than the cap.
+  static Future<String> _readTextInIsolate(String path) {
+    return Isolate.run(() {
+      final file = File(path);
+      if (!file.existsSync()) return '[File not found]';
+      final length = file.lengthSync();
+      if (length > 512 * 1024) {
+        final raf = file.openSync();
+        try {
+          final data = raf.readSync(512 * 1024);
+          return '${utf8.decode(data, allowMalformed: true)}\n… (truncated)';
+        } finally {
+          raf.closeSync();
+        }
+      }
+      return file.readAsStringSync();
+    });
+  }
+
+  /// Top-level (isolate-safe) DOCX text extraction. Reads the file itself from
+  /// [sourcePath] — no [File] objects cross the isolate boundary.
+  /// Returns `[File not found]` / `[File too large to preview]` /
+  /// `[No text content found]` placeholders instead of throwing.
+  static String _extractDocxTextSync(String sourcePath) {
     try {
-      if (!await file.exists()) return '[File not found]';
-      final bytes = await file.length() > 8 * 1024 * 1024
-          ? null
-          : await file.readAsBytes();
-      if (bytes == null) return '[File too large to preview]';
+      final file = File(sourcePath);
+      if (!file.existsSync()) return '[File not found]';
+      if (file.lengthSync() > 8 * 1024 * 1024) {
+        return '[File too large to preview]';
+      }
+      final bytes = file.readAsBytesSync();
       final archive = ZipDecoder().decodeBytes(bytes);
       final docXml = archive.findFile('word/document.xml');
       if (docXml == null) return '[No text content found]';
-      var xml = String.fromCharCodes(docXml.content);
+      var xml = utf8.decode(docXml.content as List<int>);
       // Paragraph and row endings → newlines, then strip all remaining tags.
       xml = xml
           .replaceAll('</w:p>', '\n')
@@ -178,19 +153,6 @@ class _PreviewPanelState extends State<PreviewPanel> {
     } catch (e) {
       return '[Could not read document: $e]';
     }
-  }
-
-  Future<void> _renderPdfPage(PdfDocument doc, int page) async {
-    try {
-      final pdfPage = await doc.getPage(page);
-      final image = await pdfPage.render(width: 400, height: 560);
-      if (mounted) {
-        setState(() {
-          _pdfPageBytes = image?.bytes;
-        });
-      }
-      await pdfPage.close();
-    } catch (_) {}
   }
 
   @override
@@ -283,11 +245,8 @@ class _PreviewPanelState extends State<PreviewPanel> {
   Widget _buildPreview() {
     final item = widget.item!;
     final cs = Theme.of(context).colorScheme;
-    if (item.isPdf && _pdfDocument != null) {
-      return GestureDetector(
-        onTap: () => _openFullScreen(item),
-        child: _buildPdfPreview(),
-      );
+    if (item.isPdf) {
+      return _buildMetadataCard();
     }
     if (item.isVideo) {
       return GestureDetector(
@@ -437,66 +396,6 @@ class _PreviewPanelState extends State<PreviewPanel> {
             label: const Text('Open with…'),
           ),
         ),
-      ],
-    );
-  }
-
-  Widget _buildPdfPreview() {
-    final cs = Theme.of(context).colorScheme;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.chevron_left, size: 20),
-                onPressed: _currentPdfPage > 1
-                    ? () async {
-                        final doc = _pdfDocument!;
-                        await doc.close();
-                        final newDoc = await PdfDocument.openFile(
-                          widget.item!.path,
-                        );
-                        setState(() {
-                          _pdfDocument = newDoc;
-                          _currentPdfPage--;
-                        });
-                        await _renderPdfPage(newDoc, _currentPdfPage);
-                      }
-                    : null,
-              ),
-              Text(
-                'Page $_currentPdfPage / $_pdfPageCount',
-                style: TextStyle(color: cs.onSurface, fontSize: 12),
-              ),
-              IconButton(
-                icon: const Icon(Icons.chevron_right, size: 20),
-                onPressed: _currentPdfPage < _pdfPageCount
-                    ? () async {
-                        setState(() => _currentPdfPage++);
-                        await _renderPdfPage(_pdfDocument!, _currentPdfPage);
-                      }
-                    : null,
-              ),
-            ],
-          ),
-        ),
-        _pdfPageBytes != null
-            ? ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: Image.memory(
-                  _pdfPageBytes!,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => Icon(
-                    Icons.picture_as_pdf,
-                    size: 48,
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-              )
-            : const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       ],
     );
   }

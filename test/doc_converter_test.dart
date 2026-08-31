@@ -17,7 +17,7 @@ void main() {
       expect(DocConverter.canConvert('archive.zip'), isFalse);
       expect(DocConverter.canConvert('video.mp4'), isFalse);
       expect(DocConverter.canConvert('song.mp3'), isFalse);
-      expect(DocConverter.canConvert('doc.pdf'), isFalse);
+      expect(DocConverter.canConvert('doc.pdf'), isTrue); // PDF now converts to TXT
     });
 
     test('getAvailableFormats returns formats for convertible files', () {
@@ -174,10 +174,67 @@ void main() {
     });
 
     test('markdownFileToHtml builds a full document', () async {
-      final html = await DocConverter.markdownFileToHtml(mdFile.path);
+      // The converter writes a styled .html file next to the source and
+      // returns its path (matching the ConvertDialog contract). Verify the
+      // written file contains a complete document.
+      final outPath = await DocConverter.markdownFileToHtml(mdFile.path);
+      expect(outPath, isNotNull);
+      expect(outPath, endsWith('.html'));
+      final html = File(outPath!).readAsStringSync();
       expect(html, contains('<!DOCTYPE html>'));
       expect(html, contains('<title>sample</title>'));
       expect(html, contains('<h1>Sample</h1>'));
     });
+
+    test('toPdf succeeds with lists, bullets and non-Latin-1 text', () async {
+      // Regression: '•' (U+2022) written via the default Helvetica base font
+      // made doc.save() throw, failing the whole conversion.
+      final file = File('${tempDir.path}/bullets.md');
+      file.writeAsStringSync(
+        '# Title \u2013 dash\n\n- item one\n- item two\u2026\n\n'
+        '1. first\n2. second\n\nUnicode: caf\u00e9 \u2014 na\u00efve',
+      );
+      final result = await DocConverter.toPdf(file.path);
+      expect(result, isNotNull);
+      expect(File(result!).existsSync(), isTrue);
+    });
+
+    test('toPdf converts a DOCX source via document.xml text', () async {
+      // Regression: DOCX is a binary ZIP — readAsString threw FormatException.
+      final docxResult = await DocConverter.toDocx(mdFile.path);
+      expect(docxResult, isNotNull);
+      final result = await DocConverter.toPdf(docxResult!);
+      expect(result, isNotNull);
+      final txt = await DocConverter.toText(docxResult);
+      expect(txt, isNotNull);
+      expect(File(txt!).readAsStringSync(), contains('Sample'));
+    });
+
+    test('fromPdf extracts text from a generated PDF', () async {
+      // Round-trip: markdown → PDF → TXT.
+      final pdfPath = await DocConverter.toPdf(mdFile.path);
+      expect(pdfPath, isNotNull);
+      final result = await DocConverter.toText(pdfPath!);
+      expect(result, isNotNull);
+      final text = File(result!).readAsStringSync();
+      expect(text, contains('Sample'));
+      expect(text, contains('Hello'));
+    });
+
+    test('toText of a non-PDF binary garbage file does not crash', () async {
+      // Latin-1 tolerant decode: no FormatException on invalid UTF-8.
+      final binFile = File('${tempDir.path}/weird.log');
+      binFile.writeAsBytesSync([0xff, 0xfe, 0x00, 0x81, 0x41, 0x42]);
+      final result = await DocConverter.toText(binFile.path);
+      expect(result, isNotNull);
+    });
   });
 }
+
+test('conversion writes real file for all formats', () async {
+  final md = File('test_input.md');
+  await md.writeAsString('# X');
+  final p = await DocConverter.markdownFileToHtml(md.path);
+  expect(File(p!).existsSync(), isTrue);
+  expect(p!.endsWith('.html'), isTrue);
+});
