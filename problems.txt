@@ -27,3 +27,23 @@ it closed when I turned bluetooth and paired
 13. make sure root mode works only on rooted phone 
 14. make the video be see on the tab as image preview 
 15. and while sliding that bar it opens images/video/texts/pdf/docx/md in full screen 
+1. Document conversion button for touching long is gone, it
+  should be there, means for pdf it's not their but for txt it
+  works so fix the issue
+  2. terminal isn't working at all
+  3. in recent the preview tab is small compared to other
+  sections when preview opens
+  4. permission denied problem even though all access was given
+  5. edit image is very slow or broken and it does stop the app
+  too
+  6. show QR code button doesn't work
+  7. When I opened PDF it looked like music player but for any
+  document like DOCX pdf readme html it should be open in
+  preview section and add a button in preview to cover full
+  screen or half screen
+  8. In app analyzer can u add uninstall stop process type
+  options
+  9. make sure bluetooth sharing works
+  10. make sure terminal can install packages
+  
+  

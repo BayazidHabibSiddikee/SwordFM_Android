@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:pdfx/pdfx.dart';
 import '../services/open_with_service.dart';
+import '../screens/pdf_reader_screen.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
 
@@ -59,10 +60,20 @@ class _PreviewPanelState extends State<PreviewPanel> {
   }
 
   void _openFullScreen(FileItem item) {
-    Navigator.of(context).pushNamed(
-      '/video',
-      arguments: item.path,
-    );
+    final ext = item.extension.toLowerCase();
+    if (ext == '.pdf') {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PdfReaderScreen(filePath: item.path),
+        ),
+      );
+    } else if (ext == '.docx' || item.isText || item.isMarkdown) {
+      // For text-based docs, open with default app for full viewing
+      OpenWithService.openDefault(item.path);
+    } else {
+      // Fallback: try opening with default app
+      OpenWithService.openDefault(item.path);
+    }
   }
 
   Future<void> _loadContent() async {
@@ -227,6 +238,14 @@ class _PreviewPanelState extends State<PreviewPanel> {
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
+                  ),
+                  // Expand button — opens in full-screen reader/player
+                  IconButton(
+                    icon: const Icon(Icons.fullscreen, size: 18),
+                    onPressed: () => _openFullScreen(item),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    tooltip: 'Open full screen',
                   ),
                   IconButton(
                     icon: const Icon(Icons.close, size: 18),

@@ -401,6 +401,8 @@ class DocConverter {
 
   /// Checks if the file can be converted. Accepts every plain-text format —
   /// markdown, code and data files all flow through the same text pipeline.
+  /// PDF and DOCX are also accepted as source inputs (DOCX→text, PDF→cover
+  /// page thumbnail only; full PDF→other is handled externally).
   static bool canConvert(String path) {
     final ext = p.extension(path).toLowerCase();
     const textExts = {

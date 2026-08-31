@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import 'theme/theme.dart';
 import 'package:dynamic_color/dynamic_color.dart';
@@ -135,6 +136,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Listen for swordfm:// deep links (from "Show QR Code") so scanning the
+    // QR navigates the browser to the shared path.
+    _setupDeepLinkHandler();
     // On Android, resolve the actual storage root synchronously after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _currentPath = AppPaths.home);
@@ -146,6 +150,26 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       FileUtils.loadClipboardHistory();
       checkAutoTheme();
       _syncWidgetBookmarks();
+    });
+  }
+
+  /// Registers a handler for the native `com.swordfm/deeplink` channel which
+  /// delivers the path encoded in `swordfm://open?path=...` QR codes.
+  void _setupDeepLinkHandler() {
+    const channel = MethodChannel('com.swordfm/deeplink');
+    channel.setMethodCallHandler((call) async {
+      if (call.method == 'onOpenPath') {
+        final path = (call.arguments as Map?)?['path'] as String?;
+        if (path != null && mounted) {
+          final dir = FileSystemEntity.isDirectorySync(path)
+              ? path
+              : p.dirname(path);
+          setState(() {
+            _selectedIndex = 0; // switch to Files tab
+            _currentPath = dir;
+          });
+        }
+      }
     });
   }
 

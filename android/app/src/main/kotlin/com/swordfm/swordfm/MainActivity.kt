@@ -145,13 +145,12 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             // APK / XAPK installation via PackageInstaller.
             MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/installer")
                 .setMethodCallHandler(this)
-            // Cloud storage OAuth redirect delivery.
+            // Cloud storage OAuth redirect delivery + swordfm:// deep links.
             MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/cloud")
                 .setMethodCallHandler { call, result ->
-                    if (call.method == "getCloudCallbackScheme") {
-                        result.success("storagesfm://dropbox-callback")
-                    } else {
-                        result.notImplemented()
+                    when (call.method) {
+                        "getCloudCallbackScheme" -> result.success("storagesfm://dropbox-callback")
+                        else -> result.notImplemented()
                     }
                     true
                 }
@@ -167,6 +166,25 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     }
                     true
                 }
+        }
+
+        // Cold start via a deep link (swordfm://...). The Flutter engine may not
+        // be ready to accept an invokeMethod instantly, so deliver it once the
+        // first frame is up.
+        intent.data?.let { uri ->
+            if (uri.scheme == "swordfm" && uri.host == "open") {
+                val path = uri.getQueryParameter("path")
+                if (path != null) {
+                    flutterEngine?.let { engine ->
+                        engine.dartExecutor.binaryMessenger.let { messenger ->
+                            MethodChannel(messenger, "com.swordfm/deeplink").invokeMethod(
+                                "onOpenPath",
+                                mapOf("uri" to uri.toString(), "path" to path)
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -397,6 +415,12 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
             // existing bluetooth-channel focus for file-picker calls.
             MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, "com.swordfm/cloud")
                 .invokeMethod("onOAuthRedirect", mapOf("uri" to uri.toString()))
+        } else if (uri.scheme == "swordfm") {
+            // "Show QR Code" deep link — swordfm://open?path=<encoded>
+            // Forward to Dart so MainScreen can navigate to the shared file/folder.
+            val path = uri.getQueryParameter("path") ?: return
+            MethodChannel(flutterEngine!!.dartExecutor.binaryMessenger, "com.swordfm/deeplink")
+                .invokeMethod("onOpenPath", mapOf("uri" to uri.toString(), "path" to path))
         }
     }
 

@@ -1,6 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
-import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
@@ -20,8 +21,28 @@ class PhotoEditorScreen extends StatefulWidget {
 class _PhotoEditorState extends State<PhotoEditorScreen> {
   img.Image? _original;
   img.Image? _edited;
+
+  // Pre-encoded preview bytes for the InteractiveViewer. Encoding the full
+  // image on every edit is far too slow for large photos (blocks the UI for
+  // seconds). We keep a *downscaled* JPEG preview that refreshes quickly, and
+  // only re-encode it when the edits (params) actually change.
+  Uint8List? _previewBytes;
   bool _loading = true;
   bool _saving = false;
+
+  // Keep the last-applied params so we can avoid redundant re-encodes.
+  int _lastAppliedRotation = 0;
+  bool _lastAppliedFlipH = false;
+  bool _lastAppliedFlipV = false;
+  double _lastAppliedBrightness = 0;
+  double _lastAppliedContrast = 1;
+  bool _lastAppliedCrop = false;
+  int _lastAppliedCropX = 0;
+  int _lastAppliedCropY = 0;
+  int _lastAppliedCropW = 0;
+  int _lastAppliedCropH = 0;
+
+  // Active (pending) edit params — slider drags update these live.
   double _brightness = 0;
   double _contrast = 1;
   int _rotation = 0; // 0, 90, 180, 270
@@ -33,18 +54,36 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
   int _cropH = 0;
   bool _hasCrop = false;
 
+  // Debounce timer for slider-driven preview refreshes so we don't re-encode
+  // on every pixel of slider movement.
+  Timer? _debounce;
+
   @override
   void initState() {
     super.initState();
     _loadImage();
   }
 
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  /// Loads the full-res original once, then prepares a small preview.
   Future<void> _loadImage() async {
     try {
       final bytes = await File(widget.filePath).readAsBytes();
-      _original = img.decodeImage(bytes);
+      // Decode the original in the background so a big photo doesn't block
+      // the UI thread while loading.
+      final decoded = await compute(_decodeImage, bytes);
+      if (decoded == null) {
+        throw Exception('Unsupported image format');
+      }
+      _original = decoded;
       _edited = img.Image.from(_original!);
-      setState(() => _loading = false);
+      _rebuildPreview();
+      if (mounted) setState(() => _loading = false);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -55,8 +94,18 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
     }
   }
 
-  void _applyEdits() {
-    if (_original == null) return;
+  /// Decode helper for [compute] (top-level so it can be spawned in an isolate).
+  static img.Image? _decodeImage(Uint8List bytes) {
+    try {
+      return img.decodeImage(bytes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Applies the pending transforms to a copy of the original (runs off the
+  /// UI thread when possible) and returns the edited image.
+  Future<img.Image> _applyEditsToImage() async {
     var result = img.Image.from(_original!);
 
     // Rotate
@@ -70,16 +119,101 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
 
     // Brightness & Contrast
     if (_brightness != 0 || _contrast != 1) {
-      result = img.adjustColor(result, brightness: _brightness / 100, contrast: _contrast);
+      result = img.adjustColor(
+        result,
+        brightness: _brightness / 100,
+        contrast: _contrast,
+      );
     }
 
     // Crop
     if (_hasCrop && _cropW > 0 && _cropH > 0) {
-      result = img.copyCrop(result, x: _cropX, y: _cropY, width: _cropW, height: _cropH);
+      result = img.copyCrop(
+        result,
+        x: _cropX,
+        y: _cropY,
+        width: _cropW,
+        height: _cropH,
+      );
     }
 
-    _edited = result;
+    return result;
+  }
+
+  bool _paramsChanged() {
+    return _rotation != _lastAppliedRotation ||
+        _flipH != _lastAppliedFlipH ||
+        _flipV != _lastAppliedFlipV ||
+        _brightness != _lastAppliedBrightness ||
+        _contrast != _lastAppliedContrast ||
+        _hasCrop != _lastAppliedCrop ||
+        _cropX != _lastAppliedCropX ||
+        _cropY != _lastAppliedCropY ||
+        _cropW != _lastAppliedCropW ||
+        _cropH != _lastAppliedCropH;
+  }
+
+  /// Recomputes the full-res edited image and a downscaled JPEG preview,
+  /// off the UI thread. Called debounced during slider drags, and
+  /// immediately after discrete edits (rotate/flip/crop).
+  void _rebuildPreview() {
+    if (_original == null) return;
+    if (!_paramsChanged()) return;
+    _edited = null; // free memory while working
     setState(() {});
+
+    Future(() async {
+      final edited = await _applyEditsToImage();
+      if (!mounted) { edited.clear(); return; }
+      final bytes = await compute(_encodePreview, edited);
+      if (!mounted) return;
+      setState(() {
+        _edited = edited;
+        _previewBytes = bytes;
+        _lastAppliedRotation = _rotation;
+        _lastAppliedFlipH = _flipH;
+        _lastAppliedFlipV = _flipV;
+        _lastAppliedBrightness = _brightness;
+        _lastAppliedContrast = _contrast;
+        _lastAppliedCrop = _hasCrop;
+        _lastAppliedCropX = _cropX;
+        _lastAppliedCropY = _cropY;
+        _lastAppliedCropW = _cropW;
+        _lastAppliedCropH = _cropH;
+      });
+    });
+  }
+
+  /// Top-level encode helper for [compute].
+  static Uint8List _encodePreview(img.Image image) {
+    // Downscale aggressively for the on-screen preview — the actual save
+    // later re-encodes the full-res image. This makes the editor feel
+    // instant even for 10MP+ photos.
+    var preview = image;
+    const maxDim = 900;
+    if (max(preview.width, preview.height) > maxDim) {
+      final scale = maxDim / max(preview.width, preview.height);
+      preview = img.copyResize(
+        preview,
+        width: (preview.width * scale).round(),
+        height: (preview.height * scale).round(),
+      );
+    }
+    final bytes = img.encodeJpg(preview, quality: 80);
+    if (preview != image) preview.clear();
+    return bytes;
+  }
+
+  /// Callback used by discrete tool buttons — recompute immediately.
+  void _applyEdits() {
+    _debounce?.cancel();
+    _rebuildPreview();
+  }
+
+  /// Callback used by continuous sliders — recompute after a short pause.
+  void _applyEditsDebounced() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 150), _rebuildPreview);
   }
 
   Future<void> _saveImage() async {
@@ -90,8 +224,11 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
       final dir = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
       final baseName = p.basenameWithoutExtension(widget.filePath);
       final outPath = p.join(dir.path, '${baseName}_edited.png');
-      final encoded = img.encodePng(_edited!);
-      await File(outPath).writeAsBytes(encoded);
+      // Encode the full-res edited image in the background so a large photo
+      // doesn't freeze the UI while saving.
+      final full = await compute(_encodeFullImage, _edited!);
+      if (full == null) throw Exception('encode failed');
+      await File(outPath).writeAsBytes(full);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -115,6 +252,15 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
     if (mounted) setState(() => _saving = false);
   }
 
+  /// Encodes the full-res edited image as PNG (isolate-friendly top-level fn).
+  static Uint8List? _encodeFullImage(img.Image image) {
+    try {
+      return img.encodePng(image);
+    } catch (_) {
+      return null;
+    }
+  }
+
   void _resetEdits() {
     setState(() {
       _brightness = 0;
@@ -123,8 +269,20 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
       _flipH = false;
       _flipV = false;
       _hasCrop = false;
-      _edited = _original != null ? img.Image.from(_original!) : null;
+      _edited = null;
+      _previewBytes = null;
+      _lastAppliedRotation = 0;
+      _lastAppliedFlipH = false;
+      _lastAppliedFlipV = false;
+      _lastAppliedBrightness = 0;
+      _lastAppliedContrast = 1;
+      _lastAppliedCrop = false;
+      _lastAppliedCropX = 0;
+      _lastAppliedCropY = 0;
+      _lastAppliedCropW = 0;
+      _lastAppliedCropH = 0;
     });
+    _applyEdits();
   }
 
   @override
@@ -167,16 +325,24 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
                 // Image preview
                 Expanded(
                   child: Center(
-                    child: _edited != null
+                    child: _previewBytes != null
                         ? InteractiveViewer(
                             minScale: 0.5,
                             maxScale: 4,
                             child: Image.memory(
-                              img.encodePng(_edited!),
+                              _previewBytes!,
                               fit: BoxFit.contain,
+                              gaplessPlayback: true,
                             ),
                           )
-                        : const Text('No image'),
+                        : _loading
+                            ? Center(
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: OneDarkColors.cyan,
+                                ),
+                              )
+                            : const SizedBox.shrink(),
                   ),
                 ),
                 // Tool bar
@@ -204,11 +370,11 @@ class _PhotoEditorState extends State<PhotoEditorScreen> {
                           }),
                           _toolButton(Icons.brightness_6, 'Bright', () => _showSlider(
                             'Brightness', _brightness, -100, 100,
-                            (v) { setState(() => _brightness = v); _applyEdits(); },
+                            (v) { setState(() => _brightness = v); _applyEditsDebounced(); },
                           )),
                           _toolButton(Icons.contrast, 'Contrast', () => _showSlider(
                             'Contrast', _contrast, 0.2, 3,
-                            (v) { setState(() => _contrast = v); _applyEdits(); },
+                            (v) { setState(() => _contrast = v); _applyEditsDebounced(); },
                           )),
                           _toolButton(Icons.crop, 'Crop', _showCropDialog),
                         ],

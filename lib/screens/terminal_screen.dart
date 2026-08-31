@@ -9,12 +9,16 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/terminal_service.dart';
 import '../theme/theme.dart';
 import '../utils/constants.dart' show AppPaths;
+import '../utils/file_utils.dart' show FileUtils;
 
 /// Built-in terminal emulator (no Termux required).
 ///
 /// Spawns a real pseudo-terminal via [Pty] (native JNI) running the system
 /// shell, and renders it with the xterm widget. Falls back to Termux (via
 /// [TerminalService]) only when no shell binary can be spawned.
+///
+/// If the device is rooted (has `su`), the terminal starts with root so
+/// package-manager commands (`apt`, `pkg install`, `pm`, `cmd package`) work.
 class TerminalScreen extends StatefulWidget {
   /// Directory the shell starts in ("Open Terminal Here").
   final String startPath;
@@ -32,6 +36,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   bool _shellExited = false;
   String? _spawnError;
   final FocusNode _terminalFocusNode = FocusNode();
+  bool _isRoot = false;
 
   @override
   void initState() {
@@ -41,7 +46,18 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _terminal.onResize = (width, height, _, __) {
       _pty?.resize(height, width);
     };
-    _startShell();
+    _checkRoot().then((v) {
+      if (mounted) setState(() => _isRoot = v);
+      _startShell();
+    });
+  }
+
+  Future<bool> _checkRoot() async {
+    try {
+      return await FileUtils.isRooted;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _startShell() async {
@@ -58,34 +74,56 @@ class _TerminalScreenState extends State<TerminalScreen> {
           : Directory.systemTemp.path;
     }
 
-    // Try multiple shell paths in order of preference
-    const shells = <String>[
-      '/data/data/com.termux/files/usr/bin/bash',
-      '/data/data/com.termux/files/usr/bin/sh',
-      '/system/bin/sh',
-      '/system/xbin/sh',
-      '/bin/sh',
-    ];
-    String shell = shells.firstWhere(
-      (s) => File(s).existsSync(),
-      orElse: () => '/system/bin/sh',
-    );
+    String shell;
+    String envHome;
+    String shellPath;
 
-    final usingTermux = shell.startsWith('/data/data/com.termux');
-    final shellPath = usingTermux
-        ? '/data/data/com.termux/files/usr/bin:'
-              '/data/data/com.termux/files/usr/bin/applets:'
-              '/system/bin:/system/xbin:/product/bin:/vendor/bin'
-        : '/system/bin:/system/xbin:/product/bin:/vendor/bin';
+    if (_isRoot) {
+      // Use su so the shell runs as root — grants access to package managers
+      // (apt, pkg, pm) and system directories.
+      shell = '/system/bin/sh';
+      envHome = cwd;
+      shellPath =
+          '/data/data/com.termux/files/usr/bin:'
+          '/data/data/com.termux/files/usr/bin/applets:'
+          '/system/bin:/system/xbin:/product/bin:/vendor/bin';
+    } else {
+      // Try multiple shell paths in order of preference. mksh is Android's
+      // default interactive shell and works under a PTY; toybox sh usually is
+      // not interactive and exits immediately. Termux's bash is preferred when
+      // installed because it ships a working package manager.
+      const shells = <String>[
+        '/data/data/com.termux/files/usr/bin/bash',
+        '/data/data/com.termux/files/usr/bin/sh',
+        '/system/bin/mksh',
+        '/system/bin/sh',
+        '/system/xbin/sh',
+        '/bin/sh',
+      ];
+      shell = shells.firstWhere(
+        (s) => File(s).existsSync(),
+        orElse: () => '/system/bin/sh',
+      );
+      final usingTermux = shell.startsWith('/data/data/com.termux');
+      envHome = cwd;
+      shellPath = usingTermux
+          ? '/data/data/com.termux/files/usr/bin:'
+                '/data/data/com.termux/files/usr/bin/applets:'
+                '/system/bin:/system/xbin:/product/bin:/vendor/bin'
+          : '/system/bin:/system/xbin:/product/bin:/vendor/bin';
+    }
 
     try {
+      final List<String> args =
+          _isRoot ? <String>['sh', '-c', 'exec sh'] : const <String>[];
       final pty = Pty.start(
         shell,
+        arguments: args,
         workingDirectory: cwd,
         environment: {
           'TERM': 'xterm-256color',
           'PATH': shellPath,
-          'HOME': cwd,
+          'HOME': envHome,
           'LANG': 'en_US.UTF-8',
           'TMPDIR': Directory.systemTemp.path,
           'SHELL': shell,
@@ -107,7 +145,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
       _shellExited = false;
       pty.exitCode.then((code) {
         _shellExited = true;
-        _terminal.write('\r\n\x1b[2m[Process exited with code $code]\x1b[0m\r\n');
+        _terminal.write(
+            '\r\n\x1b[2m[Process exited with code $code]\x1b[0m\r\n');
         if (mounted) setState(() => _pty = null);
       });
 
@@ -116,10 +155,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
         if (mounted && _pty != null && !_shellExited) return;
         if (mounted && _shellExited && _spawnError == null) {
           setState(() {
-            _spawnError =
-                'System shell exited immediately. This device uses toybox '
-                'which does not work as an interactive terminal.\n\n'
-                'Install Termux for a full bash shell with package manager.';
+            _spawnError = _isRoot
+                ? 'Root shell exited immediately. Device may not be rooted or su is unavailable.'
+                : 'System shell exited immediately. This device uses toybox '
+                    'which does not work as an interactive terminal.\n\n'
+                    'Install Termux for a full bash shell with package manager.';
           });
         }
       });
@@ -132,7 +172,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
 
       if (mounted) setState(() => _pty = pty);
     } catch (e) {
-      if (mounted) setState(() => _spawnError = e.toString());
+      debugPrint('Terminal spawn error: $e');
+      if (mounted) {
+        setState(() => _spawnError = e.toString());
+      }
     }
   }
 
@@ -141,8 +184,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
   static bool _canWrite(String dirPath) {
     try {
       final probe = File(
-        '$dirPath/.swordfm_write_probe_${DateTime.now().millisecondsSinceEpoch}',
-      );
+          '$dirPath/.swordfm_write_probe_${DateTime.now().millisecondsSinceEpoch}');
       probe.createSync();
       probe.deleteSync();
       return true;
@@ -170,7 +212,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         backgroundColor: OneDarkColors.bgDark,
         foregroundColor: cs.onSurface,
         title: Text(
-          'Terminal — ${widget.startPath}',
+          'Terminal${_isRoot ? ' (root)' : ''} — ${widget.startPath}',
           style: TextStyle(color: cs.onSurface, fontSize: 14),
           overflow: TextOverflow.ellipsis,
         ),
@@ -219,9 +261,11 @@ class _TerminalScreenState extends State<TerminalScreen> {
                       if (!mounted) return;
                       if (launched) return;
                       // Termux not found — open Play Store
-                      final url = Uri.parse('https://play.google.com/store/apps/details?id=com.termux');
+                      final url = Uri.parse(
+                          'https://play.google.com/store/apps/details?id=com.termux');
                       if (await canLaunchUrl(url)) {
-                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                        await launchUrl(url,
+                            mode: LaunchMode.externalApplication);
                       }
                     },
                     icon: const Icon(Icons.open_in_new, size: 18),
@@ -236,7 +280,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
                     },
                     child: Text(
                       'Retry with temp directory',
-                      style: TextStyle(color: OneDarkColors.cyan, fontSize: 12),
+                      style:
+                          TextStyle(color: OneDarkColors.cyan, fontSize: 12),
                     ),
                   ),
                 ],
@@ -244,7 +289,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
             )
           : _pty == null
           ? Center(
-              child: CircularProgressIndicator(color: OneDarkColors.cyan),
+              child:
+                  CircularProgressIndicator(color: OneDarkColors.cyan),
             )
           : SafeArea(
               child: Column(
@@ -278,36 +324,46 @@ class _TerminalScreenState extends State<TerminalScreen> {
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(
-                      children: [
-                        _quickKey('↑', '\u001b[A'),
-                        _quickKey('↓', '\u001b[B'),
-                        _quickKey('Esc', '\u001b'),
-                        _quickKey('Tab', '\t'),
-                        _quickKey('Ctrl+C', '\u0003'),
-                        _quickKey('Ctrl+D', '\u0004'),
-                        _quickKey('Ctrl+L', '\u000c'),
-                        const Spacer(),
-                        IconButton(
-                          icon: Icon(
-                            Icons.content_paste,
-                            size: 20,
-                            color: OneDarkColors.fgDim,
+                        children: [
+                          _quickKey('↑', '[A'),
+                          _quickKey('↓', '[B'),
+                          _quickKey('Esc', ''),
+                          _quickKey('Tab', '\t'),
+                          _quickKey('Ctrl+C', ''),
+                          _quickKey('Ctrl+D', ''),
+                          _quickKey('Ctrl+L', ''),
+                          const Spacer(),
+                          IconButton(
+                            icon: Icon(
+                              Icons.download,
+                              size: 20,
+                              color: OneDarkColors.green,
+                            ),
+                            tooltip: 'Package manager help',
+                            onPressed: _hintPackageInstall,
                           ),
-                          tooltip: 'Paste from clipboard',
-                          onPressed: _pasteFromClipboard,
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            Icons.keyboard_hide,
-                            size: 20,
-                            color: OneDarkColors.fgDim,
+                          IconButton(
+                            icon: Icon(
+                              Icons.content_paste,
+                              size: 20,
+                              color: OneDarkColors.fgDim,
+                            ),
+                            tooltip: 'Paste from clipboard',
+                            onPressed: _pasteFromClipboard,
                           ),
-                          tooltip: 'Hide keyboard',
-                          onPressed: () => FocusScope.of(context).unfocus(),
-                        ),
-                      ],
+                          IconButton(
+                            icon: Icon(
+                              Icons.keyboard_hide,
+                              size: 20,
+                              color: OneDarkColors.fgDim,
+                            ),
+                            tooltip: 'Hide keyboard',
+                            onPressed: () =>
+                                FocusScope.of(context).unfocus(),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
                   ),
                 ],
               ),
@@ -337,31 +393,52 @@ class _TerminalScreenState extends State<TerminalScreen> {
     _pty?.write(utf8.encode(text));
   }
 
+  /// Shows how to install packages in the running shell (Termux's `pkg` /
+  /// `apt` when available; otherwise a helpful note). Writes a hint into the
+  /// terminal so the user knows what to type.
+  void _hintPackageInstall() {
+    final termux = File('/data/data/com.termux/files/usr/bin/pkg').existsSync();
+    final msg = termux
+        ? '\r\n\x1b[1;32m[SwordFM] Package manager detected (Termux).\r\n'
+            '  • Update package lists:  pkg update\r\n'
+            '  • Search:              pkg search <name>\r\n'
+            '  • Install:             pkg install <name>\r\n'
+            '  (or use: apt update && apt install <name>)\x1b[0m\r\n'
+        : '\r\n\x1b[1;33m[SwordFM] No package manager found in this shell.\r\n'
+            '  This device uses the Android toybox shell which cannot install\r\n'
+            '  packages by itself.\r\n'
+            '  • Install Termux (from the Play Store/F-Droid) for a full bash\r\n'
+            '    shell, then run:  pkg install <name>\r\n'
+            '  • If the device is rooted, open Termux as root and use:\r\n'
+            '      apt update && apt install <name>\x1b[0m\r\n';
+    _pty?.write(utf8.encode(msg));
+  }
+
   /// One Dark-flavored terminal palette. A getter (not a cached static) so it
   /// tracks the current theme mode like the rest of the app.
   static TerminalTheme get _oneDarkTerminalTheme => TerminalTheme(
-    cursor: OneDarkColors.cyan,
-    selection: OneDarkColors.select,
-    foreground: OneDarkColors.fg,
-    background: OneDarkColors.bgDark,
-    black: const Color(0xFF282C34),
-    red: const Color(0xFFE06C75),
-    green: const Color(0xFF98C379),
-    yellow: const Color(0xFFE5C07B),
-    blue: const Color(0xFF61AFEF),
-    magenta: const Color(0xFFC678DD),
-    cyan: const Color(0xFF56B6C2),
-    white: const Color(0xFFABB2BF),
-    brightBlack: const Color(0xFF5C6370),
-    brightRed: const Color(0xFFE06C75),
-    brightGreen: const Color(0xFF98C379),
-    brightYellow: const Color(0xFFE5C07B),
-    brightBlue: const Color(0xFF61AFEF),
-    brightMagenta: const Color(0xFFC678DD),
-    brightCyan: const Color(0xFF56B6C2),
-    brightWhite: const Color(0xFFFFFFFF),
-    searchHitBackground: OneDarkColors.dim,
-    searchHitBackgroundCurrent: OneDarkColors.hover,
-    searchHitForeground: OneDarkColors.fg,
-  );
+        cursor: OneDarkColors.cyan,
+        selection: OneDarkColors.select,
+        foreground: OneDarkColors.fg,
+        background: OneDarkColors.bgDark,
+        black: const Color(0xFF282C34),
+        red: const Color(0xFFE06C75),
+        green: const Color(0xFF98C379),
+        yellow: const Color(0xFFE5C07B),
+        blue: const Color(0xFF61AFEF),
+        magenta: const Color(0xFFC678DD),
+        cyan: const Color(0xFF56B6C2),
+        white: const Color(0xFFABB2BF),
+        brightBlack: const Color(0xFF5C6370),
+        brightRed: const Color(0xFFE06C75),
+        brightGreen: const Color(0xFF98C379),
+        brightYellow: const Color(0xFFE5C07B),
+        brightBlue: const Color(0xFF61AFEF),
+        brightMagenta: const Color(0xFFC678DD),
+        brightCyan: const Color(0xFF56B6C2),
+        brightWhite: const Color(0xFFFFFFFF),
+        searchHitBackground: OneDarkColors.dim,
+        searchHitBackgroundCurrent: OneDarkColors.hover,
+        searchHitForeground: OneDarkColors.fg,
+      );
 }

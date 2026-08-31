@@ -685,7 +685,9 @@ class _FileBrowserState extends State<FileBrowser> {
 
   /// Single-tap on a file: select it for the preview panel. On phones the
   /// side panel is hidden, so open the preview in a bottom sheet instead.
-  /// Video/audio/PDF open directly in the built-in players/reader.
+  /// Video/audio open directly in the built-in players. PDFs and other
+  /// documents (docx/html/md/txt) open in the preview panel (never the
+  /// full-screen reader) so the user can tap the full-screen button from there.
   Future<void> _showFile(FileItem item) async {
     widget.onItemSelected(item);
     final ext = item.extension.toLowerCase();
@@ -695,10 +697,6 @@ class _FileBrowserState extends State<FileBrowser> {
     }
     if (_kAudioExtensions.contains(ext)) {
       await _openAudio(item);
-      return;
-    }
-    if (item.isPdf) {
-      _openPdf(item.path);
       return;
     }
     if (MediaQuery.of(context).size.width < 600) {
@@ -2047,7 +2045,7 @@ class _FileBrowserState extends State<FileBrowser> {
             () => _installPackage(item),
           ),
         const PopupMenuDivider(),
-        if (item.isText || item.extension == '.docx')
+        if (item.isText || item.isPdf || item.extension == '.docx')
           _menuItem('Convert…', Icons.transform, () {
             showDialog(
               context: context,

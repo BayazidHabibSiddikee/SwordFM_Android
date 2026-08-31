@@ -271,7 +271,7 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
                   PreviewPanel(
                     item: _previewItem,
                     width: double.infinity,
-                    height: 280,
+                    height: null, // let it grow to fill remaining column space
                     onClose: () => setState(() => _previewItem = null),
                   ),
               ],
