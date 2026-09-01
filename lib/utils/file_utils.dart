@@ -479,6 +479,10 @@ class FileItem {
   ].contains(extension);
   bool get isPdf => extension == '.pdf';
   bool get isVideo => const ['.mp4', '.mkv', '.avi', '.mov', '.webm'].contains(extension);
+  /// True for PowerPoint files. We support .pptx (the modern ZIP format);
+  /// the legacy .ppt binary format is not supported.
+  bool get isPptx => extension == '.pptx';
+  bool get isDocx => extension == '.docx';
 }
 
 /// Sort options for the file browser.

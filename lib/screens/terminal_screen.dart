@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:xterm/xterm.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../services/terminal_service.dart';
 import '../theme/theme.dart';
 import '../utils/constants.dart' show AppPaths;
@@ -42,18 +41,32 @@ class _TerminalScreenState extends State<TerminalScreen> {
   bool _restarting = false;
   final FocusNode _terminalFocusNode = FocusNode();
   bool _isRoot = false;
+  // null = still probing; true/false once the Termux install check has run.
+  // The body of the screen is gated on this so a missing Termux surfaces
+  // the install-Termux panel *before* we try to spawn a shell (which would
+  // always fail with the toybox mksh fallback on most devices).
+  bool? _termuxInstalled;
 
   @override
   void initState() {
     super.initState();
     _terminal = Terminal(maxLines: 10000);
     // width = columns, height = rows; Pty.resize takes (rows, columns).
-    _terminal.onResize = (width, height, _, __) {
+    _terminal.onResize = (width, height, _, _) {
       _pty?.resize(height, width);
     };
-    _checkRoot().then((v) {
-      if (mounted) setState(() => _isRoot = v);
-      _startShell();
+    TerminalService.isInstalled().then((installed) {
+      if (mounted) {
+        setState(() {
+          _termuxInstalled = installed;
+          // If Termux is not installed, the embedded shell will not find a
+          // usable bash, so the install-Termux panel will be shown by build().
+        });
+      }
+      _checkRoot().then((v) {
+        if (mounted) setState(() => _isRoot = v);
+        _startShell();
+      });
     });
   }
 
@@ -250,75 +263,87 @@ class _TerminalScreenState extends State<TerminalScreen> {
           ),
         ],
       ),
-      body: _spawnError != null
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.error_outline,
-                      size: 48, color: OneDarkColors.red),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Could not start shell',
-                    style: TextStyle(color: OneDarkColors.fg),
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Text(
-                      _spawnError!,
-                      style: TextStyle(
-                        color: OneDarkColors.fgDim,
-                        fontSize: 12,
+      body: _TermuxMissingBody(
+        installed: _termuxInstalled,
+        onInstall: () async {
+          await TerminalService.openInstallPage();
+        },
+        onRetry: () async {
+          // Re-probe Termux install state — user may have just installed it.
+          final installed = await TerminalService.isInstalled();
+          if (mounted) {
+            setState(() => _termuxInstalled = installed);
+            if (installed) _startShell();
+          }
+        },
+        child: _spawnError != null
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.error_outline,
+                        size: 48, color: OneDarkColors.red),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Could not start shell',
+                      style: TextStyle(color: OneDarkColors.fg),
+                    ),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        _spawnError!,
+                        style: TextStyle(
+                          color: OneDarkColors.fgDim,
+                          fontSize: 12,
+                        ),
+                        textAlign: TextAlign.center,
                       ),
-                      textAlign: TextAlign.center,
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: () async {
-                      // Try Termux first
-                      final launched = await TerminalService.openTerminalAt(
-                        widget.startPath,
-                      );
-                      if (!mounted) return;
-                      if (launched) return;
-                      // Termux not found — open Play Store
-                      final url = Uri.parse(
-                          'https://play.google.com/store/apps/details?id=com.termux');
-                      if (await canLaunchUrl(url)) {
-                        await launchUrl(url,
-                            mode: LaunchMode.externalApplication);
-                      }
-                    },
-                    icon: const Icon(Icons.open_in_new, size: 18),
-                    label: const Text('Install Termux'),
-                  ),
-                  const SizedBox(height: 8),
-                  // Retry with internal shell
-                  TextButton(
-                    onPressed: () {
-                      setState(() => _spawnError = null);
-                      _startShell();
-                    },
-                    child: Text(
-                      'Retry with temp directory',
-                      style:
-                          TextStyle(color: OneDarkColors.cyan, fontSize: 12),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () {
+                        setState(() => _spawnError = null);
+                        _startShell();
+                      },
+                      child: Text(
+                        'Retry with temp directory',
+                        style: TextStyle(
+                            color: OneDarkColors.cyan, fontSize: 12),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            )
-          : _pty == null
-          ? Center(
-              child:
-                  CircularProgressIndicator(color: OneDarkColors.cyan),
-            )
-          : SafeArea(
-              child: Column(
-                children: [
-                  Expanded(
+                  ],
+                ),
+              )
+            : _pty == null
+                ? Center(
+                    child:
+                        CircularProgressIndicator(color: OneDarkColors.cyan),
+                  )
+                : SafeArea(
+                    child: Column(
+                      children: [
+                        if (_termuxInstalled == true)
+                          _TermuxHandoffBar(
+                            onOpenTermux: () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              final ok = await TerminalService.openTerminalAt(
+                                widget.startPath,
+                              );
+                              if (!ok && mounted) {
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Could not launch Termux. Make sure '
+                                      '"Allow external apps" is enabled in '
+                                      'Termux settings.',
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        Expanded(
                     child: GestureDetector(
                       // Tap anywhere on the terminal to focus and raise the
                       // on-screen keyboard (the default keyboardType is
@@ -391,6 +416,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                 ],
               ),
             ),
+        ),
     );
   }
 
@@ -464,4 +490,132 @@ class _TerminalScreenState extends State<TerminalScreen> {
         searchHitBackgroundCurrent: OneDarkColors.hover,
         searchHitForeground: OneDarkColors.fg,
       );
+}
+
+/// Top-of-terminal bar shown only when Termux is installed. Gives the user a
+/// one-tap handoff to a full Termux session in the current directory, which
+/// is far better than the embedded xterm (real package manager, scrolling
+/// history, copy/paste, etc.). The embedded xterm remains the default view.
+class _TermuxHandoffBar extends StatelessWidget {
+  final Future<void> Function() onOpenTermux;
+  const _TermuxHandoffBar({required this.onOpenTermux});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: OneDarkColors.bg,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        children: [
+          Icon(Icons.terminal, size: 14, color: OneDarkColors.green),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Termux is installed — open a full session in this folder.',
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          TextButton.icon(
+            onPressed: onOpenTermux,
+            icon: Icon(Icons.open_in_new, size: 14, color: OneDarkColors.cyan),
+            label: Text(
+              'Open in Termux',
+              style: TextStyle(color: OneDarkColors.cyan, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Gates the terminal body on Termux availability. When [installed] is
+/// `false`, shows the install-Termux panel (so the user is guided to F-Droid
+/// or Play Store) instead of the failed-spawn error path the old code used
+/// to fall into. When [installed] is `null`, shows a tiny spinner. When
+/// `true`, renders the supplied [child] (the original spawn-error / xterm
+/// body).
+class _TermuxMissingBody extends StatelessWidget {
+  final bool? installed;
+  final Future<void> Function() onInstall;
+  final Future<void> Function() onRetry;
+  final Widget child;
+
+  const _TermuxMissingBody({
+    required this.installed,
+    required this.onInstall,
+    required this.onRetry,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (installed == null) {
+      return Center(
+        child: CircularProgressIndicator(color: OneDarkColors.cyan),
+      );
+    }
+    if (installed == true) {
+      return child;
+    }
+    return _InstallTermuxPanel(onInstall: onInstall, onRetry: onRetry);
+  }
+}
+
+class _InstallTermuxPanel extends StatelessWidget {
+  final Future<void> Function() onInstall;
+  final Future<void> Function() onRetry;
+  const _InstallTermuxPanel({required this.onInstall, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = OneDarkColors.amber;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(Icons.terminal, size: 56, color: accent),
+            const SizedBox(height: 12),
+            Text(
+              'Termux is not installed',
+              style: TextStyle(color: OneDarkColors.fg, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'SwordFM needs Termux to provide a real bash shell with a '
+              'package manager (pkg / apt). Without it, the embedded shell '
+              'is just the Android toybox mksh and is not useful for real '
+              'work.',
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: onInstall,
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Install Termux (F-Droid)'),
+              style: FilledButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: Colors.black,
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onRetry,
+              icon: Icon(Icons.refresh, size: 16, color: OneDarkColors.cyan),
+              label: Text(
+                'I just installed it — retry',
+                style: TextStyle(color: OneDarkColors.cyan, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

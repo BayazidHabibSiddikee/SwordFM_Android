@@ -274,8 +274,22 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // The LAN screen is used both as a tab body in the bottom-nav (where the
+    // main scaffold supplies the title bar) and as a pushed route from the
+    // file browser. When pushed, the lack of an AppBar traps the user — they
+    // cannot get back to tap into BT/FTP checks. Show a slim back/title bar
+    // whenever we're NOT inside a parent that supplies one, so the screen is
+    // always escapable.
+    final canPop = Navigator.of(context).canPop();
     return Scaffold(
       backgroundColor: OneDarkColors.bg,
+      appBar: canPop
+          ? AppBar(
+              backgroundColor: OneDarkColors.bgDark,
+              foregroundColor: OneDarkColors.fg,
+              title: const Text('LAN Sharing'),
+            )
+          : null,
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
