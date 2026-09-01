@@ -18,7 +18,6 @@ import '../screens/terminal_screen.dart';
 import '../screens/folder_graph_screen.dart';
 import '../screens/lan_screen.dart';
 import '../screens/archive_browser_screen.dart';
-import '../screens/photo_editor_screen.dart';
 import 'preview_panel.dart';
 import 'convert_dialog.dart';
 import 'package:path/path.dart' as p;
@@ -1215,14 +1214,6 @@ class _FileBrowserState extends State<FileBrowser> {
     ).push(MaterialPageRoute(builder: (_) => TerminalScreen(startPath: path)));
   }
 
-  void _openPhotoEditor(FileItem item) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PhotoEditorScreen(filePath: item.path),
-      ),
-    );
-  }
-
   /// Ctrl+L: jump to a typed path.
   void _showGoToPathDialog() {
     final controller = TextEditingController(text: _currentPath);
@@ -1981,12 +1972,6 @@ class _FileBrowserState extends State<FileBrowser> {
             'Open With…',
             Icons.open_with,
             () => _showOpenWithMenu(item, tapPosition),
-          ),
-        if (!item.isDirectory && item.isImage)
-          _menuItem(
-            'Edit Image…',
-            Icons.photo_camera_back,
-            () => _openPhotoEditor(item),
           ),
         if (item.isDirectory)
           _menuItem(

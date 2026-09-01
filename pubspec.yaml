@@ -24,6 +24,7 @@ dependencies:
   pdf: ^3.12.0
   archive: ^4.0.9
   crypto: ^3.0.0
+  xml: ^6.5.0
   webdav_client: ^1.2.2
   dio: ^5.1.0
   dartssh2: ^3.3.0
@@ -48,7 +49,6 @@ dependencies:
   just_audio: ^0.9.43
   # Document scanner
   image_picker: ^1.1.2
-  image: ^4.5.2
   # App/Process info
   device_info_plus: ^13.2.0
   installed_apps: ^1.3.1
@@ -69,4 +69,5 @@ flutter:
   generate: true
   assets:
     - lib/l10n/arb/
+    - assets/conv/swordconv.py
   uses-material-design: true

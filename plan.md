@@ -105,6 +105,73 @@ All 7 phases are now complete. The remaining items are intentionally deferred to
 
 ---
 
+## 🧩 Phase 10: Real Terminal + Proper File Manager (In Progress)
+
+### Current terminal problem
+The built-in terminal (`lib/screens/terminal_screen.dart`) uses `flutter_pty` to spawn
+Android's **toybox shell** (`mksh`/`sh`). It's not Termux-like: no package manager
+(`apt`/`pkg` are absent), the shell dies constantly, and there's no real POSIX
+environment. It only "works like Termux" if Termux is separately installed and even then
+it shells out funnily.
+
+### Direction — integrate Termux instead of fighting it
+Rather than reimplement a POSIX environment in pure Dart (enormous, fragile), the robust
+path is:
+1. **Bundle/install Termux** as the terminal backend (it ships `bash`, `coreutils`,
+   `util-linux`, and the `pkg`/`apt` package manager — everything the current terminal
+   lacks).
+2. Drive it from SwordFM through the Termux **`RUN_COMMAND`** intent and, for an
+   in-app experience, launch **Termux's own Activity** into the current directory
+   (`TermuxService.openTerminalAt` + the `com.swordfm/terminal` MethodChannel + `termux://`
+   URL scheme that already exist but need improvement). Optional local‑PTY fallback stays
+   for non-Termux devices.
+
+### File manager tasks (proposed)
+- [ ] Upgrade `TerminalService` to robustly detect, launch, and (optionally) embed Termux.
+- [ ] `Open Terminal Here` in the file browser always hands off to Termux in the current dir.
+- [ ] Keep the pure-Dart `flutter_pty` shell as a graceful fallback when Termux is absent.
+- [ ] Verify Termux toolchain `pkg`/`apt` inside the embedded/launched shell.
+
+### Conversion — port `swordconv` (Python) to Termux, drop LibreOffice/pdf2docx
+```diff
+- OLD PLAN: use LibreOffice + pandoc in Termux (huge, rejected by original project)
++ NEW(REVISED): port the original `swordconv` Python tool (tools/swordconv) to run under
++ Termux, and drop both LibreOffice/pandoc AND pdf2docx from the Android path.
++ The original swordconv docstring explicitly rejects LibreOffice/pandoc (~500 MB).
+```
+The original project already ships `tools/swordconv` — a single Python script that does
+all conversions with **PyMuPDF + python-docx + mammoth + bs4 + markdown** (no LibreOffice).
+This is the exact engine to port onto Termux.
+
+**Verified on host (Sep 2026):**
+- ✅ `md/txt/html/docx → docx` is a **true editable re-layout** (python-docx): real
+  `word/document.xml`, numbering, fonts, text runs. Light deps only.
+- ✅ `text → PDF` via PyMuPDF `Story` re-lays HTML across pages.
+- ✅ `pdf/docx/html → txt/md` clean text extraction.
+- ⚠️ GNU **PDF→DOCX via `pdf2docx` is NOT viable on Android**: it wraps each PDF page as
+  an *embedded image* (1.4 KB PDF → 122 KB "docx"), needs `opencv`+`numpy` (fragile/broken
+  on Termux), and hit an import-order bug on host that wrote a `%PDF` mislabeled as DOCX.
+  **Decision: do PDF→DOCX as text re-layout** via the existing `read_pdf` (PyMuPDF →
+  structured HTML incl. heading-size detection) → `write_docx` (python-docx) path. Gives a
+  genuinely editable DOCX with heading/paragraph structure; honest tradeoff = no embedded
+  images/layout fidelity (not achievable in pure-Dart or light-Termux tools).
+
+### Conversion tasks (proposed)
+- [ ] Port `tools/swordconv`'s readers/writers into `ConversionToolService` (Dart
+      Process calling `/data/data/com.termux/files/usr/bin/python` + a bundled script, or
+      a trimmed Dart port of the ~390-line script).
+- [ ] First-run bootstrap: `pkg install python` + `pip install pymupdf python-docx mammoth
+      beautifulsoup4 markdown` (~small wheels vs LibreOffice). Show install progress.
+- [ ] `ConvertDialog` calls the toolchain when present; else falls back to the existing
+      pure-Dart `DocConverter` (never regresses offline / no-Termux).
+- [ ] PDF→DOCX and PDF→HTML/DOCX reuse the `swordconv` PyMuPDF text+heading pipeline
+      (editable re-layout, no images) instead of the current string-slicing `_extractPdfTextSync`.
+- [ ] (port-only, optionally later) `markdownFileToHtml` / md→pdf keeps the existing Dart
+      builder — the Python path only wins when it means less work or better output.
+- [ ] `Open Terminal Here` hands off to Termux in the current dir; pure-Pty stays as fallback.
+
+---
+
 ## 🧩 Phase 9: UX Parity Features (In Progress)
 
 ### ✅ Batch 1 — Navigation, Selection, Bookmarks, Clipboard (Complete)

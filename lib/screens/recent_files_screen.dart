@@ -100,6 +100,13 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
       appBar: AppBar(
         title: const Text('Recent Files'),
         backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            onPressed: _loading ? null : _loadRecent,
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -139,60 +146,7 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
                 Expanded(
                   child: RefreshIndicator(
                     onRefresh: _loadRecent,
-                    child: ListView.separated(
-                      itemCount: _entries.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final entry = _entries[index];
-                        final file = File(entry.path);
-                        final item = FileItem(
-                          entity: file,
-                          name: entry.name,
-                          path: entry.path,
-                          isDirectory: false,
-                          size: entry.size,
-                          lastModified: entry.modified,
-                        );
-                        final isSel = _previewItem?.path == entry.path;
-                        return ListTile(
-                          leading: Icon(
-                            item.icon,
-                            color: item.iconColor,
-                            size: 28,
-                          ),
-                          title: Text(
-                            entry.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            _formatSize(entry.size),
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                              fontSize: 12,
-                            ),
-                          ),
-                          trailing: Text(
-                            _relativeTime(entry.modified),
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                              fontSize: 12,
-                            ),
-                          ),
-                          selected: isSel,
-                          selectedTileColor: Theme.of(
-                            context,
-                          ).colorScheme.primaryContainer.withValues(alpha: 0.2),
-                          onTap: () {
-                            _openEntry(item);
-                          },
-                        );
-                      },
-                    ),
+                    child: _buildEntryList(),
                   ),
                 ),
                 if (_previewItem != null)
@@ -208,60 +162,7 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
                 Expanded(
                   child: RefreshIndicator(
                     onRefresh: _loadRecent,
-                    child: ListView.separated(
-                      itemCount: _entries.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final entry = _entries[index];
-                        final file = File(entry.path);
-                        final item = FileItem(
-                          entity: file,
-                          name: entry.name,
-                          path: entry.path,
-                          isDirectory: false,
-                          size: entry.size,
-                          lastModified: entry.modified,
-                        );
-                        final isSel = _previewItem?.path == entry.path;
-                        return ListTile(
-                          leading: Icon(
-                            item.icon,
-                            color: item.iconColor,
-                            size: 28,
-                          ),
-                          title: Text(
-                            entry.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            _formatSize(entry.size),
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                              fontSize: 12,
-                            ),
-                          ),
-                          trailing: Text(
-                            _relativeTime(entry.modified),
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                              fontSize: 12,
-                            ),
-                          ),
-                          selected: isSel,
-                          selectedTileColor: Theme.of(
-                            context,
-                          ).colorScheme.primaryContainer.withValues(alpha: 0.2),
-                          onTap: () {
-                            _openEntry(item);
-                          },
-                        );
-                      },
-                    ),
+                    child: _buildEntryList(),
                   ),
                 ),
                 if (_previewItem != null)
@@ -276,12 +177,79 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
     );
   }
 
+  /// Shared ListView so the wide and narrow layouts stay in lockstep.
+  Widget _buildEntryList() {
+    return ListView.separated(
+      itemCount: _entries.length,
+      separatorBuilder: (_, _) => const Divider(height: 1),
+      itemBuilder: (context, index) => _buildEntryTile(_entries[index]),
+    );
+  }
+
+  Widget _buildEntryTile(_RecentEntry entry) {
+    final file = File(entry.path);
+    final item = FileItem(
+      entity: file,
+      name: entry.name,
+      path: entry.path,
+      isDirectory: false,
+      size: entry.size,
+      lastModified: entry.modified,
+    );
+    final isSel = _previewItem?.path == entry.path;
+    final dimColor = Theme.of(context).colorScheme.onSurfaceVariant;
+    final selColor =
+        Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.2);
+    return ListTile(
+      leading: Icon(
+        item.icon,
+        color: item.iconColor,
+        size: 28,
+      ),
+      title: Text(
+        entry.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(
+        _formatSize(entry.size),
+        style: TextStyle(color: dimColor, fontSize: 12),
+      ),
+      trailing: Text(
+        _relativeTime(entry.modified),
+        style: TextStyle(color: dimColor, fontSize: 12),
+      ),
+      selected: isSel,
+      selectedTileColor: selColor,
+      onTap: () => _openEntry(item),
+    );
+  }
+
   /// Taps a recent entry: video/audio open in the built-in players, anything
-  /// else shows the preview panel.
-  void _openEntry(FileItem item) {
+  /// else shows the preview panel. If the file no longer exists (deleted
+  /// between scan and tap, or not readable under scoped storage), a SnackBar
+  /// explains the situation instead of letting the player crash.
+  Future<void> _openEntry(FileItem item) async {
+    final file = File(item.path);
+    // Capture the navigator / messenger before the await so we don't reach
+    // back into a disposed context if the screen is closing.
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    if (!await file.exists()) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('"${item.name}" no longer exists.'),
+          action: SnackBarAction(
+            label: 'Refresh',
+            onPressed: _loadRecent,
+          ),
+        ),
+      );
+      return;
+    }
     final ext = item.extension.toLowerCase();
     if (kVideoExtensions.contains(ext)) {
-      Navigator.of(context).push(
+      navigator.push(
         MaterialPageRoute(
           builder: (_) => VideoPlayerScreen(filePath: item.path),
         ),
@@ -289,14 +257,14 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
       return;
     }
     if (kAudioExtensions.contains(ext)) {
-      Navigator.of(context).push(
+      navigator.push(
         MaterialPageRoute(
           builder: (_) => MusicPlayerScreen(filePath: item.path),
         ),
       );
       return;
     }
-    setState(() => _previewItem = item);
+    if (mounted) setState(() => _previewItem = item);
   }
 
   static String _formatSize(int bytes) {

@@ -406,7 +406,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         const Padding(
                                           padding: EdgeInsets.symmetric(
                                             horizontal: 12,
-                                            vertical: 4,
+                                            vertical: 6,
                                           ),
                                           child: SizedBox(
                                             height: 16,
@@ -505,7 +505,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           const Padding(
                                             padding: EdgeInsets.symmetric(
                                               horizontal: 12,
-                                              vertical: 4,
+                                              vertical: 6,
                                             ),
                                             child: SizedBox(
                                               height: 16,
@@ -520,7 +520,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           Padding(
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 12,
-                                              vertical: 4,
+                                              vertical: 6,
                                             ),
                                             child: Text(
                                               'No removable devices',
