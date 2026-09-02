@@ -1206,12 +1206,10 @@ class _FileBrowserState extends State<FileBrowser> {
         });
   }
 
-  /// Opens the built-in terminal emulator at [path] (Linux F4 equivalent).
-  /// The screen itself falls back to Termux when no shell can be spawned.
   Future<void> _openTerminalHere(String path) async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => TerminalScreen(startPath: path)));
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => TerminalScreen(startPath: path)),
+    );
   }
 
   /// Ctrl+L: jump to a typed path.
@@ -2195,17 +2193,6 @@ class _FileBrowserState extends State<FileBrowser> {
         ),
       ),
       const PopupMenuDivider(),
-      if (isText)
-        PopupMenuItem(
-          value: 'termux',
-          child: Row(
-            children: [
-              Icon(Icons.terminal, size: 16, color: OneDarkColors.fg),
-              const SizedBox(width: 8),
-              const Text('Open in Termux'),
-            ],
-          ),
-        ),
       PopupMenuItem(
         value: 'copy',
         child: Row(
@@ -2235,9 +2222,6 @@ class _FileBrowserState extends State<FileBrowser> {
             } catch (e) {
               _openFailed(e);
             }
-            break;
-          case 'termux':
-            _openTerminalHere(p.dirname(item.path));
             break;
           case 'copy':
             await Clipboard.setData(ClipboardData(text: item.path));

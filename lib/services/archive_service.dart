@@ -212,7 +212,8 @@ class ArchiveService {
           destDir,
           tool: '7z',
           toolArgs: ['x', '-y'],
-          hint: 'Install "p7zip" in Termux to extract 7z archives',
+          hint: 'Install "7zip" / p7zip on your device to extract '
+              '7z archives.',
         );
       case '.rar':
         return _extractWithTool(
@@ -220,7 +221,7 @@ class ArchiveService {
           destDir,
           tool: 'unrar',
           toolArgs: ['x', '-y'],
-          hint: 'Install "unrar" in Termux to extract RAR archives',
+          hint: 'Install "unrar" on your device to extract RAR archives.',
         );
       case '.zst':
       case '.tar.zst':
@@ -229,7 +230,8 @@ class ArchiveService {
           destDir,
           tool: 'zstd',
           toolArgs: ['-d', '-o'],
-          hint: 'Install "zstd" in Termux to extract Zstandard archives',
+          hint: 'Install "zstd" on your device to extract Zstandard '
+              'archives.',
         );
       default:
         throw Exception('unsupported:unknown archive format $ext');

@@ -31,13 +31,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_BLUETOOTH" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Package visibility (Android 11+): Termux for "Open Terminal Here" / rclone browser -->
+    <!-- Package visibility (Android 11+): required for installed_apps plugin and file pickers -->
     <queries>
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="termux" />
-        </intent>
-        <package android:name="com.termux" />
         <!-- Required for installed_apps plugin on Android 11+ (API 30+) -->
         <intent>
             <action android:name="android.intent.action.GET_CONTENT" />

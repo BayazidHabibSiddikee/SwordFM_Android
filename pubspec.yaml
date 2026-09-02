@@ -69,5 +69,4 @@ flutter:
   generate: true
   assets:
     - lib/l10n/arb/
-    - assets/conv/swordconv.py
   uses-material-design: true

@@ -317,27 +317,6 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     result.error("OPEN_FAILED", e.message, null)
                 }
             }
-            "openTerminalAt" -> {
-                val path = call.argument<String>("path") ?: ""
-                try {
-                    openTerminalAt(path)
-                    result.success(true)
-                } catch (e: Exception) {
-                    result.error("TERMUX_FAILED", e.message, null)
-                }
-            }
-            "runInTermux" -> {
-                val command = call.argument<String>("command") ?: ""
-                try {
-                    val launched = runInTermux(command)
-                    result.success(launched)
-                } catch (e: Exception) {
-                    result.error("TERMUX_RUN_FAILED", e.message, null)
-                }
-            }
-            "isTermuxInstalled" -> {
-                result.success(isTermuxInstalled())
-            }
             "shareFiles" -> {
                 @Suppress("UNCHECKED_CAST")
                 val paths = call.argument<List<String>>("paths") ?: emptyList()
@@ -566,53 +545,6 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
         chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(chooser)
         return true
-    }
-
-    /** Opens a Termux session running bash at [path] via the RUN_COMMAND intent. */
-    private fun openTerminalAt(path: String) {
-        val intent = Intent("com.termux.RUN_COMMAND").apply {
-            setClassName("com.termux", "com.termux.app.RunCommandService")
-            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
-            putExtra("com.termux.RUN_COMMAND_WORKDIR", path)
-            putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
-            putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", 0) // 0 = new session
-        }
-        startService(intent)
-    }
-
-    /**
-     * Runs [command] in Termux via the RUN_COMMAND intent and returns
-     * immediately. The actual work happens in Termux's RunCommandService,
-     * which keeps running even if SwordFM is backgrounded. We use
-     * BACKGROUND=true so the user does not see a Termux session pop up for
-     * a short-lived install command. Returns true if the intent was
-     * dispatched; false if Termux is not installed.
-     */
-    private fun runInTermux(command: String): Boolean {
-        if (!isTermuxInstalled()) return false
-        val intent = Intent("com.termux.RUN_COMMAND").apply {
-            setClassName("com.termux", "com.termux.app.RunCommandService")
-            putExtra("com.termux.RUN_COMMAND_PATH",
-                "/data/data/com.termux/files/usr/bin/bash")
-            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
-            putExtra("com.termux.RUN_COMMAND_COMMAND", command)
-        }
-        return try {
-            startService(intent)
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    /** Detects whether the Termux app is installed. */
-    private fun isTermuxInstalled(): Boolean {
-        return try {
-            packageManager.getPackageInfo("com.termux", 0)
-            true
-        } catch (_: Exception) {
-            false
-        }
     }
 
     /** True when the app has "All files access" (MANAGE_EXTERNAL_STORAGE). */
