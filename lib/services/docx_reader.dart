@@ -166,12 +166,34 @@ class DocxReader {
     }
 
     final blocks = <DocxBlock>[];
-    for (final child in body.children) {
-      if (child is! XmlElement) continue;
-      final parsed = _parseBlock(child, rels, imageDir);
+    // Block elements are the direct children of <w:body>, BUT real-world
+    // documents wrap them in <w:sdt> (content controls — forms, dropdowns,
+    // date pickers, etc.) and <w:smartTag> blocks. We walk all descendants
+    // so those wrappers don't silently hide their inner paragraphs/tables.
+    for (final descendant in body.descendantElements) {
+      final parent = descendant.parent;
+      if (parent is XmlElement &&
+          parent != body &&
+          !_isBlockWrapper(parent)) {
+        continue; // nested inside something we already visited
+      }
+      final parsed = _parseBlock(descendant, rels, imageDir);
       if (parsed != null) blocks.addAll(parsed);
     }
     return DocxDocument(blocks: blocks, embeddedImageCount: imageCount);
+  }
+
+  /// True when [el] is a transparent block-level wrapper whose children
+  /// should be treated as direct body children for parsing purposes.
+  static bool _isBlockWrapper(XmlElement? el) {
+    if (el == null) return false;
+    final name = el.name.local;
+    // sdt: <w:sdt><w:sdtContent>…</w:sdtContent></w:sdt> — common in Word
+    // forms and content controls.
+    if (name == 'sdt' || name == 'sdtContent') return true;
+    // smartTag: legacy Word feature, occasionally seen.
+    if (name == 'smartTag') return true;
+    return false;
   }
 
   // ---------- block parsing ----------

@@ -31,10 +31,17 @@ class _PdfReaderState extends State<PdfReaderScreen> {
 
   Future<void> _loadPdf() async {
     try {
+      // Open the document once. Pass it to the controller inside a Future
+      // (the controller's API requires Future<PdfDocument>, not the doc
+      // directly). The previous code passed Future.value(doc), which
+      // produced a Future in an "already complete" state and made
+      // PdfViewPinch render blank on pdfx 2.9 — using a freshly-created
+      // microtask future via Future(() => doc) gives the controller the
+      // async-resolve tick it needs to wire up its listeners.
       final doc = await PdfDocument.openFile(widget.filePath);
       _doc = doc;
       _totalPages = doc.pagesCount;
-      _controller = PdfControllerPinch(document: Future.value(doc));
+      _controller = PdfControllerPinch(document: Future(() => doc));
       if (mounted) setState(() => _loaded = true);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
