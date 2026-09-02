@@ -1,13 +1,20 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:pdfx/pdfx.dart';
 
 /// Full-screen PDF reader with page navigation, pinch-to-zoom, and go-to-page.
 ///
-/// Uses the active Material [ColorScheme] (like the rest of the app) instead
-/// of the hard-coded One-Dark palette so the reader matches whichever theme
-/// (dark or cream/light, with dynamic color blending) is currently active.
-/// Pinch-to-zoom is provided by [PdfViewPinch] for a smooth full-screen
-/// reading experience (the plain [PdfView] did not support zoom).
+/// Implementation note: previous versions of this screen used
+/// `PdfViewPinch` directly, but that widget renders blank on some
+/// Flutter/Pdfium combinations on Android 14+. We now pre-render each
+/// page to a PNG using the same `page.render()` path the preview panel
+/// uses, and display them in a `PageView` with `InteractiveViewer`
+/// for pinch-zoom. This is more reliable and gives a real scrollable
+/// reader.
+///
+/// Uses the active Material [ColorScheme] instead of hard-coded colors
+/// so the reader matches the rest of the app in dark or cream/light
+/// theme.
 class PdfReaderScreen extends StatefulWidget {
   final String filePath;
   const PdfReaderScreen({super.key, required this.filePath});
@@ -16,55 +23,67 @@ class PdfReaderScreen extends StatefulWidget {
 }
 
 class _PdfReaderState extends State<PdfReaderScreen> {
-  PdfControllerPinch? _controller;
   int _currentPage = 1;
   int _totalPages = 0;
   bool _loaded = false;
   String? _error;
+  /// File-system paths to per-page PNG renders. Each entry corresponds
+  /// to a page number (1-based: _pageRenders[0] is page 1).
+  final List<String> _pageRenders = [];
+  final PageController _pageController = PageController();
 
   @override
   void initState() {
     super.initState();
     _loadPdf();
-    // Update the page count from the controller once the document finishes
-    // loading. PdfControllerPinch exposes pagesCount which goes from null
-    // to a real number when the Future resolves.
-    () async {
-      // Spin until the controller has a real page count.
-      while (mounted && (_controller?.pagesCount ?? 0) <= 0) {
-        await Future.delayed(const Duration(milliseconds: 50));
-      }
-      if (mounted) setState(() => _totalPages = _controller!.pagesCount!);
-    }();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadPdf() async {
     try {
-      // Hand the controller a Future that opens the file itself, and let
-      // it own the document lifetime. We don't pre-open or pre-resolve the
-      // page count — the controller's _loadDocument does `_state!._releasePages()`
-      // which would crash if we passed it an already-resolved doc. Instead
-      // the controller's loading state listener drives UI state via the
-      // loadingState ValueNotifier.
-      _controller = PdfControllerPinch(
-        document: PdfDocument.openFile(widget.filePath),
-      );
+      final doc = await PdfDocument.openFile(widget.filePath);
+      _totalPages = doc.pagesCount;
+      // Render every page once at a generous size. 1080px wide gives
+      // crisp text even on tablets; phone panels won't use the full
+      // resolution but the file size is still modest (~200-500 KB per
+      // page for typical PDFs).
+      final tmp = await Directory.systemTemp.createTemp('swordfm_pdf_read_');
+      for (var i = 1; i <= _totalPages; i++) {
+        final page = await doc.getPage(i);
+        final png = await page.render(
+          width: 1080,
+          height: (page.height * 1080 / page.width),
+          format: PdfPageImageFormat.png,
+          backgroundColor: '#FFFFFF',
+        );
+        await page.close();
+        if (png == null || png.bytes.isEmpty) continue;
+        final out = File('${tmp.path}/page$i.png');
+        await out.writeAsBytes(png.bytes);
+        _pageRenders.add(out.path);
+      }
+      await doc.close();
       if (mounted) setState(() => _loaded = true);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
   }
 
-  @override
-  void dispose() {
-    _controller?.dispose();
-    super.dispose();
-  }
-
   void _jumpToPage(int page) {
-    if (_controller != null && page >= 1 && page <= _totalPages) {
-      _controller!.jumpToPage(page);
-      setState(() => _currentPage = page);
+    if (page < 1 || page > _totalPages) return;
+    if (page == _currentPage) return;
+    setState(() => _currentPage = page);
+    if (_pageController.hasClients) {
+      _pageController.animateToPage(
+        page - 1,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
     }
   }
 
@@ -93,30 +112,39 @@ class _PdfReaderState extends State<PdfReaderScreen> {
       ),
       body: _error != null
           ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.error_outline, size: 48, color: cs.error),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Cannot open PDF',
-                    style: TextStyle(color: cs.onSurface),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _error!,
-                    style:
-                        TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.error_outline, size: 48, color: cs.error),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Cannot open PDF',
+                      style: TextStyle(color: cs.onSurface),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _error!,
+                      style: TextStyle(
+                          color: cs.onSurfaceVariant, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
               ),
             )
           : !_loaded
-          ? Center(
-              child: CircularProgressIndicator(color: cs.primary),
-            )
-          : _buildReader(cs),
-      bottomNavigationBar: _loaded
+              ? Center(child: CircularProgressIndicator(color: cs.primary))
+              : _pageRenders.isEmpty
+                  ? Center(
+                      child: Text(
+                        'This PDF has no renderable pages.',
+                        style: TextStyle(color: cs.onSurfaceVariant),
+                      ),
+                    )
+                  : _buildReader(cs),
+      bottomNavigationBar: _loaded && _pageRenders.isNotEmpty
           ? Container(
               color: cs.surfaceContainerHighest,
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -130,8 +158,9 @@ class _PdfReaderState extends State<PdfReaderScreen> {
                   IconButton(
                     icon: Icon(Icons.navigate_before,
                         size: 20, color: cs.onSurfaceVariant),
-                    onPressed:
-                        _currentPage > 1 ? () => _jumpToPage(_currentPage - 1) : null,
+                    onPressed: _currentPage > 1
+                        ? () => _jumpToPage(_currentPage - 1)
+                        : null,
                   ),
                   Expanded(
                     child: Slider(
@@ -163,32 +192,54 @@ class _PdfReaderState extends State<PdfReaderScreen> {
     );
   }
 
-    Widget _buildReader(ColorScheme cs) {
-    // PdfViewPinch renders each page at full resolution with pinch-to-zoom.
-    // The background matches the active theme so the reader is consistent
-    // across dark / light modes (no hard-coded One-Dark colors).
-    return PdfViewPinch(
-      controller: _controller!,
-      onPageChanged: (page) {
-        if (mounted) setState(() => _currentPage = page);
+  /// PageView of all pre-rendered pages with pinch-zoom on each.
+  Widget _buildReader(ColorScheme cs) {
+    return PageView.builder(
+      controller: _pageController,
+      itemCount: _pageRenders.length,
+      onPageChanged: (idx) {
+        if (mounted) setState(() => _currentPage = idx + 1);
       },
-      backgroundDecoration: BoxDecoration(color: cs.surface),
-      padding: 8,
-      minScale: 1.0,
-      maxScale: 8.0,
-      builders: PdfViewPinchBuilders<DefaultBuilderOptions>(
-        options: const DefaultBuilderOptions(),
-        documentLoaderBuilder: (_) =>
-            Center(child: CircularProgressIndicator(color: cs.primary)),
-        pageLoaderBuilder: (_) =>
-            Center(child: CircularProgressIndicator(color: cs.primary)),
-        errorBuilder: (context, error) => Center(
-          child: Text(
-            'Error: $error',
-            style: TextStyle(color: cs.onSurfaceVariant),
+      itemBuilder: (context, idx) {
+        return InteractiveViewer(
+          minScale: 1.0,
+          maxScale: 6.0,
+          child: Center(
+            child: Container(
+              margin: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Image.file(
+                File(_pageRenders[idx]),
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) => Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.broken_image,
+                          size: 48, color: cs.onSurfaceVariant),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Page ${idx + 1} could not be rendered',
+                        style:
+                            TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

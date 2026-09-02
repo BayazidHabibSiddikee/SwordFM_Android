@@ -5,8 +5,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:swordfm/services/docx_reader.dart';
+import 'package:swordfm/widgets/preview_panel.dart'
+    show docxTextFromPath, readTextCapped;
 
 /// Builds a minimal valid .docx (ZIP with word/document.xml) on disk.
 Future<String> _writeDocx(String path, String bodyXml) async {
@@ -46,6 +49,27 @@ void main() {
         .join(' ');
     expect(all, contains('Hello preview'));
     expect(all, contains('Second line'));
+  });
+
+  test('preview isolate entry point extracts DOCX text via compute()',
+      () async {
+    // Regression: the old code ran Isolate.run(() => _extractDocx(path))
+    // from inside the State class — the closure captured `this` (the widget
+    // tree) and blew up with "object is unsendable". compute() with a
+    // top-level function must succeed.
+    final text = await compute(docxTextFromPath, docxPath);
+    expect(text, contains('Hello preview'));
+    expect(text, contains('Second line'));
+    expect(text, isNot(contains('[Could not read document')));
+  });
+
+  test('preview isolate entry point reads capped text via compute()',
+      () async {
+    final tmp = await Directory.systemTemp.createTemp('swordfm_txt_test_');
+    final txt = File('${tmp.path}/note.txt');
+    await txt.writeAsString('plain text preview');
+    final text = await compute(readTextCapped, txt.path);
+    expect(text, contains('plain text preview'));
   });
 
   test('parses real-world DOCX with namespace soup + SDT', () async {

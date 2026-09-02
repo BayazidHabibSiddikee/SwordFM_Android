@@ -228,13 +228,15 @@ void main() {
       final result = await DocConverter.toText(binFile.path);
       expect(result, isNotNull);
     });
+
+    test('conversion writes real file for all formats', () async {
+      final md = File('${tempDir.path}/test_input.md');
+      await md.writeAsString('# X');
+      final p = await DocConverter.markdownFileToHtml(md.path);
+      expect(p, isNotNull);
+      expect(File(p!).existsSync(), isTrue);
+      expect(p.endsWith('.html'), isTrue);
+    });
   });
 }
 
-test('conversion writes real file for all formats', () async {
-  final md = File('test_input.md');
-  await md.writeAsString('# X');
-  final p = await DocConverter.markdownFileToHtml(md.path);
-  expect(File(p!).existsSync(), isTrue);
-  expect(p!.endsWith('.html'), isTrue);
-});

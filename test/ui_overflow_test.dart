@@ -55,16 +55,17 @@ void main() {
   });
 
   group('UI overflow regression (narrow phone viewport)', () {
-    testWidgets('sidebar tiles fit the 160px drawer without overflow',
+    testWidgets('sidebar tiles fit the 180px drawer without overflow',
         (tester) async {
       usePhoneViewport(tester);
       await tester.pumpWidget(const SwordFM());
       await tester.pump(const Duration(milliseconds: 200));
 
-      // Sidebar tiles are rendered within the 160px drawer; no overflow
-      // exception thrown.
+      // Sidebar tiles are rendered within the 180px drawer; no overflow
+      // exception thrown. The section header now shows uppercase ("PLACES"),
+      // so we match that.
       expect(find.text('Home'), findsOneWidget);
-      expect(find.text('Places'), findsOneWidget);
+      expect(find.text('PLACES'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 

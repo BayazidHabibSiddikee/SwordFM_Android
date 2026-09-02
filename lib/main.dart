@@ -323,7 +323,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   curve: Curves.easeInOut,
                   child: _sidebarVisible
                       ? SizedBox(
-                          width: isMobile ? 160 : 200,
+                          width: isMobile ? 180 : 220,
                           child: Card(
                             color: surfaceHighest,
                             elevation: 0,
@@ -898,16 +898,32 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       onTap: () => setState(() {
         open ? _openSections.remove(key) : _openSections.add(key);
       }),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Container(
+        // Bottom border to separate the section header from the tiles
+        // below it — gives the sidebar a clearer visual rhythm.
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: cs.outlineVariant.withValues(alpha: 0.4),
+              width: 0.5,
+            ),
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: cs.primary),
+            Icon(icon, size: 16, color: cs.primary),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                title,
-                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14),
+                title.toUpperCase(),
+                style: TextStyle(
+                  color: cs.onSurfaceVariant,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
             AnimatedRotation(
@@ -934,37 +950,48 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     return MouseRegion(
       onEnter: (_) => setState(() => _hoveredIndex.add(index)),
       onExit: (_) => setState(() => _hoveredIndex.remove(index)),
-      child: ListTile(
-        // Compact padding so tiles fit the narrow (160px) mobile sidebar.
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-        minLeadingWidth: 0,
-        horizontalTitleGap: 6,
-                leading: Icon(
-          icon,
-          size: 20,
-          color: isActive ? cs.primary : onSurface,
-        ),
-        tileColor: _hoveredIndex.contains(index)
-            ? onSurface.withValues(alpha: 0.08)
-            : null,
-        title: Row(
-          children: [
-            Flexible(
-              child: Text(
-                label,
-                                 style: TextStyle(
-                  color: isActive ? cs.primary : onSurface,
-                  fontSize: 16,
+      child: Tooltip(
+        // Tooltip shows the full path on long-press / hover so the user
+        // can see which folder a truncated label refers to.
+        message: path,
+        waitDuration: const Duration(milliseconds: 400),
+        child: ListTile(
+          // Compact: dense padding (vertical 0) so 8+ tiles fit on a
+          // phone screen without scrolling, but the horizontal padding
+          // keeps the icon/text from kissing the sidebar edge.
+          contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+          minLeadingWidth: 0,
+          horizontalTitleGap: 6,
+          visualDensity: VisualDensity.compact,
+          dense: true,
+          leading: Icon(
+            icon,
+            size: 18,
+            color: isActive ? cs.primary : onSurface,
+          ),
+          tileColor: _hoveredIndex.contains(index)
+              ? onSurface.withValues(alpha: 0.08)
+              : null,
+          title: Row(
+            children: [
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: isActive ? cs.primary : onSurface,
+                    fontSize: 13,
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
               ),
-            ),
-          ],
+            ],
+          ),
+          selected: isActive,
+          selectedTileColor: cs.primaryContainer.withValues(alpha: 0.3),
+          onTap: () => setState(() => _currentPath = path),
         ),
-        selected: isActive,
-        selectedTileColor: cs.primaryContainer.withValues(alpha: 0.3),
-        onTap: () => setState(() => _currentPath = path),
       ),
     );
   }

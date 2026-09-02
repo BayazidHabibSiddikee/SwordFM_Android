@@ -1,7 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:pdfx/pdfx.dart';
@@ -168,15 +169,15 @@ class _PreviewPanelState extends State<PreviewPanel> {
       } else if (widget.item!.isPptx) {
         // PPTX is a ZIP of slide XML files. Extract a list of slide titles
         // (or the first non-empty text per slide) for a structured preview.
-        _content = await Isolate.run(() => _extractPptxOutlineSync(path));
+        _content = await compute(pptxOutlineFromPath, path);
       } else if (widget.item!.isMarkdown) {
-        _content = await _readTextInIsolate(path);
+        _content = await compute(readTextCapped, path);
       } else if (widget.item!.extension.toLowerCase() == '.docx') {
         // DOCX is a ZIP binary — pull the text out in a background isolate so
         // the (potentially large) ZIP decode + XML regex never blocks the UI.
-        _content = await Isolate.run(() => _extractDocxTextSync(path));
+        _content = await compute(docxTextFromPath, path);
       } else if (widget.item!.isText || widget.item!.isCode) {
-        _content = await _readTextInIsolate(path);
+        _content = await compute(readTextCapped, path);
       }
     } catch (e) {
       setState(() {
@@ -189,134 +190,6 @@ class _PreviewPanelState extends State<PreviewPanel> {
         });
       }
     }
-  }
-
-  /// Reads a text/code/markdown file off the UI isolate. Passes only the path
-  /// (isolates cannot receive a [File] object) and caps reads at 512 KB so a
-  /// huge file never stalls either thread. Returns a trimmed marker when the
-  /// file is bigger than the cap.
-  static Future<String> _readTextInIsolate(String path) {
-    return Isolate.run(() {
-      final file = File(path);
-      if (!file.existsSync()) return '[File not found]';
-      final length = file.lengthSync();
-      if (length > 512 * 1024) {
-        final raf = file.openSync();
-        try {
-          final data = raf.readSync(512 * 1024);
-          return '${utf8.decode(data, allowMalformed: true)}\n… (truncated)';
-        } finally {
-          raf.closeSync();
-        }
-      }
-      return file.readAsStringSync();
-    });
-  }
-
-  /// Top-level (isolate-safe) DOCX text extraction. Reads the file itself from
-  /// [sourcePath] — no [File] objects cross the isolate boundary.
-  /// Returns `[File not found]` / `[File too large to preview]` /
-  /// `[No text content found]` placeholders instead of throwing.
-  static String _extractDocxTextSync(String sourcePath) {
-    try {
-      final file = File(sourcePath);
-      if (!file.existsSync()) return '[File not found]';
-      if (file.lengthSync() > 8 * 1024 * 1024) {
-        return '[File too large to preview]';
-      }
-      final bytes = file.readAsBytesSync();
-      final archive = ZipDecoder().decodeBytes(bytes);
-      final docXml = archive.findFile('word/document.xml');
-      if (docXml == null) return '[No text content found]';
-      // readBytes() — the `content` getter is unreliable in archive 4.x
-      // (can yield empty bytes for stored / unsupported-compression entries).
-      final docXmlBytes = docXml.readBytes();
-      if (docXmlBytes == null) {
-        return '[Could not read document: unsupported compression]';
-      }
-      var xml = utf8.decode(docXmlBytes, allowMalformed: true);
-      // Paragraph and row endings → newlines, then strip all remaining tags.
-      xml = xml
-          .replaceAll('</w:p>', '\n')
-          .replaceAll('</w:tr>', '\n')
-          .replaceAll('<w:tab/>', '\t')
-          .replaceAll(RegExp(r'<[^>]+>'), '');
-      return xml
-          .replaceAll('&amp;', '&')
-          .replaceAll('&lt;', '<')
-          .replaceAll('&gt;', '>')
-          .replaceAll('&quot;', '"')
-          .replaceAll('&apos;', "'")
-          .trim();
-    } catch (e) {
-      return '[Could not read document: $e]';
-    }
-  }
-
-  /// Top-level (isolate-safe) PPTX outline extractor. PPTX is a ZIP of slide
-  /// XML files (`ppt/slides/slide1.xml`, `slide2.xml`, …). We pick the first
-  /// few non-empty text runs per slide to produce a slide list with titles
-  /// and bullet-style content. Output format:
-  ///
-  ///     Slide 1 — <title>
-  ///       • <line>
-  ///       • <line>
-  ///     Slide 2 — <title>
-  ///       …
-  ///
-  /// Falls back to a friendly message when the file isn't a real PPTX or is
-  /// too large to parse cheaply.
-  static String _extractPptxOutlineSync(String sourcePath) {
-    try {
-      final file = File(sourcePath);
-      if (!file.existsSync()) return '[File not found]';
-      if (file.lengthSync() > 16 * 1024 * 1024) {
-        return '[File too large to preview]';
-      }
-      final bytes = file.readAsBytesSync();
-      final archive = ZipDecoder().decodeBytes(bytes);
-      final slideFiles = archive.files
-          .where((f) =>
-              f.name.startsWith('ppt/slides/slide') &&
-              f.name.endsWith('.xml'))
-          .toList()
-        ..sort((a, b) => a.name.compareTo(b.name));
-      if (slideFiles.isEmpty) return '[No slides found]';
-      final buf = StringBuffer();
-      const maxLinesPerSlide = 6;
-      for (final slide in slideFiles) {
-        final xml = utf8.decode(slide.content as List<int>,
-            allowMalformed: true);
-        // Extract text inside <a:t>…</a:t>; the standard PPTX text element.
-        final runs = RegExp(r'<a:t[^>]*>([^<]*)</a:t>')
-            .allMatches(xml)
-            .map((m) => m.group(1)?.trim() ?? '')
-            .where((s) => s.isNotEmpty)
-            .toList();
-        if (runs.isEmpty) {
-          buf.writeln('Slide ${_slideNumber(slide.name)} — (empty)');
-          buf.writeln();
-          continue;
-        }
-        // First non-empty run is treated as the slide title; the rest as
-        // bullets. This is a heuristic but matches what most slides look like.
-        final title = runs.first;
-        final rest = runs.skip(1).take(maxLinesPerSlide).toList();
-        buf.writeln('Slide ${_slideNumber(slide.name)} — $title');
-        for (final r in rest) {
-          buf.writeln('  • $r');
-        }
-        buf.writeln();
-      }
-      return buf.toString().trim();
-    } catch (e) {
-      return '[Could not read presentation: $e]';
-    }
-  }
-
-  static String _slideNumber(String name) {
-    final m = RegExp(r'slide(\d+)\.xml$').firstMatch(name);
-    return m?.group(1) ?? '?';
   }
 
   @override
@@ -734,6 +607,138 @@ class _PreviewPanelState extends State<PreviewPanel> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Top-level isolate entry points for the preview panel.
+//
+// These MUST be top-level functions (not methods or closures created inside
+// the widget State). A closure defined inside a State method implicitly
+// captures `this` — the whole rendered widget tree — and Isolate.run/compute
+// then fails with "Illegal argument in isolate message: object is unsendable"
+// (WidgetsFlutterBinding / RenderParagraph etc.). compute() + a top-level
+// function reference sends only the String path across the boundary.
+// ---------------------------------------------------------------------------
+
+/// Reads a text/code/markdown file off the UI isolate. Caps reads at 512 KB
+/// so a huge file never stalls either thread. Returns a marker when the file
+/// is bigger than the cap.
+String readTextCapped(String path) {
+  final file = File(path);
+  if (!file.existsSync()) return '[File not found]';
+  final length = file.lengthSync();
+  if (length > 512 * 1024) {
+    final raf = file.openSync();
+    try {
+      final data = raf.readSync(512 * 1024);
+      return '${utf8.decode(data, allowMalformed: true)}\n… (truncated)';
+    } finally {
+      raf.closeSync();
+    }
+  }
+  return file.readAsStringSync();
+}
+
+/// DOCX text extraction for the preview panel. Reads the file itself from
+/// [sourcePath] — no [File] objects cross the isolate boundary.
+/// Returns `[File not found]` / `[File too large to preview]` /
+/// `[No text content found]` placeholders instead of throwing.
+String docxTextFromPath(String sourcePath) {
+  try {
+    final file = File(sourcePath);
+    if (!file.existsSync()) return '[File not found]';
+    if (file.lengthSync() > 8 * 1024 * 1024) {
+      return '[File too large to preview]';
+    }
+    final bytes = file.readAsBytesSync();
+    final archive = ZipDecoder().decodeBytes(bytes);
+    final docXml = archive.findFile('word/document.xml');
+    if (docXml == null) return '[No text content found]';
+    // readBytes() — the `content` getter is unreliable in archive 4.x
+    // (can yield empty bytes for stored / unsupported-compression entries).
+    final docXmlBytes = docXml.readBytes();
+    if (docXmlBytes == null) {
+      return '[Could not read document: unsupported compression]';
+    }
+    var xml = utf8.decode(docXmlBytes, allowMalformed: true);
+    // Paragraph and row endings → newlines, then strip all remaining tags.
+    xml = xml
+        .replaceAll('</w:p>', '\n')
+        .replaceAll('</w:tr>', '\n')
+        .replaceAll('<w:tab/>', '\t')
+        .replaceAll(RegExp(r'<[^>]+>'), '');
+    return xml
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'")
+        .trim();
+  } catch (e) {
+    return '[Could not read document: $e]';
+  }
+}
+
+/// PPTX outline extractor for the preview panel. PPTX is a ZIP of slide XML
+/// files (`ppt/slides/slide1.xml`, …). Picks the first few non-empty text
+/// runs per slide. Output format:
+///
+///     Slide 1 — <title>
+///       • <line>
+///
+/// Falls back to a friendly message when the file isn't a real PPTX or is
+/// too large to parse cheaply.
+String pptxOutlineFromPath(String sourcePath) {
+  try {
+    final file = File(sourcePath);
+    if (!file.existsSync()) return '[File not found]';
+    if (file.lengthSync() > 16 * 1024 * 1024) {
+      return '[File too large to preview]';
+    }
+    final bytes = file.readAsBytesSync();
+    final archive = ZipDecoder().decodeBytes(bytes);
+    final slideFiles = archive.files
+        .where((f) =>
+            f.name.startsWith('ppt/slides/slide') && f.name.endsWith('.xml'))
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+    if (slideFiles.isEmpty) return '[No slides found]';
+    final buf = StringBuffer();
+    const maxLinesPerSlide = 6;
+    for (final slide in slideFiles) {
+      // readBytes() — archive 4.x-safe content read (see docxTextFromPath).
+      final slideBytes = slide.readBytes();
+      if (slideBytes == null) continue;
+      final xml = utf8.decode(slideBytes, allowMalformed: true);
+      // Extract text inside <a:t>…</a:t>; the standard PPTX text element.
+      final runs = RegExp(r'<a:t[^>]*>([^<]*)</a:t>')
+          .allMatches(xml)
+          .map((m) => m.group(1)?.trim() ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
+      final label = 'Slide ${_slideNumber(slide.name)}';
+      if (runs.isEmpty) {
+        buf.writeln('$label — (empty)');
+        buf.writeln();
+        continue;
+      }
+      // First non-empty run is treated as the slide title; the rest as
+      // bullets. This is a heuristic but matches what most slides look like.
+      buf.writeln('$label — ${runs.first}');
+      for (final r in runs.skip(1).take(maxLinesPerSlide)) {
+        buf.writeln('  • $r');
+      }
+      buf.writeln();
+    }
+    return buf.toString().trim();
+  } catch (e) {
+    return '[Could not read presentation: $e]';
+  }
+}
+
+String _slideNumber(String name) {
+  final m = RegExp(r'slide(\d+)\.xml$').firstMatch(name);
+  return m?.group(1) ?? '?';
+}
+
 /// Renders a video preview: a real frame thumbnail (extracted from the file
 /// at ~1s in) overlaid with a big play button. Tapping opens the in-app
 /// full-screen player. Falls back to a movie icon if the thumbnail cannot be
@@ -793,7 +798,16 @@ class _VideoPreviewTileState extends State<_VideoPreviewTile> {
     );
     _controller = c;
     try {
-      await c.initialize();
+      // initialize() can hang on Android 14+ for some codecs (HEVC, certain
+      // MKV variants). Race it against a 6-second timeout so the user sees
+      // a usable error instead of a permanent spinner, and fall back to the
+      // full-screen player which uses the same controller but with more
+      // surface area for diagnostics.
+      await c.initialize().timeout(
+            const Duration(seconds: 6),
+            onTimeout: () => throw TimeoutException(
+                'VideoPlayerController.initialize timed out'),
+          );
       await c.setVolume(_muted ? 0 : 1);
       if (!mounted) return;
       setState(() {
@@ -801,6 +815,11 @@ class _VideoPreviewTileState extends State<_VideoPreviewTile> {
         _controllerError = null;
       });
     } catch (e) {
+      // Discard the failed controller so a tap-to-retry works.
+      try {
+        c.dispose();
+      } catch (_) {}
+      _controller = null;
       if (!mounted) return;
       setState(() => _controllerError = e.toString());
     }
