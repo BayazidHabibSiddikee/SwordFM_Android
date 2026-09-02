@@ -17,7 +17,6 @@ class PdfReaderScreen extends StatefulWidget {
 
 class _PdfReaderState extends State<PdfReaderScreen> {
   PdfControllerPinch? _controller;
-  PdfDocument? _doc;
   int _currentPage = 1;
   int _totalPages = 0;
   bool _loaded = false;
@@ -27,21 +26,29 @@ class _PdfReaderState extends State<PdfReaderScreen> {
   void initState() {
     super.initState();
     _loadPdf();
+    // Update the page count from the controller once the document finishes
+    // loading. PdfControllerPinch exposes pagesCount which goes from null
+    // to a real number when the Future resolves.
+    () async {
+      // Spin until the controller has a real page count.
+      while (mounted && (_controller?.pagesCount ?? 0) <= 0) {
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
+      if (mounted) setState(() => _totalPages = _controller!.pagesCount!);
+    }();
   }
 
   Future<void> _loadPdf() async {
     try {
-      // Open the document once. Pass it to the controller inside a Future
-      // (the controller's API requires Future<PdfDocument>, not the doc
-      // directly). The previous code passed Future.value(doc), which
-      // produced a Future in an "already complete" state and made
-      // PdfViewPinch render blank on pdfx 2.9 — using a freshly-created
-      // microtask future via Future(() => doc) gives the controller the
-      // async-resolve tick it needs to wire up its listeners.
-      final doc = await PdfDocument.openFile(widget.filePath);
-      _doc = doc;
-      _totalPages = doc.pagesCount;
-      _controller = PdfControllerPinch(document: Future(() => doc));
+      // Hand the controller a Future that opens the file itself, and let
+      // it own the document lifetime. We don't pre-open or pre-resolve the
+      // page count — the controller's _loadDocument does `_state!._releasePages()`
+      // which would crash if we passed it an already-resolved doc. Instead
+      // the controller's loading state listener drives UI state via the
+      // loadingState ValueNotifier.
+      _controller = PdfControllerPinch(
+        document: PdfDocument.openFile(widget.filePath),
+      );
       if (mounted) setState(() => _loaded = true);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -51,7 +58,6 @@ class _PdfReaderState extends State<PdfReaderScreen> {
   @override
   void dispose() {
     _controller?.dispose();
-    _doc?.close();
     super.dispose();
   }
 

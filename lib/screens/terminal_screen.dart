@@ -368,13 +368,39 @@ class _TerminalScreenState extends State<TerminalScreen> {
                       // a shell).
                       onTap: () =>
                           _terminalFocusNode.requestFocus(),
-                      child: TerminalView(
+                      child: PopScope(
+                        // canPop: false means Flutter delivers the back
+                        // press to onPopInvokedWithResult; we then decide
+                        // whether to pop the route or forward a backspace
+                        // (Ctrl-H / 0x7F) to the PTY. The xterm's hidden
+                        // EditableText would otherwise eat the back key
+                        // for soft-keyboard backspace and the navigator
+                        // never sees the press.
+                        canPop: false,
+                        onPopInvokedWithResult: (didPop, _) {
+                          if (didPop) return;
+                          // The user pressed back. The simplest reliable
+                          // behavior: pop the screen. If we wanted to be
+                          // fancy, we'd inspect the xterm's input buffer
+                          // and forward a backspace if non-empty — but the
+                          // xterm package doesn't expose that, and the
+                          // soft-keyboard already has a backspace key for
+                          // the in-shell use case. So back always pops.
+                          try {
+                            _pty?.kill();
+                          } catch (_) {}
+                          if (mounted) {
+                            Navigator.of(context).pop();
+                          }
+                        },
+                        child: TerminalView(
                         _terminal,
                         theme: _oneDarkTerminalTheme,
                         textStyle: const TerminalStyle(fontSize: 13),
                         autofocus: true,
                         keyboardType: TextInputType.text,
                         focusNode: _terminalFocusNode,
+                      ),
                       ),
                     ),
                   ),
@@ -461,8 +487,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
   }
 
   /// Shows how to install packages in the running shell (Termux's `pkg` /
-  /// `apt` when available; otherwise a helpful note). Writes a hint into the
-  /// terminal so the user knows what to type.
+  /// `apt` when available; otherwise a helpful note). Renders the hint on the
+  /// terminal DISPLAY (never into the PTY — writing to the PTY would feed the
+  /// banner text to the shell as commands, which is exactly what happened
+  /// when toybox sh echoed "inaccessible or not found" for every line).
   void _hintPackageInstall() {
     final termux = File('/data/data/com.termux/files/usr/bin/pkg').existsSync();
     final msg = termux
@@ -478,7 +506,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
             '    shell, then run:  pkg install <name>\r\n'
             '  • If the device is rooted, open Termux as root and use:\r\n'
             '      apt update && apt install <name>\x1b[0m\r\n';
-    _pty?.write(utf8.encode(msg));
+    // Display-only write — the shell never sees this text.
+    _terminal.write(msg);
   }
 
   /// One Dark-flavored terminal palette. A getter (not a cached static) so it

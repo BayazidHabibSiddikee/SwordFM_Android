@@ -265,9 +265,13 @@ class ConversionToolService {
       case ToolchainState.pythonMissing:
         final ok = await _runInTermux('pkg install -y python');
         return ok
-            ? 'Installing python in Termux… return here in a minute and try again.'
+            ? 'Installing python in Termux… return here in a minute and try again.\n\n'
+                'If the install never started, open Termux → Settings → Security → '
+                'enable "Allow external apps".'
             : 'Could not start the install. Open Termux and run: '
-                'pkg install python';
+                'pkg install python\n\n'
+                'Tip: in Termux settings, enable "Allow external apps" so '
+                'SwordFM can run commands there.';
       case ToolchainState.modulesMissing:
         final modules = await missingModules();
         final pkgs = modules.map(pipNameFor).toSet().toList()..sort();
@@ -275,8 +279,12 @@ class ConversionToolService {
         final ok = await _runInTermux(cmd);
         return ok
             ? 'Installing ${pkgs.join(', ')} in Termux… '
-                'return here in a minute and try again.'
-            : 'Could not start the install. Open Termux and run: $cmd';
+                'return here in a minute and try again.\n\n'
+                'If the install never started, open Termux → Settings → Security → '
+                'enable "Allow external apps".'
+            : 'Could not start the install. Open Termux and run: $cmd\n\n'
+                'Tip: in Termux settings, enable "Allow external apps" so '
+                'SwordFM can run commands there.';
     }
   }
 }

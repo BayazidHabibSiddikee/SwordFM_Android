@@ -48,10 +48,10 @@ class _PreviewPanelState extends State<PreviewPanel> {
   List<String> _pdfPageThumbs = const [];
   int _pdfPageCount = 0;
   /// Cap on how many pages we render in the preview to keep memory bounded.
-  /// 50 pages × 320× ~450px JPEG ≈ 25 MB which is reasonable for a sidebar
-  /// preview; larger PDFs show the first 50 + a "more pages" hint that opens
-  /// the full-screen reader.
-  static const int _kPdfPreviewCap = 50;
+  /// 20 pages × 640× ~900px JPEG ≈ 25-30 MB which is enough to read most
+  /// book pages clearly on a phone; larger PDFs show the first 20 + an
+  /// "open all N pages in reader" button.
+  static const int _kPdfPreviewCap = 20;
 
   @override
   void initState() {
@@ -142,11 +142,13 @@ class _PreviewPanelState extends State<PreviewPanel> {
           final thumbs = <String>[];
           for (var i = 1; i <= pagesToRender; i++) {
             final page = await doc.getPage(i);
-            // 320px wide — small enough to keep memory bounded for many
-            // pages, large enough to be readable on a phone.
+            // 640px wide — wide enough that book text is comfortably
+            // readable on a phone, sharp enough that zoom-in on a single
+            // page stays legible. JPEG keeps the file small (50-200 KB
+            // per page depending on content).
             final png = await page.render(
-              width: 320,
-              height: (page.height * 320 / page.width),
+              width: 640,
+              height: (page.height * 640 / page.width),
               format: PdfPageImageFormat.jpeg,
               backgroundColor: '#FFFFFF',
             );
@@ -226,7 +228,13 @@ class _PreviewPanelState extends State<PreviewPanel> {
       final archive = ZipDecoder().decodeBytes(bytes);
       final docXml = archive.findFile('word/document.xml');
       if (docXml == null) return '[No text content found]';
-      var xml = utf8.decode(docXml.content as List<int>);
+      // readBytes() — the `content` getter is unreliable in archive 4.x
+      // (can yield empty bytes for stored / unsupported-compression entries).
+      final docXmlBytes = docXml.readBytes();
+      if (docXmlBytes == null) {
+        return '[Could not read document: unsupported compression]';
+      }
+      var xml = utf8.decode(docXmlBytes, allowMalformed: true);
       // Paragraph and row endings → newlines, then strip all remaining tags.
       xml = xml
           .replaceAll('</w:p>', '\n')

@@ -100,7 +100,10 @@ class DocConverter {
             .where((f) => f.name == 'word/document.xml')
             .firstOrNull;
         if (docXml == null) return '';
-        final xml = utf8.decode(docXml.content as List<int>, allowMalformed: true);
+        // readBytes() — archive 4.x-safe content read (see ArchiveService).
+        final docXmlBytes = docXml.readBytes();
+        if (docXmlBytes == null) return '';
+        final xml = utf8.decode(docXmlBytes, allowMalformed: true);
         return xml
             .replaceAll('</w:p>', '\n')
             .replaceAll('</w:tr>', '\n')

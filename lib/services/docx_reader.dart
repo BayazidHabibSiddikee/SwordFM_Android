@@ -123,19 +123,29 @@ class DocxReader {
     final bytes = await file.readAsBytes();
     final archive = ZipDecoder().decodeBytes(bytes);
 
-    // 1. Pull word/document.xml out of the ZIP.
+    // 1. Pull word/document.xml out of the ZIP. Use readBytes() — the
+    //    `content` getter is unreliable in archive 4.x (it can return empty
+    //    data for stored/unsupported-compression entries; see
+    //    ArchiveService.extract which has the same guard).
     final docXml = archive.findFile('word/document.xml');
     if (docXml == null) {
       throw DocxParseException('Missing word/document.xml — not a real .docx');
     }
+    final docXmlBytes = docXml.readBytes();
+    if (docXmlBytes == null) {
+      throw DocxParseException(
+          'Could not read word/document.xml (corrupt or unsupported '
+          'compression)');
+    }
     final documentXml =
-        utf8.decode(docXml.content as List<int>, allowMalformed: true);
+        utf8.decode(docXmlBytes, allowMalformed: true);
 
     // 2. Pull the relationship file so we can resolve r:embed="rIdN" → image path.
     final relsBytes = archive.findFile('word/_rels/document.xml.rels');
     final rels = relsBytes != null
-        ? _parseRelationships(
-            utf8.decode(relsBytes.content as List<int>, allowMalformed: true))
+        ? _parseRelationships(utf8.decode(
+            relsBytes.readBytes() ?? const <int>[],
+            allowMalformed: true))
         : <String, String>{};
 
     // 3. Extract embedded images to the app's temp dir so the renderer can
@@ -151,9 +161,11 @@ class DocxReader {
       imageDir = p.join(cache.path, 'swordfm_docx_${path.hashCode}');
       await Directory(imageDir).create(recursive: true);
       for (final f in imageFiles) {
+        final imgBytes = f.readBytes();
+        if (imgBytes == null) continue; // unreadable entry — skip, don't fail
         final name = p.basename(f.name);
         final out = File(p.join(imageDir, name));
-        await out.writeAsBytes(f.content as List<int>);
+        await out.writeAsBytes(imgBytes);
         imageCount++;
       }
     }
