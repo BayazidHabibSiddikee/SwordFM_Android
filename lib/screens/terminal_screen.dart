@@ -241,7 +241,24 @@ class _TerminalScreenState extends State<TerminalScreen> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Scaffold(
+    // PopScope forces the Android system back button / predictive back gesture
+    // to pop the route. Without this on Android 14+ (target SDK 37), the
+    // auto-focus on the embedded xterm can swallow the back event so the user
+    // gets stuck on the terminal screen.
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          // Should not happen (canPop: true) but be defensive: if the
+          // navigator didn't pop, kill the shell and force-pop manually so
+          // the user can never get stuck.
+          try {
+            _pty?.kill();
+          } catch (_) {}
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       backgroundColor: OneDarkColors.bgDark,
       appBar: AppBar(
         backgroundColor: OneDarkColors.bgDark,
@@ -417,6 +434,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
               ),
             ),
         ),
+      ),
     );
   }
 
