@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_pty/flutter_pty.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:xterm/xterm.dart';
 import '../theme/theme.dart';
 import '../utils/constants.dart' show AppPaths;
@@ -41,6 +42,10 @@ class _TerminalScreenState extends State<TerminalScreen> {
   bool _restarting = false;
   final FocusNode _terminalFocusNode = FocusNode();
   bool _isRoot = false;
+  /// The Termux-install hint banner. Shown by default so the user knows
+  /// there's a fuller option. Dismissable — once dismissed, it stays
+  /// gone for the session.
+  bool _showTermuxHint = true;
 
   @override
   void initState() {
@@ -292,6 +297,26 @@ class _TerminalScreenState extends State<TerminalScreen> {
                 : SafeArea(
                     child: Column(
                       children: [
+                        if (_showTermuxHint) _TermuxHintBanner(
+                          onDismiss: () => setState(
+                              () => _showTermuxHint = false),
+                          onOpenStore: () async {
+                            // Open F-Droid's Termux page; that's the
+                            // canonical distribution. Falls back to the
+                            // Play Store if F-Droid isn't installed.
+                            final fdroid = Uri.parse(
+                                'https://f-droid.org/packages/com.termux/');
+                            final play = Uri.parse(
+                                'https://play.google.com/store/apps/details?id=com.termux');
+                            if (await canLaunchUrl(fdroid)) {
+                              await launchUrl(fdroid,
+                                  mode: LaunchMode.externalApplication);
+                            } else if (await canLaunchUrl(play)) {
+                              await launchUrl(play,
+                                  mode: LaunchMode.externalApplication);
+                            }
+                          },
+                        ),
                         Expanded(
                           child: GestureDetector(
                             onTap: () =>
@@ -421,4 +446,62 @@ class _TerminalScreenState extends State<TerminalScreen> {
         searchHitBackgroundCurrent: OneDarkColors.hover,
         searchHitForeground: OneDarkColors.fg,
       );
+}
+
+/// Small dismissible banner at the top of the terminal screen that
+/// suggests installing Termux for the "real" full-feature shell
+/// experience. Doesn't take over the screen — just a single line with
+/// a label and two icon-buttons (open the store, dismiss).
+class _TermuxHintBanner extends StatelessWidget {
+  final VoidCallback onDismiss;
+  final VoidCallback onOpenStore;
+
+  const _TermuxHintBanner({
+    required this.onDismiss,
+    required this.onOpenStore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: cs.surfaceContainerHighest,
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, size: 14, color: cs.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'For a full bash shell with apt/pkg, install Termux from '
+              'F-Droid or Play Store.',
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          TextButton.icon(
+            onPressed: onOpenStore,
+            icon: const Icon(Icons.open_in_new, size: 14),
+            label: const Text('Open', style: TextStyle(fontSize: 11)),
+            style: TextButton.styleFrom(
+              foregroundColor: cs.primary,
+              minimumSize: const Size(0, 28),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          IconButton(
+            onPressed: onDismiss,
+            icon: const Icon(Icons.close, size: 16),
+            tooltip: 'Dismiss',
+            color: cs.onSurfaceVariant,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          ),
+        ],
+      ),
+    );
+  }
 }

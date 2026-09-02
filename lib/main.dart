@@ -348,25 +348,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         'Home',
                                         AppPaths.home,
                                       ),
-                                      ListTile(
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                            ),
-                                        minLeadingWidth: 0,
-                                        horizontalTitleGap: 6,
-                                        leading: Icon(
-                                          Icons.history,
-                                          size: 18,
-                                          color: cs.primary,
-                                        ),
-                                        title: Text(
-                                          'Recent',
-                                          style: TextStyle(
-                                            color: cs.onSurface,
-                                            fontSize: 14,
-                                          ),
-                                        ),
+                                      _SidebarTile(
+                                        icon: Icons.history,
+                                        label: 'Recent',
+                                        iconColor: cs.primary,
                                         onTap: () => Navigator.of(context)
                                             .push(
                                           MaterialPageRoute(
@@ -418,25 +403,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           ),
                                         ),
                                       const Divider(),
-                                      ListTile(
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                            ),
-                                        minLeadingWidth: 0,
-                                        horizontalTitleGap: 6,
-                                        leading: Icon(
-                                          Icons.delete_outline,
-                                          size: 18,
-                                          color: onSurfaceDim,
-                                        ),
-                                        title: Text(
-                                          'Trash',
-                                          style: TextStyle(
-                                            color: onSurfaceDim,
-                                            fontSize: 14,
-                                          ),
-                                        ),
+                                      _SidebarTile(
+                                        icon: Icons.delete_outline,
+                                        label: 'Trash',
+                                        iconColor: onSurfaceDim,
+                                        textColor: onSurfaceDim,
                                         onTap: () => Navigator.of(context).push(
                                           MaterialPageRoute(
                                             builder: (_) => const TrashScreen(),
@@ -532,44 +503,22 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           )
                                         else
                                           ..._volumes!.map(
-                                          (vol) => ListTile(
-                                            dense: true,
-                                            contentPadding:
-                                                const EdgeInsets.symmetric(
-                                                  horizontal: 8,
-                                                ),
-                                            horizontalTitleGap: 4,
-                                            minLeadingWidth: 0,
-                                            leading: Icon(
-                                              vol.isRemovable
+                                            (vol) => _SidebarTile(
+                                              icon: vol.isRemovable
                                                   ? Icons.sd_storage
                                                   : Icons.storage,
-                                              size: 18,
-                                              color: OneDarkColors.cyan,
-                                            ),
-                                            title: Text(
-                                              vol.label.isNotEmpty
+                                              label: vol.label.isNotEmpty
                                                   ? vol.label
                                                   : 'Storage',
-                                              style: TextStyle(
-                                                color: onSurface,
-                                                fontSize: 14,
-                                              ),
+                                              subtitle: _shortPath(vol.path),
+                                              iconColor: OneDarkColors.cyan,
+                                              tooltip: vol.path,
+                                              onTap: () {
+                                                setState(() =>
+                                                    _currentPath = vol.path);
+                                              },
                                             ),
-                                            subtitle: Text(
-                                              _shortPath(vol.path),
-                                              style: TextStyle(
-                                                color: onSurfaceDim,
-                                                fontSize: 11,
-                                              ),
-                                            ),
-                                            onTap: () {
-                                              setState(
-                                                () => _currentPath = vol.path,
-                                              );
-                                            },
                                           ),
-                                        ),
                                       ], // devices
                                       const Divider(),
                                       // ── Cloud Storage section ──────────────────
@@ -589,49 +538,20 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                       if (_openSections
                                           .contains('bookmarks')) ...[
                                       // Add bookmark button
-                                      ListTile(
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                            ),
-                                        minLeadingWidth: 0,
-                                        horizontalTitleGap: 6,
-                                        leading: Icon(
-                                          Icons.bookmark_add,
-                                          size: 18,
-                                          color: onSurfaceDim,
-                                        ),
-                                        title: Text(
-                                          'Add Bookmark',
-                                          style: TextStyle(
-                                            color: onSurfaceDim,
-                                            fontSize: 14,
-                                          ),
-                                        ),
+                                      _SidebarTile(
+                                        icon: Icons.bookmark_add,
+                                        label: 'Add Bookmark',
+                                        iconColor: onSurfaceDim,
+                                        textColor: onSurfaceDim,
                                         onTap: _addBookmark,
                                       ),
                                       // Saved bookmarks — tap to navigate, long-press to remove
                                       ..._bookmarks.map(
-                                        (path) => ListTile(
-                                          dense: true,
-                                          contentPadding:
-                                              const EdgeInsets.symmetric(
-                                                horizontal: 8,
-                                              ),
-                                          minLeadingWidth: 0,
-                                          horizontalTitleGap: 6,
-                                          leading: Icon(
-                                            Icons.bookmark,
-                                            size: 18,
-                                            color: OneDarkColors.amber,
-                                          ),
-                                          title: Text(
-                                            _shortPath(path),
-                                            style: TextStyle(
-                                              color: onSurface,
-                                              fontSize: 14,
-                                            ),
-                                          ),
+                                        (path) => _SidebarTile(
+                                          icon: Icons.bookmark,
+                                          label: _shortPath(path),
+                                          tooltip: path,
+                                          iconColor: OneDarkColors.amber,
                                           onTap: () => setState(
                                             () => _currentPath = path,
                                           ),
@@ -941,72 +861,32 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Wrapper around [_SidebarTile] that adds the hover-state tracking
+  /// we use for subtle background highlighting on desktop.
   Widget _sidebarTile(int index, IconData icon, String label, String path) {
-    final cs = Theme.of(context).colorScheme;
-    final onSurface = cs.onSurface;
     final isActive =
         _currentPath.startsWith(path) &&
         (_currentPath == path || _currentPath.startsWith('$path/'));
     return MouseRegion(
       onEnter: (_) => setState(() => _hoveredIndex.add(index)),
       onExit: (_) => setState(() => _hoveredIndex.remove(index)),
-      child: Tooltip(
-        // Tooltip shows the full path on long-press / hover so the user
-        // can see which folder a truncated label refers to.
-        message: path,
-        waitDuration: const Duration(milliseconds: 400),
-        child: ListTile(
-          // Compact: dense padding (vertical 0) so 8+ tiles fit on a
-          // phone screen without scrolling, but the horizontal padding
-          // keeps the icon/text from kissing the sidebar edge.
-          contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-          minLeadingWidth: 0,
-          horizontalTitleGap: 6,
-          visualDensity: VisualDensity.compact,
-          dense: true,
-          leading: Icon(
-            icon,
-            size: 18,
-            color: isActive ? cs.primary : onSurface,
-          ),
-          tileColor: _hoveredIndex.contains(index)
-              ? onSurface.withValues(alpha: 0.08)
-              : null,
-          title: Row(
-            children: [
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    color: isActive ? cs.primary : onSurface,
-                    fontSize: 13,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                ),
-              ),
-            ],
-          ),
-          selected: isActive,
-          selectedTileColor: cs.primaryContainer.withValues(alpha: 0.3),
-          onTap: () => setState(() => _currentPath = path),
-        ),
+      child: _SidebarTile(
+        icon: icon,
+        label: label,
+        active: isActive,
+        tooltip: path,
+        onTap: () => setState(() => _currentPath = path),
       ),
     );
   }
 
-    Widget _sidebarAction(IconData icon, String label, VoidCallback onTap) {
-    final onSurfaceDim = Theme.of(context).colorScheme.onSurfaceVariant;
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-      minLeadingWidth: 0,
-      horizontalTitleGap: 6,
-      leading: Icon(icon, size: 20, color: onSurfaceDim),
-      title: Text(
-        label,
-        style: TextStyle(color: onSurfaceDim, fontSize: 16),
-      ),
+  Widget _sidebarAction(IconData icon, String label, VoidCallback onTap) {
+    final cs = Theme.of(context).colorScheme;
+    return _SidebarTile(
+      icon: icon,
+      label: label,
+      iconColor: cs.onSurfaceVariant,
+      textColor: cs.onSurfaceVariant,
       onTap: onTap,
     );
   }
@@ -1189,5 +1069,83 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (path.startsWith('$home/')) return path.substring(home.length + 1);
     if (path == home) return 'SD Card';
     return path.split('/').where((p) => p.isNotEmpty).last;
+  }
+}
+
+/// One consistent sidebar tile. Every entry in the drawer — places,
+/// bookmarks, devices, recent, trash, volumes, plus the inline Recent
+/// entry — uses this widget so the drawer has a single visual rhythm
+/// (same height, same icon size, same text size, same padding).
+class _SidebarTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? subtitle;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final String? tooltip;
+  final bool active;
+  final Color? iconColor;
+  final Color? textColor;
+
+  const _SidebarTile({
+    required this.icon,
+    required this.label,
+    this.subtitle,
+    this.onTap,
+    this.onLongPress,
+    this.tooltip,
+    this.active = false,
+    this.iconColor,
+    this.textColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final effectiveIconColor =
+        iconColor ?? (active ? cs.primary : cs.onSurface);
+    final effectiveTextColor =
+        textColor ?? (active ? cs.primary : cs.onSurface);
+    final tile = ListTile(
+      // All sidebar tiles share the same compact density so the drawer
+      // shows the same number of rows on every device. ListTile's
+      // default 56dp height is too tall for an 180px-wide drawer holding
+      // 10+ entries.
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+      horizontalTitleGap: 6,
+      minLeadingWidth: 0,
+      leading: Icon(icon, size: 18, color: effectiveIconColor),
+      title: Text(
+        label,
+        style: TextStyle(
+          color: effectiveTextColor,
+          fontSize: 13,
+          fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: subtitle == null
+          ? null
+          : Text(
+              subtitle!,
+              style: TextStyle(
+                color: cs.onSurfaceVariant,
+                fontSize: 11,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+      selected: active,
+      selectedTileColor: cs.primaryContainer.withValues(alpha: 0.3),
+      hoverColor: cs.onSurface.withValues(alpha: 0.08),
+      onTap: onTap,
+      onLongPress: onLongPress,
+    );
+    if (tooltip == null) return tile;
+    return Tooltip(message: tooltip!, child: tile);
   }
 }
