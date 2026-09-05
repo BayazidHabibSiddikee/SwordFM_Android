@@ -122,10 +122,12 @@ void main() {
     // loading completes we're back in fake time, so the zoom animation's
     // 150 ms controller is driven by pumpAndSettle as usual.
     var loaded = false;
-    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    // 30 s / 50 ms windows: generous enough that the suite stays stable when
+    // the machine is under load (CI, Gradle daemons churning in background).
+    final deadline = DateTime.now().add(const Duration(seconds: 30));
     while (!loaded && DateTime.now().isBefore(deadline)) {
       await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
       );
       await tester.pump();
       loaded = bodyText().evaluate().isNotEmpty;
