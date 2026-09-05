@@ -279,12 +279,28 @@ class DocConverter {
           .where((f) => f.name == 'word/document.xml')
           .firstOrNull;
       if (docXml == null) return null;
-      final xml = utf8.decode(docXml.content as List<int>);
-      // Strip tags; break paragraphs/rows onto separate lines.
+      // readBytes() — archive 4.x-safe content read. The legacy `.content`
+      // getter maps a failed decompression to EMPTY bytes, so a corrupt/
+      // unsupported entry produced a silently EMPTY .txt with a success
+      // result. readBytes() returns null instead, letting us fail loudly
+      // (see ArchiveService for the same fix).
+      final docXmlBytes = docXml.readBytes();
+      if (docXmlBytes == null) return null;
+      // allowMalformed — tolerate stray invalid UTF-8 inside the XML.
+      final xml = utf8.decode(docXmlBytes, allowMalformed: true);
+      // Strip tags; break paragraphs/rows onto separate lines; decode XML
+      // entities so "&amp;" doesn't leak literally into the TXT output
+      // (mirrors the DOCX branch of [_readSourceText]).
       final text = xml
           .replaceAll(RegExp(r'</w:p>'), '\n')
           .replaceAll(RegExp(r'</w:tr>'), '\n')
+          .replaceAll('<w:tab/>', '\t')
           .replaceAll(RegExp(r'<[^>]+>'), '')
+          .replaceAll('&amp;', '&')
+          .replaceAll('&lt;', '<')
+          .replaceAll('&gt;', '>')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&apos;', "'")
           .replaceAll(RegExp(r'\n{3,}'), '\n\n')
           .trim();
       final outPath = _resolveOutputPath(sourcePath, '.txt');
@@ -345,18 +361,12 @@ class DocConverter {
       return _csvToMarkdown(content);
     }
     if (ext == '.docx') {
-      // DOCX content is raw XML from word/document.xml — extract text
-      return content
-          .replaceAll('</w:p>', '\n')
-          .replaceAll('</w:tr>', '\n')
-          .replaceAll('<w:tab/>', '\t')
-          .replaceAll(RegExp(r'<[^>]+>'), '')
-          .replaceAll('&amp;', '&')
-          .replaceAll('&lt;', '<')
-          .replaceAll('&gt;', '>')
-          .replaceAll('&quot;', '"')
-          .replaceAll('&apos;', "'")
-          .trim();
+      // DOCX sources were already fully decoded (XML stripped, entities
+      // resolved) by [_readSourceText] — the markdown pipeline consumes
+      // plain text. Stripping again here double-decoded entities (a literal
+      // "&lt;" in the document became "&" then "<" and could get eaten by
+      // downstream markdown parsing).
+      return content;
     }
     return content;
   }
@@ -386,7 +396,7 @@ class DocConverter {
         .map((l) => _splitCsvLine(l))
         .toList();
     if (rows.isEmpty) return csv;
-    final cell = (String s) => s.trim().replaceAll('|', '\\|');
+    String cell(String s) => s.trim().replaceAll('|', r'\|');
     final header = rows.first;
     final sb = StringBuffer();
     sb.writeln('| ${header.map(cell).join(' | ')} |');
@@ -573,8 +583,15 @@ class DocConverter {
   /// Converts Markdown content to plain text (strips formatting).
   static String markdownToText(String markdown) {
     var text = markdown;
-    // Remove fenced code blocks but keep content
-    text = text.replaceAll(RegExp(r'```[\s\S]*?```'), '');
+    // Fenced code blocks: strip the fence markers, KEEP the code content.
+    // Previously the regex deleted everything between fences, so converting
+    // a README with code samples to TXT silently dropped the code.
+    text = text.replaceAllMapped(
+      RegExp(r'^```[^\n]*\n([\s\S]*?)```', multiLine: true),
+      (m) => m.group(1)!,
+    );
+    // Unclosed trailing fence: drop the marker, keep the code.
+    text = text.replaceAll(RegExp(r'^```[^\n]*\n', multiLine: true), '');
     // Headings
     text = text.replaceAllMapped(
       RegExp(r'^#{1,6}\s+(.+)$', multiLine: true),
@@ -610,6 +627,13 @@ class DocConverter {
       RegExp(r'^\s*(-{3,}|\*{3,}|_{3,})\s*$', multiLine: true),
       '',
     );
+    // Unmatched inline markers (a lone "*", "**", or "`" with no closing
+    // partner) previously leaked into TXT output. Matched pairs were
+    // already stripped above; drop any leftovers. Note: a literal
+    // "3 * 4" loses its asterisk — acceptable for plain-text output.
+    text = text.replaceAll('**', '');
+    text = text.replaceAll(RegExp(r'(?<!\*)\*(?!\*)'), '');
+    text = text.replaceAll('`', '');
     return text.trim();
   }
 
