@@ -25,7 +25,12 @@ class _DocxReaderScreenState extends State<DocxReaderScreen>
   // headings, body text, and list items scale together.
   double _textScale = 1.0;
   late final AnimationController _zoomAnim;
-  late final Animation<double> _zoomTween;
+  /// Mutable begin/end so [_setScale] can re-target the same animation
+  /// (reassigning a `late final` here used to throw LateInitializationError).
+  late final Tween<double> _zoomTween;
+  /// Driven once in initState; the child's AnimatedBuilder listens to this
+  /// single persistent Animation object.
+  late final Animation<double> _zoomAnimValue;
 
   @override
   void initState() {
@@ -34,9 +39,8 @@ class _DocxReaderScreenState extends State<DocxReaderScreen>
       vsync: this,
       duration: const Duration(milliseconds: 150),
     );
-    _zoomTween = _zoomAnim.drive(
-      Tween<double>(begin: _textScale, end: _textScale),
-    );
+    _zoomTween = Tween<double>(begin: _textScale, end: _textScale);
+    _zoomAnimValue = _zoomAnim.drive(_zoomTween);
     _load();
   }
 
@@ -48,7 +52,14 @@ class _DocxReaderScreenState extends State<DocxReaderScreen>
 
   void _setScale(double s) {
     final target = s.clamp(0.6, 3.0);
-    _zoomTween = _zoomAnim.drive(Tween<double>(begin: _textScale, end: target));
+    // Re-target the existing tween instead of driving a new Animation —
+    // the child listens to the persistent [_zoomAnimValue] object, so
+    // reassigning the Animation itself would leave it stale. When a tap
+    // interrupts an in-flight animation, start from the currently displayed
+    // scale so the zoom never jumps backwards.
+    _zoomTween
+      ..begin = _zoomAnimValue.isAnimating ? _zoomAnimValue.value : _textScale
+      ..end = target;
     _zoomAnim.forward(from: 0.0).whenComplete(() {
       if (mounted) setState(() => _textScale = target);
     });
@@ -127,7 +138,7 @@ class _DocxReaderScreenState extends State<DocxReaderScreen>
                   : _DocxDocumentView(
                       doc: _doc!,
                       textScale: _textScale,
-                      zoomTween: _zoomTween,
+                      zoomTween: _zoomAnimValue,
                       onDoubleTap: _handleDoubleTap,
                     ),
     );

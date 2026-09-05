@@ -51,6 +51,11 @@ class _PdfReaderState extends State<PdfReaderScreen>
   /// Cache directory for rendered page PNGs so re-opens of the same file
   /// are instant. Cleared on dispose.
   Directory? _renderCache;
+  /// Single persistent zoom animation. A fresh controller per button press
+  /// used to leak: any controller replaced mid-flight never reached
+  /// AnimationStatus.completed, so its dispose-on-completed never fired and
+  /// its listener kept fighting over [_transform.value] with the newer one.
+  AnimationController? _zoomCtrl;
 
   @override
   void initState() {
@@ -71,6 +76,7 @@ class _PdfReaderState extends State<PdfReaderScreen>
   @override
   void dispose() {
     _transform.removeListener(_onTransformChanged);
+    _zoomCtrl?.dispose();
     _transform.dispose();
     _pageController.dispose();
     // Best-effort cleanup of the render cache. The OS would clean it up
@@ -115,22 +121,35 @@ class _PdfReaderState extends State<PdfReaderScreen>
         ? Offset(size.width / 2, size.height / 2)
         : focal;
     final end = Matrix4.identity()
-      ..translate(centre.dx, centre.dy)
-      ..scale(target)
-      ..translate(-centre.dx, -centre.dy);
-    final tween = Matrix4Tween(begin: _transform.value, end: end);
+      ..translateByDouble(centre.dx, centre.dy, 0.0, 1.0)
+      ..scaleByDouble(target, target, target, 1.0)
+      ..translateByDouble(-centre.dx, -centre.dy, 0.0, 1.0);
+    // Stop and discard any in-flight zoom animation before starting a new
+    // one — otherwise rapid clicks stack listeners on [_transform] and the
+    // superseded controller leaks (dispose-on-completed never fires).
+    _zoomCtrl?..stop()..dispose();
     final controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 180),
     );
-    final animation = tween.animate(
+    final animation = Matrix4Tween(begin: _transform.value, end: end).animate(
       CurvedAnimation(parent: controller, curve: Curves.easeOut),
     );
-    animation.addListener(() => _transform.value = animation.value);
-    controller.addStatusListener((status) {
-      if (status == AnimationStatus.completed) controller.dispose();
+    controller.addListener(() {
+      // Guard: this animation may have been superseded mid-flight by a
+      // newer press (which disposes this controller). Disposed controllers
+      // must not write into [_transform].
+      if (!controller.isAnimating) return;
+      _transform.value = animation.value;
     });
-    controller.forward();
+    // Single forward() — the completion tick is skipped by the isAnimating
+    // guard above, so land exactly on the target matrix in whenComplete.
+    // If this animation is superseded, its controller is disposed and its
+    // TickerFuture never completes, making this a no-op.
+    controller.forward().whenComplete(() {
+      _transform.value = end;
+    });
+    _zoomCtrl = controller;
   }
 
   Future<void> _loadPdf() async {
@@ -231,7 +250,7 @@ class _PdfReaderState extends State<PdfReaderScreen>
       backgroundColor: cs.surface,
       appBar: AppBar(
         title: Text(
-          '${widget.filePath.split('/').last} (${_currentPage}/${_totalPages > 0 ? _totalPages : "?"})',
+          '${widget.filePath.split('/').last} ($_currentPage/${_totalPages > 0 ? _totalPages : "?"})',
           style: TextStyle(fontSize: 13, color: cs.onSurface),
           overflow: TextOverflow.ellipsis,
         ),
@@ -257,7 +276,7 @@ class _PdfReaderState extends State<PdfReaderScreen>
               padding: const EdgeInsets.symmetric(horizontal: 2),
               child: Center(
                 child: Text(
-                  _scale.toStringAsFixed(_scale < 1.5 ? 2 : 1) + '×',
+                  '${_scale.toStringAsFixed(_scale < 1.5 ? 2 : 1)}×',
                   style: TextStyle(
                     color: cs.onSurfaceVariant,
                     fontSize: 12,

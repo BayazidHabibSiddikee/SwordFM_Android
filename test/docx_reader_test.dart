@@ -4,7 +4,9 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:archive/archive.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:swordfm/screens/docx_reader_screen.dart';
 import 'package:swordfm/services/docx_reader.dart';
 
 /// Builds a minimal valid .docx (ZIP with word/document.xml) on disk.
@@ -95,5 +97,73 @@ void main() {
       (b) => b is DocxParagraph && b.runs.any((r) => r.link != null),
     );
     expect(hasLink, isTrue);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Zoom regression tests for DocxReaderScreen — the first zoom-in tap or
+  // double-tap used to throw LateInitializationError because the zoom
+  // animation was stored in a `late final` field that _setScale reassigned.
+  // ---------------------------------------------------------------------------
+
+  /// The DOCX renderer emits Text.rich(...), which find.text/textContaining
+  /// cannot see unless findRichText is enabled.
+  Finder bodyText() =>
+      find.textContaining('Bold italic both plain.', findRichText: true);
+
+  Future<void> pumpReader(WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(home: DocxReaderScreen(filePath: path)),
+    );
+    // _load() performs real file I/O that was started inside the test
+    // binding's fake-async zone. Its await chain only advances while a real
+    // event-loop window is open, and the tree only re-renders on a pump —
+    // so alternate short real-time windows (letting the I/O chain advance)
+    // with pumps (rendering the result) until the content appears. After
+    // loading completes we're back in fake time, so the zoom animation's
+    // 150 ms controller is driven by pumpAndSettle as usual.
+    var loaded = false;
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (!loaded && DateTime.now().isBefore(deadline)) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+      );
+      await tester.pump();
+      loaded = bodyText().evaluate().isNotEmpty;
+    }
+    expect(tester.takeException(), isNull);
+    expect(bodyText(), findsOneWidget,
+        reason: 'DOCX content never loaded within the pump/runAsync window');
+  }
+
+  testWidgets('first zoom-in tap does not throw and animates',
+      (tester) async {
+    await pumpReader(tester);
+
+    // This exact sequence used to throw:
+    // LateInitializationError: Field '_zoomTween' has already been
+    // initialized.
+    await tester.tap(find.byTooltip('Zoom in'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // And the second tap (re-target the same tween) must also be clean.
+    await tester.tap(find.byTooltip('Zoom out'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('rapid zoom taps re-target without throwing', (tester) async {
+    await pumpReader(tester);
+
+    // Interrupt an in-flight animation with another tap — the tween must
+    // re-target from the currently displayed scale, not snap backwards.
+    await tester.tap(find.byTooltip('Zoom in'));
+    await tester.pump(const Duration(milliseconds: 40)); // mid-animation
+    await tester.tap(find.byTooltip('Zoom in'));
+    await tester.pump(const Duration(milliseconds: 40));
+    await tester.tap(find.byTooltip('Zoom out'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
   });
 }
