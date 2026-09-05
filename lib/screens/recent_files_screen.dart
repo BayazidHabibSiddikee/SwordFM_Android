@@ -165,12 +165,17 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
                     child: _buildEntryList(),
                   ),
                 ),
+                // Expanded — PreviewPanel sizes itself with a Column+Expanded,
+                // so a null/loose height constraint crashes the layout
+                // ("RenderFlex children have non-zero flex…") the moment a
+                // preview item is tapped on phones.
                 if (_previewItem != null)
-                  PreviewPanel(
-                    item: _previewItem,
-                    width: double.infinity,
-                    height: null, // let it grow to fill remaining column space
-                    onClose: () => setState(() => _previewItem = null),
+                  Expanded(
+                    child: PreviewPanel(
+                      item: _previewItem,
+                      width: double.infinity,
+                      onClose: () => setState(() => _previewItem = null),
+                    ),
                   ),
               ],
             ),

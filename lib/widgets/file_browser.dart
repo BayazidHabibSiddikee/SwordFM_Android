@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/theme.dart';
 import '../screens/video_player_screen.dart';
 import '../screens/image_viewer_screen.dart';
+import '../screens/pdf_reader_screen.dart';
+import '../screens/docx_reader_screen.dart';
 import '../screens/music_player_screen.dart';
 import '../screens/notepad_screen.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
@@ -675,6 +677,16 @@ class _FileBrowserState extends State<FileBrowser> {
         _openPdf(item.path);
         return;
       }
+      // DOCX → built-in reader (headings, bold/italic, lists, tables, images)
+      if (item.isDocx) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => DocxReaderScreen(filePath: item.path),
+          ),
+        );
+        WidgetService.addRecentFile(item.path);
+        return;
+      }
       // Images → built-in pinch-zoom viewer
       if (item.isImage) {
         Navigator.of(context).push(
@@ -766,7 +778,12 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   void _openPdf(String path) {
-    OpenWithService.openDefault(path);
+    // In-app reader (pinch-zoom, page nav, go-to-page). The old code handed
+    // the file to an external app, which silently did nothing on devices
+    // with no PDF viewer installed.
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => PdfReaderScreen(filePath: path)),
+    );
   }
 
   /// Opens [item] in the music player, seeding a playlist with the other
