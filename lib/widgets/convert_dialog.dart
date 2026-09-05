@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:open_file/open_file.dart';
 import '../theme/theme.dart';
 import '../services/doc_converter.dart';
-import 'package:path/path.dart' as p;
 
 /// Dialog for converting a file. Uses the pure-Dart [DocConverter] — no
 /// external runtime, no Python, no Termux. The trade-off is honest:
@@ -90,9 +89,9 @@ class _ConvertDialogState extends State<ConvertDialog> {
         .split('/')
         .last
         .replaceAll(RegExp(r'\.[^.]+$'), '');
-    // PDF sources can only be converted to TXT (text extraction); offering
-    // PDF/DOCX/HTML targets for a .pdf previously always ended in
-    // "Conversion failed".
+    // PDF sources convert via text extraction: TXT (raw text), DOCX and
+    // HTML (extracted text re-rendered through the shared markdown
+    // pipeline). PDF→PDF is excluded — the source is already a PDF.
     final isPdfSource = widget.filePath.toLowerCase().endsWith('.pdf');
     return AlertDialog(
       backgroundColor: OneDarkColors.bg,

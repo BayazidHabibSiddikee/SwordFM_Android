@@ -237,6 +237,50 @@ void main() {
       expect(File(p!).existsSync(), isTrue);
       expect(p.endsWith('.html'), isTrue);
     });
+
+    test('fromDocx extracts text and decodes entities', () async {
+      // Round-trip: markdown → DOCX → TXT. Regression for the archive 4.x
+      // `.content` getter returning EMPTY bytes (silently empty output).
+      final docxResult = await DocConverter.toDocx(mdFile.path);
+      expect(docxResult, isNotNull);
+      final txt = await DocConverter.fromDocx(docxResult!);
+      expect(txt, isNotNull);
+      final content = File(txt!).readAsStringSync();
+      expect(content, contains('Sample'));
+      expect(content, contains('Hello'));
+    });
+
+    test('markdownToText keeps fenced code content', () async {
+      const md = '# Readme\n\n```dart\nvoid main() {}\n```\n\nDone.';
+      final text = DocConverter.markdownToText(md);
+      expect(text, contains('Readme'));
+      expect(text, contains('void main() {}'));
+      expect(text, contains('Done.'));
+      expect(text, isNot(contains('```')));
+    });
+
+    test('markdownToText handles unclosed trailing fence', () async {
+      const md = '# Title\n\n```python\nprint("hi")';
+      final text = DocConverter.markdownToText(md);
+      expect(text, contains('print("hi")'));
+      expect(text, isNot(contains('```')));
+    });
+
+    test('markdownToText leaves HTML entities intact', () async {
+      // Entities are escaped content, not markdown — toText must not decode
+      // them (a literal "if (a &lt; b)" in code stays legible).
+      const md = 'Compare `a &lt; b` and `b &amp;&amp; c`';
+      final text = DocConverter.markdownToText(md);
+      expect(text, contains('a &lt; b'));
+      expect(text, contains('b &amp;&amp; c'));
+    });
+
+    test('markdownToText closes stray inline markers', () async {
+      const md = 'This has *an unclosed italic marker';
+      final text = DocConverter.markdownToText(md);
+      expect(text, contains('an unclosed italic marker'));
+      expect(text, isNot(contains('*')));
+    });
   });
 }
 
