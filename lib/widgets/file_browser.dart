@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/theme.dart';
 import '../screens/video_player_screen.dart';
+import '../screens/image_viewer_screen.dart';
 import '../screens/music_player_screen.dart';
 import '../screens/notepad_screen.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
@@ -672,6 +673,16 @@ class _FileBrowserState extends State<FileBrowser> {
       // PDF → built-in reader
       if (item.isPdf) {
         _openPdf(item.path);
+        return;
+      }
+      // Images → built-in pinch-zoom viewer
+      if (item.isImage) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ImageViewerScreen(filePath: item.path),
+          ),
+        );
+        WidgetService.addRecentFile(item.path);
         return;
       }
       // Everything else → external app

@@ -9,6 +9,7 @@ import 'package:pdfx/pdfx.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import '../screens/docx_reader_screen.dart';
+import '../screens/image_viewer_screen.dart';
 import '../screens/pdf_reader_screen.dart';
 import '../screens/text_reader_screen.dart';
 import '../screens/video_player_screen.dart';
@@ -105,6 +106,16 @@ class _PreviewPanelState extends State<PreviewPanel> {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => VideoPlayerScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
+    // Images get the in-app pinch-zoom viewer (double-tap zoom, rotate,
+    // reset) instead of handing off to an external app.
+    if (item.isImage) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ImageViewerScreen(filePath: item.path),
         ),
       );
       return;
@@ -316,11 +327,21 @@ class _PreviewPanelState extends State<PreviewPanel> {
                         child: Container(
                           color: cs.surface,
                           width: double.infinity,
-                          child: Image.file(
-                            File(_pdfPageThumbs[i]),
-                            fit: BoxFit.contain,
-                            errorBuilder: (_, _, _) =>
-                                _buildMetadataCard(),
+                          // InteractiveViewer lets the user pinch-zoom a
+                          // single page inside the preview panel (up to
+                          // 6×). The outer SingleChildScrollView still
+                          // handles vertical scrolling; the viewer only
+                          // claims the gesture once a pinch starts.
+                          child: InteractiveViewer(
+                            minScale: 1.0,
+                            maxScale: 6.0,
+                            panEnabled: true,
+                            child: Image.file(
+                              File(_pdfPageThumbs[i]),
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, _, _) =>
+                                  _buildMetadataCard(),
+                            ),
                           ),
                         ),
                       ),

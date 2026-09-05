@@ -17,14 +17,45 @@ class DocxReaderScreen extends StatefulWidget {
   State<DocxReaderScreen> createState() => _DocxReaderScreenState();
 }
 
-class _DocxReaderScreenState extends State<DocxReaderScreen> {
+class _DocxReaderScreenState extends State<DocxReaderScreen>
+    with SingleTickerProviderStateMixin {
   DocxDocument? _doc;
   String? _error;
+  // Text zoom multiplier (1.0 = default). Applied via TextScaler so all
+  // headings, body text, and list items scale together.
+  double _textScale = 1.0;
+  late final AnimationController _zoomAnim;
+  late final Animation<double> _zoomTween;
 
   @override
   void initState() {
     super.initState();
+    _zoomAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+    );
+    _zoomTween = _zoomAnim.drive(
+      Tween<double>(begin: _textScale, end: _textScale),
+    );
     _load();
+  }
+
+  @override
+  void dispose() {
+    _zoomAnim.dispose();
+    super.dispose();
+  }
+
+  void _setScale(double s) {
+    final target = s.clamp(0.6, 3.0);
+    _zoomTween = _zoomAnim.drive(Tween<double>(begin: _textScale, end: target));
+    _zoomAnim.forward(from: 0.0).whenComplete(() {
+      if (mounted) setState(() => _textScale = target);
+    });
+  }
+
+  void _handleDoubleTap() {
+    _setScale(_textScale < 1.05 ? 1.5 : 1.0);
   }
 
   Future<void> _load() async {
@@ -54,6 +85,33 @@ class _DocxReaderScreenState extends State<DocxReaderScreen> {
           style: TextStyle(fontSize: 13, color: cs.onSurface),
           overflow: TextOverflow.ellipsis,
         ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.zoom_out, color: cs.onSurfaceVariant, size: 20),
+            tooltip: 'Zoom out',
+            onPressed: _doc == null ? null : () => _setScale(_textScale - 0.2),
+          ),
+          // Zoom % readout — tap to reset to 100%.
+          Center(
+            child: InkWell(
+              onTap: _doc == null || _textScale == 1.0
+                  ? null
+                  : () => _setScale(1.0),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Text(
+                  '${(_textScale * 100).toStringAsFixed(0)}%',
+                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.zoom_in, color: cs.onSurfaceVariant, size: 20),
+            tooltip: 'Zoom in',
+            onPressed: _doc == null ? null : () => _setScale(_textScale + 0.2),
+          ),
+        ],
       ),
       body: _error != null
           ? _buildError(cs, _error!)
@@ -66,7 +124,12 @@ class _DocxReaderScreenState extends State<DocxReaderScreen> {
                         style: TextStyle(color: cs.onSurfaceVariant),
                       ),
                     )
-                  : _DocxDocumentView(doc: _doc!),
+                  : _DocxDocumentView(
+                      doc: _doc!,
+                      textScale: _textScale,
+                      zoomTween: _zoomTween,
+                      onDoubleTap: _handleDoubleTap,
+                    ),
     );
   }
 
@@ -102,19 +165,42 @@ class _DocxReaderScreenState extends State<DocxReaderScreen> {
 
 class _DocxDocumentView extends StatelessWidget {
   final DocxDocument doc;
-  const _DocxDocumentView({required this.doc});
+  final double textScale;
+  final Animation<double> zoomTween;
+  final VoidCallback onDoubleTap;
+  const _DocxDocumentView({
+    required this.doc,
+    required this.textScale,
+    required this.zoomTween,
+    required this.onDoubleTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 80),
-      itemCount: doc.blocks.length,
-      itemBuilder: (context, i) {
-        final block = doc.blocks[i];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: _BlockRenderer(block: block, cs: cs),
+    return AnimatedBuilder(
+      animation: zoomTween,
+      builder: (context, _) {
+        final scale = zoomTween.isAnimating ? zoomTween.value : textScale;
+        return MediaQuery.withClampedTextScaling(
+          minScaleFactor: scale,
+          maxScaleFactor: scale,
+          // Double-tap toggles between 100% and 150% (wired from state so
+          // the zoom buttons and the gesture stay in sync).
+          child: GestureDetector(
+            onDoubleTap: onDoubleTap,
+            child: ListView.builder(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 80),
+              itemCount: doc.blocks.length,
+              itemBuilder: (context, i) {
+                final block = doc.blocks[i];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _BlockRenderer(block: block, cs: cs),
+                );
+              },
+            ),
+          ),
         );
       },
     );
