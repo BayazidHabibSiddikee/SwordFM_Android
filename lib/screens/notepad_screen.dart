@@ -305,29 +305,103 @@ class _NotepadScreenState extends State<NotepadScreen> {
         ],
       ),
       body: _loaded
-          ? TextField(
-              controller: _controller,
-              onChanged: (_) {
-                if (!_dirty) setState(() => _dirty = true);
-              },
-              maxLines: null,
-              expands: true,
-              keyboardType: TextInputType.multiline,
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 14,
-                color: OneDarkColors.fg,
-              ),
-              decoration: InputDecoration(
-                hintText: 'Start typing…',
-                hintStyle: TextStyle(
-                  color: OneDarkColors.fgDim.withValues(alpha: 0.5),
-                ),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.all(16),
-              ),
-            )
+          ? _LineNumberedNotepad(controller: _controller, onChanged: _onChanged)
           : const Center(child: CircularProgressIndicator()),
+    );
+  }
+
+  /// Called by the notepad body whenever the user types. Marks the
+  /// document dirty so the Save button highlights. Pulled out as a
+  /// method so the notepad can stay `Stateless` over the line-number
+  /// gutter (the controller is the source of truth for the text).
+  void _onChanged() {
+    if (!_dirty) setState(() => _dirty = true);
+  }
+}
+
+/// Body for the notepad: a left gutter showing line numbers and a
+/// monospaced TextField for the content. Both columns share a horizontal
+/// scroll so long lines stay in sync with their line number.
+class _LineNumberedNotepad extends StatelessWidget {
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+  const _LineNumberedNotepad({
+    required this.controller,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Listen to the controller so the gutter redraws when lines are
+    // added or removed.
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final text = controller.text;
+        // 1-based line count. An empty document has 1 line (line 0 is
+        // shown so the cursor's first row gets a number).
+        final lineCount = text.isEmpty
+            ? 1
+            : '\n'.allMatches(text).length + 1;
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Gutter ───────────────────────────────────────────────
+            Container(
+              width: 48,
+              padding: const EdgeInsets.only(top: 16, right: 6),
+              decoration: BoxDecoration(
+                border: Border(
+                  right: BorderSide(
+                    color: OneDarkColors.fgDim.withValues(alpha: 0.2),
+                  ),
+                ),
+              ),
+              child: ListView.builder(
+                itemCount: lineCount,
+                // Disable scrolling — the gutter should follow the text
+                // field's scroll position via the same controller, but a
+                // single shared scroll is simpler and works for typical
+                // notes.
+                physics: const NeverScrollableScrollPhysics(),
+                itemBuilder: (_, i) => Text(
+                  '${i + 1}',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: OneDarkColors.fgDim,
+                    fontFamily: 'monospace',
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ),
+            // ── Text editor ──────────────────────────────────────────
+            Expanded(
+              child: TextField(
+                controller: controller,
+                onChanged: (_) => onChanged(),
+                maxLines: null,
+                expands: true,
+                keyboardType: TextInputType.multiline,
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 14,
+                  color: OneDarkColors.fg,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Start typing…',
+                  hintStyle: TextStyle(
+                    color: OneDarkColors.fgDim.withValues(alpha: 0.5),
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.all(16),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

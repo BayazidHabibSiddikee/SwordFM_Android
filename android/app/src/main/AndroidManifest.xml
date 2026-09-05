@@ -25,6 +25,10 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
+    <!-- Background audio playback (just_audio via audio_service) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
     <!-- Foreground service for continuous Bluetooth listening -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
@@ -69,6 +73,18 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="connectedDevice|shortService" />
+
+        <!-- Background audio service for music playback (audio_service).
+             Required so the music player keeps playing when the screen
+             locks or the app is backgrounded. -->
+        <service
+            android:name="com.ryanheise.audioservice.AudioService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
 
         <!-- FileProvider for the "Open With…" app chooser -->
         <provider

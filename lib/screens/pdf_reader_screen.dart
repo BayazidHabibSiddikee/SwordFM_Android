@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:pdfx/pdfx.dart';
@@ -22,55 +23,191 @@ class PdfReaderScreen extends StatefulWidget {
   State<PdfReaderScreen> createState() => _PdfReaderState();
 }
 
-class _PdfReaderState extends State<PdfReaderScreen> {
+class _PdfReaderState extends State<PdfReaderScreen>
+    with TickerProviderStateMixin {
   int _currentPage = 1;
   int _totalPages = 0;
-  bool _loaded = false;
-  String? _error;
-  /// File-system paths to per-page PNG renders. Each entry corresponds
-  /// to a page number (1-based: _pageRenders[0] is page 1).
-  final List<String> _pageRenders = [];
+  /// Renders the first page eagerly so the reader has something to show;
+  /// later pages render in the background (or on demand when the user
+  /// swipes close to the rendered window). This makes the reader feel
+  /// snappy on multi-page documents — the old "pre-render every page serially
+  /// then show" approach could stall the first paint for tens of seconds
+  /// on a 50-page PDF.
+  final Map<int, String> _pageRenders = {};
+  /// Pages we've asked pdfx to render but haven't yet received.
+  final Set<int> _rendering = {};
+  /// Pages within [_lookaheadPages] of the current page that we'll keep
+  /// rendered. Tuned small (1) to balance memory and scroll latency.
+  static const int _lookaheadPages = 1;
   final PageController _pageController = PageController();
+  /// Shared across all page widgets so zoom is consistent when the user
+  /// swipes. Without this, every page would reset to scale 1.0.
+  final TransformationController _transform = TransformationController();
+  /// Current scale — mirrored from `_transform` for the app-bar buttons.
+  /// Capped to the same [1.0, 6.0] range as the InteractiveViewer.
+  double _scale = 1.0;
+  bool _loading = true;
+  String? _error;
+  /// Cache directory for rendered page PNGs so re-opens of the same file
+  /// are instant. Cleared on dispose.
+  Directory? _renderCache;
 
   @override
   void initState() {
     super.initState();
     _loadPdf();
+    // Mirror the controller's matrix into [_scale] so the app-bar
+    // buttons can reflect the current zoom.
+    _transform.addListener(_onTransformChanged);
+  }
+
+  void _onTransformChanged() {
+    final s = _transform.value.getMaxScaleOnAxis();
+    if ((s - _scale).abs() > 0.01) {
+      setState(() => _scale = s);
+    }
   }
 
   @override
   void dispose() {
+    _transform.removeListener(_onTransformChanged);
+    _transform.dispose();
     _pageController.dispose();
+    // Best-effort cleanup of the render cache. The OS would clean it up
+    // eventually anyway, but doing it here keeps the temp dir tidy.
+    try {
+      _renderCache?.deleteSync(recursive: true);
+    } catch (_) {}
     super.dispose();
+  }
+
+  /// Zooms in by 25% of the current scale, clamped to 6.0. The change is
+  /// anchored at the centre of the page so the user's position is
+  /// roughly preserved.
+  void _zoomIn() {
+    final matrix = _transform.value;
+    final target = (_scale * 1.25).clamp(1.0, 6.0);
+    if (target == _scale) return;
+    final t = matrix.getTranslation();
+    _animateZoom(target, Offset(t.x, t.y));
+  }
+
+  /// Zooms out by 20% of the current scale, clamped to 1.0.
+  void _zoomOut() {
+    final matrix = _transform.value;
+    final target = (_scale / 1.2).clamp(1.0, 6.0);
+    if (target == _scale) return;
+    final t = matrix.getTranslation();
+    _animateZoom(target, Offset(t.x, t.y));
+  }
+
+  /// Resets the zoom to fit-to-width (1.0).
+  void _zoomReset() {
+    _animateZoom(1.0, Offset.zero);
+  }
+
+  void _animateZoom(double target, Offset focal) {
+    // Animate the matrix to a uniform scale of [target] about the centre
+    // of the viewport. Using `Matrix4Tween` gives us a smooth transition
+    // rather than a snap.
+    final size = MediaQuery.of(context).size;
+    final centre = focal == Offset.zero
+        ? Offset(size.width / 2, size.height / 2)
+        : focal;
+    final end = Matrix4.identity()
+      ..translate(centre.dx, centre.dy)
+      ..scale(target)
+      ..translate(-centre.dx, -centre.dy);
+    final tween = Matrix4Tween(begin: _transform.value, end: end);
+    final controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 180),
+    );
+    final animation = tween.animate(
+      CurvedAnimation(parent: controller, curve: Curves.easeOut),
+    );
+    animation.addListener(() => _transform.value = animation.value);
+    controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) controller.dispose();
+    });
+    controller.forward();
   }
 
   Future<void> _loadPdf() async {
     try {
       final doc = await PdfDocument.openFile(widget.filePath);
       _totalPages = doc.pagesCount;
-      // Render every page once at a generous size. 1080px wide gives
-      // crisp text even on tablets; phone panels won't use the full
-      // resolution but the file size is still modest (~200-500 KB per
-      // page for typical PDFs).
-      final tmp = await Directory.systemTemp.createTemp('swordfm_pdf_read_');
-      for (var i = 1; i <= _totalPages; i++) {
-        final page = await doc.getPage(i);
-        final png = await page.render(
+      _renderCache = await Directory.systemTemp.createTemp('swordfm_pdf_read_');
+      // Render only the first page eagerly so the user sees something
+      // immediately; render page 2 in the background so swiping right
+      // feels instant. We'll keep rendering neighbors as the user pages
+      // through the document.
+      await doc.close();
+      if (_totalPages == 0) {
+        if (mounted) setState(() => _error = 'PDF has no pages.');
+        return;
+      }
+      await _renderPagesAround(1);
+      if (mounted) setState(() => _loading = false);
+      // Background-render the second page so the first swipe is instant.
+      if (_totalPages > 1) {
+        unawaited(_renderPage(2));
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  /// Renders [page] (1-based) to a PNG in the cache and stores the path.
+  /// Idempotent — if already rendered or rendering, no-ops.
+  Future<void> _renderPage(int page) async {
+    if (page < 1 || page > _totalPages) return;
+    if (_pageRenders.containsKey(page)) return;
+    if (_rendering.contains(page)) return;
+    _rendering.add(page);
+    try {
+      final doc = await PdfDocument.openFile(widget.filePath);
+      try {
+        final pdfPage = await doc.getPage(page);
+        // 1080px wide gives crisp text on tablets; phone panels don't
+        // use the full resolution but the file is still modest.
+        final png = await pdfPage.render(
           width: 1080,
-          height: (page.height * 1080 / page.width),
+          height: (pdfPage.height * 1080 / pdfPage.width),
           format: PdfPageImageFormat.png,
           backgroundColor: '#FFFFFF',
         );
-        await page.close();
-        if (png == null || png.bytes.isEmpty) continue;
-        final out = File('${tmp.path}/page$i.png');
-        await out.writeAsBytes(png.bytes);
-        _pageRenders.add(out.path);
+        await pdfPage.close();
+        if (png != null && png.bytes.isNotEmpty) {
+          final out = File('${_renderCache!.path}/page$page.png');
+          await out.writeAsBytes(png.bytes);
+          if (mounted) {
+            setState(() {
+              _pageRenders[page] = out.path;
+            });
+          }
+        }
+      } finally {
+        await doc.close();
       }
-      await doc.close();
-      if (mounted) setState(() => _loaded = true);
-    } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+    } catch (_) {
+      // Render failed — leave the page absent; the renderer will show a
+      // "could not render" placeholder if the user pages to it.
+    } finally {
+      _rendering.remove(page);
+    }
+  }
+
+  /// Renders [_lookaheadPages] pages before and after [currentPage].
+  /// Already-rendered pages are skipped, so this is cheap to call on every
+  /// page change.
+  Future<void> _renderPagesAround(int currentPage) async {
+    final start = (currentPage - _lookaheadPages).clamp(1, _totalPages);
+    final end =
+        (currentPage + _lookaheadPages).clamp(1, _totalPages);
+    for (var p = start; p <= end; p++) {
+      // Fire-and-forget; _renderPage itself is idempotent.
+      unawaited(_renderPage(p));
     }
   }
 
@@ -102,12 +239,52 @@ class _PdfReaderState extends State<PdfReaderScreen> {
         foregroundColor: cs.onSurface,
         iconTheme: IconThemeData(color: cs.onSurface),
         actions: [
-          if (_totalPages > 0)
+          if (_totalPages > 0) ...[
+            // Zoom controls. The InteractiveViewer already supports
+            // pinch-zoom; these buttons give one-tap access for users who
+            // prefer explicit controls or are on devices without
+            // multi-touch. The shared _transform controller means the
+            // zoom level carries across page swipes.
             IconButton(
-              icon: Icon(Icons.text_fields, size: 20, color: cs.onSurfaceVariant),
+              icon: Icon(Icons.zoom_out,
+                  color: cs.onSurfaceVariant, size: 20),
+              tooltip: 'Zoom out',
+              onPressed: _scale <= 1.0 ? null : _zoomOut,
+            ),
+            // Live scale indicator — shows the current zoom level so the
+            // user can tell what they're looking at after pinch-zoom.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Center(
+                child: Text(
+                  _scale.toStringAsFixed(_scale < 1.5 ? 2 : 1) + '×',
+                  style: TextStyle(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 12,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ),
+            IconButton(
+              icon: Icon(Icons.zoom_in,
+                  color: cs.onSurfaceVariant, size: 20),
+              tooltip: 'Zoom in',
+              onPressed: _scale >= 6.0 ? null : _zoomIn,
+            ),
+            IconButton(
+              icon: Icon(Icons.zoom_out_map,
+                  color: cs.onSurfaceVariant, size: 20),
+              tooltip: 'Reset zoom',
+              onPressed: _scale == 1.0 ? null : _zoomReset,
+            ),
+            IconButton(
+              icon: Icon(Icons.text_fields,
+                  size: 20, color: cs.onSurfaceVariant),
               tooltip: 'Go to page',
               onPressed: _showGoToPageDialog,
             ),
+          ],
         ],
       ),
       body: _error != null
@@ -134,8 +311,17 @@ class _PdfReaderState extends State<PdfReaderScreen> {
                 ),
               ),
             )
-          : !_loaded
-              ? Center(child: CircularProgressIndicator(color: cs.primary))
+          : _loading
+              ? const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 12),
+                      Text('Loading page 1…'),
+                    ],
+                  ),
+                )
               : _pageRenders.isEmpty
                   ? Center(
                       child: Text(
@@ -144,7 +330,7 @@ class _PdfReaderState extends State<PdfReaderScreen> {
                       ),
                     )
                   : _buildReader(cs),
-      bottomNavigationBar: _loaded && _pageRenders.isNotEmpty
+      bottomNavigationBar: !_loading && _pageRenders.isNotEmpty
           ? Container(
               color: cs.surfaceContainerHighest,
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -192,54 +378,93 @@ class _PdfReaderState extends State<PdfReaderScreen> {
     );
   }
 
-  /// PageView of all pre-rendered pages with pinch-zoom on each.
+  /// PageView of all pages (rendered or being rendered). Already-rendered
+  /// pages show the cached PNG; unrendered pages show a loading placeholder
+  /// and trigger a render in the background. This means opening a large PDF
+  /// shows page 1 immediately, with subsequent pages appearing as they
+  /// render.
   Widget _buildReader(ColorScheme cs) {
     return PageView.builder(
       controller: _pageController,
-      itemCount: _pageRenders.length,
+      itemCount: _totalPages,
       onPageChanged: (idx) {
-        if (mounted) setState(() => _currentPage = idx + 1);
+        if (mounted) {
+          setState(() => _currentPage = idx + 1);
+          // Warm up the next page so swiping feels instant.
+          _renderPagesAround(idx + 1);
+        }
       },
       itemBuilder: (context, idx) {
-        return InteractiveViewer(
-          minScale: 1.0,
-          maxScale: 6.0,
-          child: Center(
-            child: Container(
-              margin: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.15),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Image.file(
-                File(_pageRenders[idx]),
-                fit: BoxFit.contain,
-                errorBuilder: (_, _, _) => Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.broken_image,
-                          size: 48, color: cs.onSurfaceVariant),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Page ${idx + 1} could not be rendered',
-                        style:
-                            TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
-                      ),
-                    ],
-                  ),
+        final pageNum = idx + 1;
+        final cached = _pageRenders[pageNum];
+        if (cached != null) {
+          return InteractiveViewer(
+            // Bound the shared transformation controller so zoom level
+            // carries across page swipes. Without this, swiping to the
+            // next page would reset the user's zoom.
+            transformationController: _transform,
+            minScale: 1.0,
+            maxScale: 6.0,
+            child: Center(
+              child: Container(
+                margin: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Image.file(
+                  File(cached),
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => _buildErrorTile(
+                      cs, 'Page $pageNum could not be rendered'),
                 ),
               ),
             ),
-          ),
-        );
+          );
+        }
+        // Not yet rendered — show a placeholder and trigger a render.
+        // ignore: unawaited_futures
+        _renderPage(pageNum);
+        return _buildLoadingTile(cs, pageNum);
       },
+    );
+  }
+
+  Widget _buildLoadingTile(ColorScheme cs, int pageNum) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 12),
+          Text(
+            'Rendering page $pageNum of $_totalPages…',
+            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorTile(ColorScheme cs, String message) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.broken_image, size: 48, color: cs.onSurfaceVariant),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
+          ),
+        ],
+      ),
     );
   }
 

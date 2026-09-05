@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
+import '../services/audio_handler.dart';
 import '../theme/theme.dart';
 
 /// Music player screen with playlist support and controls.
+///
+/// Routes playback through the app-wide [SwiftAudioHandler] (set up in
+/// `main()`) so the audio session keeps playing when the screen locks or
+/// the app is backgrounded. The player UI never creates its own
+/// [AudioPlayer] — it reads from `swiftAudioHandler!.player`.
 class MusicPlayerScreen extends StatefulWidget {
   final String? filePath;
   final List<String> playlist;
@@ -18,14 +24,17 @@ class MusicPlayerScreen extends StatefulWidget {
 }
 
 class _MusicPlayerState extends State<MusicPlayerScreen> {
-  late AudioPlayer _player;
+  // Pulled from the global SwiftAudioHandler set in main(). If it's null
+  // (AudioService init failed on this platform) we fall back to a local
+  // player so the UI still works.
+  AudioPlayer? _player;
+  SwiftAudioHandler? _handler;
   bool _initialized = false;
   int _currentIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _player = AudioPlayer();
     _init();
   }
 
@@ -33,21 +42,39 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
     final paths = widget.playlist.isNotEmpty
         ? widget.playlist
         : [widget.filePath!];
-    final playlist = ConcatenatingAudioSource(
-      children: paths.map((p) => AudioSource.file(p)).toList(),
-    );
-    await _player.setAudioSource(playlist, initialIndex: widget.initialIndex);
-    _currentIndex = widget.initialIndex;
-    _player.currentIndexStream.listen((i) {
-      if (i != null && mounted) setState(() => _currentIndex = i);
-    });
+    _handler = swiftAudioHandler;
+    if (_handler != null) {
+      // Use the shared background-capable player.
+      _player = _handler!.player;
+      await _handler!.loadQueue(paths, initialIndex: widget.initialIndex);
+      _currentIndex = widget.initialIndex;
+      _player!.currentIndexStream.listen((i) {
+        if (i != null && mounted) setState(() => _currentIndex = i);
+      });
+    } else {
+      // Fallback: spin up a local player. Playback won't survive
+      // backgrounding on this path, but the UI still works.
+      _player = AudioPlayer();
+      final playlist = ConcatenatingAudioSource(
+        children: paths.map((p) => AudioSource.file(p)).toList(),
+      );
+      await _player!.setAudioSource(playlist,
+          initialIndex: widget.initialIndex);
+      _currentIndex = widget.initialIndex;
+      _player!.currentIndexStream.listen((i) {
+        if (i != null && mounted) setState(() => _currentIndex = i);
+      });
+    }
     if (mounted) setState(() => _initialized = true);
-    _player.play();
+    await _player!.play();
   }
 
   @override
   void dispose() {
-    _player.dispose();
+    // Don't dispose the player — it's the shared handler. Just remove
+    // the listener subscription. The handler keeps playing in the
+    // background; the user can return to the player UI from the
+    // notification or re-open the screen.
     super.dispose();
   }
 
@@ -69,9 +96,10 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final p = _player;
     return Scaffold(
       backgroundColor: OneDarkColors.bgDark,
-      body: _initialized
+      body: _initialized && p != null
           ? SafeArea(
               child: Column(
                 children: [
@@ -136,10 +164,10 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                   const SizedBox(height: 24),
                   // Progress
                   StreamBuilder<Duration>(
-                    stream: _player.positionStream,
+                    stream: p.positionStream,
                     builder: (_, snap) {
                       final pos = snap.data ?? Duration.zero;
-                      final dur = _player.duration ?? Duration.zero;
+                      final dur = p.duration ?? Duration.zero;
                       return Column(
                         children: [
                           Padding(
@@ -155,7 +183,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                               ),
                               activeColor: OneDarkColors.cyan,
                               inactiveColor: OneDarkColors.border,
-                              onChanged: (v) => _player.seek(
+                              onChanged: (v) => p.seek(
                                 Duration(milliseconds: v.toInt()),
                               ),
                             ),
@@ -197,13 +225,11 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                           color: OneDarkColors.fg,
                           size: 32,
                         ),
-                        onPressed: _player.hasPrevious
-                            ? _player.seekToPrevious
-                            : null,
+                        onPressed: p.hasPrevious ? p.seekToPrevious : null,
                       ),
                       const SizedBox(width: 16),
                       StreamBuilder<PlayerState>(
-                        stream: _player.playerStateStream,
+                        stream: p.playerStateStream,
                         builder: (_, snap) {
                           final state = snap.data;
                           final playing = state?.playing ?? false;
@@ -215,8 +241,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                               size: 56,
                               color: OneDarkColors.cyan,
                             ),
-                            onPressed: () =>
-                                playing ? _player.pause() : _player.play(),
+                            onPressed: () => playing ? p.pause() : p.play(),
                           );
                         },
                       ),
@@ -227,7 +252,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                           color: OneDarkColors.fg,
                           size: 32,
                         ),
-                        onPressed: _player.hasNext ? _player.seekToNext : null,
+                        onPressed: p.hasNext ? p.seekToNext : null,
                       ),
                     ],
                   ),
@@ -262,7 +287,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
-                            onTap: () => _player.seek(Duration.zero, index: i),
+                            onTap: () => p.seek(Duration.zero, index: i),
                           );
                         },
                       ),

@@ -27,6 +27,8 @@ import 'services/widget_service.dart';
 import 'services/entitlement_service.dart';
 import 'services/device_service.dart';
 import 'services/bookmarks_service.dart';
+import 'services/audio_handler.dart';
+import 'package:audio_service/audio_service.dart';
 import 'utils/constants.dart' show AppPaths;
 
 Future<void> main() async {
@@ -46,6 +48,24 @@ Future<void> main() async {
   await loadThemeMode();
   await loadPersistedViewMode();
   await loadPersistedRootMode();
+  // Background audio handler — keeps music playing when the screen locks
+  // or the app is backgrounded. Initialised before runApp() so the lock-
+  // screen media controls and notification are wired before any UI shows.
+  // Errors are non-fatal: the app still runs, just without lock-screen
+  // media controls where the service init is rejected.
+  try {
+    swiftAudioHandler = await AudioService.init(
+      builder: () => SwiftAudioHandler(),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.swordfm.audio',
+        androidNotificationChannelName: 'SwordFM playback',
+        androidNotificationOngoing: true,
+        androidStopForegroundOnPause: true,
+      ),
+    );
+  } catch (e) {
+    debugPrint('AudioService init skipped: $e');
+  }
   runApp(const SwordFM());
 }
 
@@ -78,11 +98,16 @@ class SwordFM extends StatelessWidget {
               providers: [
                 ChangeNotifierProvider(create: (_) => EntitlementService()),
               ],
-              child: MaterialApp(
-                title: 'SwordFM',
-                debugShowCheckedModeBanner: false,
-                theme: theme,
-                home: const MainScreen(),
+              child: AudioServiceWidget(
+                // Routes hardware/lock-screen media buttons (headset,
+                // Bluetooth) to the SwiftAudioHandler. No-op when audio
+                // init was skipped.
+                child: MaterialApp(
+                  title: 'SwordFM',
+                  debugShowCheckedModeBanner: false,
+                  theme: theme,
+                  home: const MainScreen(),
+                ),
               ),
             );
           },

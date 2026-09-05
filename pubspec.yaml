@@ -47,6 +47,11 @@ dependencies:
   # Media players
   video_player: ^2.9.3
   just_audio: ^0.9.43
+  # Background audio playback — keep music playing when the screen locks
+  # or the app is backgrounded. Adds a small foreground service and a
+  # lock-screen media notification; no audio data ever leaves the device.
+  audio_service: ^0.18.15
+  audio_session: ^0.1.21
   # Document scanner
   image_picker: ^1.1.2
   # App/Process info

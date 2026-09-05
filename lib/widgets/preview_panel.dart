@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import '../screens/docx_reader_screen.dart';
 import '../screens/pdf_reader_screen.dart';
+import '../screens/text_reader_screen.dart';
 import '../screens/video_player_screen.dart';
 import '../services/open_with_service.dart';
 import '../theme/theme.dart';
@@ -72,7 +73,9 @@ class _PreviewPanelState extends State<PreviewPanel> {
     // PDFs get the in-app PdfReaderScreen (pinch-to-zoom, page nav, go-to-page)
     // — much better UX than the system default. DOCX gets the in-app
     // DocxReaderScreen (real formatting: headings, bold, lists, tables,
-    // images). Videos get the in-app player. Everything else falls back to
+    // images). MD / text / code get a full-screen TextReaderScreen
+    // (markdown for .md, monospaced + line numbers for everything else).
+    // Videos get the in-app player. Archives/images/audio fall back to
     // the system default handler.
     if (item.isPdf) {
       Navigator.of(context).push(
@@ -86,6 +89,14 @@ class _PreviewPanelState extends State<PreviewPanel> {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => DocxReaderScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
+    if (item.isMarkdown || item.isText || item.isCode) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => TextReaderScreen(filePath: item.path),
         ),
       );
       return;
@@ -391,20 +402,32 @@ class _PreviewPanelState extends State<PreviewPanel> {
         onTap: () => _openFullScreen(item),
         child: Column(
         children: [
+          // InteractiveViewer lets the user pinch-zoom on the preview
+          // image, which is especially useful for large photos where the
+          // down-sampled preview would otherwise be too small to inspect.
+          // `constrained: false` lets the image grow with the scale so
+          // zoomed-in pixels aren't clipped.
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 320),
-              child: Image.file(
-                File(item.path),
-                fit: BoxFit.contain,
-                // Decode at most 1000px wide — full-res photos (10MB+) are
-                // slow to decode on mobile and would stall the preview.
-                cacheWidth: 1000,
-                errorBuilder: (_, _, _) => Icon(
-                  Icons.broken_image,
-                  size: 48,
-                  color: cs.onSurfaceVariant,
+            child: InteractiveViewer(
+              minScale: 1.0,
+              maxScale: 6.0,
+              constrained: false,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: Image.file(
+                  File(item.path),
+                  fit: BoxFit.contain,
+                  // Decode at most 1000px wide — full-res photos (10MB+)
+                  // are slow to decode on mobile and would stall the
+                  // preview. Zoom-in uses the same cache so it stays
+                  // sharp.
+                  cacheWidth: 1000,
+                  errorBuilder: (_, _, _) => Icon(
+                    Icons.broken_image,
+                    size: 48,
+                    color: cs.onSurfaceVariant,
+                  ),
                 ),
               ),
             ),
