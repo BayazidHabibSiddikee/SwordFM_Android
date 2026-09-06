@@ -37,7 +37,13 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
       _error = null;
     });
     try {
-      final cutoff = DateTime.now().subtract(const Duration(days: 7));
+      // 30-day window so academic files (sessionals, lab reports, scanned
+      // coursework from a couple weeks ago) still surface. The original
+      // 7-day window was tuned for media folders where anything older is
+      // noise; on a Documents tree it actively hides the files the user
+      // is most likely to want. Cap is still result-bounded at 500, so
+      // the wider window doesn't slow the scan.
+      final cutoff = DateTime.now().subtract(const Duration(days: 30));
       final home = AppPaths.home;
       // Scan common media directories (resolved via AppPaths so the screen
       // also works on the Linux desktop build).

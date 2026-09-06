@@ -71,6 +71,12 @@ class PianoSynth {
 
   AudioPlayer? _player;
   bool _initialized = false;
+  /// True once a source has actually been set on the player. AudioPlayer.stop
+  /// throws on a fresh player that has never had setAudioSource() called —
+  /// the first tap of any session used to throw PlayerException, which the
+  /// catch swallowed but left the player in an error state on some just_audio
+  /// versions. Track this so we only call stop() after the first source lands.
+  bool _sourceReady = false;
 
   /// Plays the note at [index] (0..7). Subsequent calls interrupt the current
   /// note so rapid taps don't muddy each other.
@@ -82,16 +88,21 @@ class PianoSynth {
       _initialized = true;
     }
 
-    // Stop any in-flight note before starting the new one.
-    try {
-      await _player!.stop();
-    } catch (_) {}
+    // Stop any in-flight note before starting the new one. Skip on the very
+    // first call: the player has no source yet, and stop() throws on a fresh
+    // just_audio player.
+    if (_sourceReady) {
+      try {
+        await _player!.stop();
+      } catch (_) {}
+    }
 
     final freq = kFrequencies[index];
     final pcmBytes = _synthesizeNote(freq);
     final player = _player!;
     try {
       await player.setAudioSource(_PcmAudioSource(pcmBytes));
+      _sourceReady = true;
       await player.play();
     } catch (e) {
       debugPrint('PianoSynth: playback failed for index $index: $e');
@@ -103,6 +114,7 @@ class PianoSynth {
     _player?.dispose();
     _player = null;
     _initialized = false;
+    _sourceReady = false;
   }
 
   /// Generates a short PCM buffer for a single note at [frequency].
@@ -112,7 +124,12 @@ class PianoSynth {
   /// the amplitude over time so the note sounds like a plucked string rather
   /// than a continuous beep.
   Uint8List _synthesizeNote(double frequency) {
-    final builder = BytesBuilder();
+    // Pre-allocate the whole PCM buffer once. Previous implementation built
+    // a new Int16List(1) + Uint8List view inside the per-sample loop — about
+    // 11,025 short-lived allocations per note, ~22k per sidebar tap. Rapid
+    // tapping allocated tens of thousands of garbage objects in a couple of
+    // seconds; this buffer keeps each note down to a single allocation.
+    final pcm = Int16List(kSamplesPerNote);
     final samplesPerFrame = (kSampleRate / frequency).round();
     final twoPi = 2.0 * math.pi;
 
@@ -152,9 +169,9 @@ class PianoSynth {
       final amplitude = sample * env * kPeakAmp;
       // Clamp to 16-bit signed range.
       final clamped = amplitude.clamp(-32768.0, 32767.0);
-      builder.add(Int16List.fromList([clamped.toInt()]).buffer.asUint8List());
+      pcm[i] = clamped.toInt();
     }
 
-    return builder.toBytes();
+    return pcm.buffer.asUint8List();
   }
 }

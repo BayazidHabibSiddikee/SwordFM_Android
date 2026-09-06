@@ -110,7 +110,13 @@ class _SplashScreenState extends State<SplashScreen>
       await prefs.setBool('splash_shown', true);
     } catch (_) {}
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_skipped) return;
+      // Bail only if disposed. Both the natural-completion timer and the
+      // tap-to-skip path funnel through _go() exactly once (_skipToApp
+      // cancels the timer), so there is no double-navigation risk.
+      // The previous guard `if (mounted && !_skipped) return;` was
+      // inverted: _skipped is false on natural completion, so the
+      // return fired and onCompleted() never ran on first launch.
+      if (!mounted) return;
       widget.onCompleted();
     });
   }
