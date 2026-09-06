@@ -48,6 +48,15 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
   void initState() {
     super.initState();
     _listenBtStreams();
+    // When opened from "Share via LAN…" on a folder, surface the chosen
+    // path immediately and auto-start the server so the user just has to
+    // scan the QR — no extra Start tap.
+    if (widget.initialShareRoot != null) {
+      _statusMessage = 'Sharing: ${widget.initialShareRoot}';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startServer();
+      });
+    }
   }
 
   @override
@@ -61,7 +70,8 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
     final ip = await _server.start(shareRootOverride: widget.initialShareRoot);
     if (ip != null) {
       setState(() {
-        _statusMessage = 'Server running at http://$ip:${_server.port}';
+        _statusMessage =
+            'Sharing: ${widget.initialShareRoot ?? _server.shareRoot}';
       });
     } else {
       setState(
@@ -295,6 +305,47 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Selected share-root banner. Always visible so the user can
+            // confirm which folder they're about to broadcast.
+            if (widget.initialShareRoot != null)
+              Card(
+                color: OneDarkColors.cyan.withValues(alpha: 0.12),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.folder_open,
+                          size: 18, color: OneDarkColors.cyan),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Sharing folder',
+                              style: TextStyle(
+                                color: OneDarkColors.cyan,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              widget.initialShareRoot!,
+                              style: TextStyle(
+                                color: OneDarkColors.fg,
+                                fontSize: 12,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (widget.initialShareRoot != null) const SizedBox(height: 12),
             // Status card
             Card(
               color: OneDarkColors.bgDark,

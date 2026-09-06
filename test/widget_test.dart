@@ -26,6 +26,8 @@ void main() {
             return null;
         }
       });
+      // Skip the splash screen in tests so assertions on MainScreen pass.
+      SharedPreferences.setMockInitialValues({'splash_shown': true});
     });
 
     tearDown(() {
@@ -38,6 +40,7 @@ void main() {
       WidgetTester tester,
     ) async {
       await tester.pumpWidget(const SwordFM());
+      await tester.pump();
 
       // Verify app builds and Scaffold is present
       expect(find.byType(Scaffold), findsOneWidget);
@@ -65,6 +68,7 @@ void main() {
       WidgetTester tester,
     ) async {
       await tester.pumpWidget(const SwordFM());
+      await tester.pump();
       expect(find.byIcon(Icons.menu), findsOneWidget);
     });
 
@@ -100,6 +104,7 @@ void main() {
 
     testWidgets('File browser loads default path', (WidgetTester tester) async {
       await tester.pumpWidget(const SwordFM());
+      await tester.pump();
       expect(find.byType(FileBrowser), findsOneWidget);
     });
   });

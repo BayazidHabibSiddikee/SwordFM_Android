@@ -83,6 +83,49 @@ class DocConverter {
     }
   }
 
+  /// Converts a file to Markdown format, writing `<base>.md` next to the
+  /// source. For text/code/markdown files this is essentially a copy with
+  /// a `.md` extension. For PDF/DOCX the extracted text is saved as Markdown.
+  static Future<String?> toMarkdown(String sourcePath) async {
+    final ext = p.extension(sourcePath).toLowerCase();
+    if (ext == '.pdf') {
+      final text = _extractPdfTextSync(sourcePath);
+      if (text == null || text.isEmpty) return null;
+      try {
+        final outPath = _resolveOutputPath(sourcePath, '.md');
+        await _writeOutput(outPath, utf8.encode(text));
+        return outPath;
+      } catch (e) {
+        debugPrint('toMarkdown failed for $sourcePath: $e');
+        return null;
+      }
+    }
+    if (ext == '.docx') {
+      final text = await _readSourceText(sourcePath);
+      if (text.isEmpty) return null;
+      try {
+        final outPath = _resolveOutputPath(sourcePath, '.md');
+        await _writeOutput(outPath, utf8.encode(text));
+        return outPath;
+      } catch (e) {
+        debugPrint('toMarkdown failed for $sourcePath: $e');
+        return null;
+      }
+    }
+    if (!canConvert(sourcePath)) return null;
+    final file = File(sourcePath);
+    if (!await file.exists()) return null;
+    try {
+      final content = await _readSourceText(sourcePath);
+      final outPath = _resolveOutputPath(sourcePath, '.md');
+      await _writeOutput(outPath, utf8.encode(content));
+      return outPath;
+    } catch (e) {
+      debugPrint('toMarkdown failed for $sourcePath: $e');
+      return null;
+    }
+  }
+
   /// Reads any convertible source as text. `.docx` sources are ZIP binaries —
   /// the text is pulled from `word/document.xml`; everything else is decoded
   /// as UTF-8 with malformed bytes tolerated (previously a strict
@@ -695,7 +738,7 @@ class DocConverter {
   /// the source is already a PDF).
   static List<String> getAvailableFormats(String path) {
     if (!canConvert(path)) return [];
-    final list = ['PDF', 'DOCX', 'HTML', 'TXT'];
+    final list = ['PDF', 'DOCX', 'HTML', 'TXT', 'Markdown'];
     if (p.extension(path).toLowerCase() == '.pdf') list.remove('PDF');
     return list;
   }

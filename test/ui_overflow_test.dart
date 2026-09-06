@@ -19,7 +19,7 @@ void main() {
 
   setUp(() {
     // NetworkScreen loads profiles via shared_preferences at startup.
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'splash_shown': true});
     // MainScreen checks "All files access" at startup (MainActivity channel) —
     // mock as granted so no dialog blocks the overflow test.
     const devices = MethodChannel('com.swordfm/devices');

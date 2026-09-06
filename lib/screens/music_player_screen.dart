@@ -168,24 +168,29 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                     builder: (_, snap) {
                       final pos = snap.data ?? Duration.zero;
                       final dur = p.duration ?? Duration.zero;
+                      // Slider requires max > min AND a finite max. When the
+                      // audio hasn't loaded a real duration yet (dur is
+                      // Duration.zero), use a 1ms window so the slider
+                      // renders without throwing. Once duration lands the
+                      // StreamBuilder rebuilds with the real value.
+                      final durMs = dur.inMilliseconds.toDouble();
+                      final maxMs = durMs > 0 ? durMs : 1.0;
                       return Column(
                         children: [
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 24),
                             child: Slider(
-                              value: pos.inMilliseconds.toDouble().clamp(
-                                0,
-                                dur.inMilliseconds.toDouble(),
-                              ),
-                              max: dur.inMilliseconds.toDouble().clamp(
-                                1,
-                                double.infinity,
-                              ),
+                              value: pos.inMilliseconds
+                                  .toDouble()
+                                  .clamp(0.0, maxMs),
+                              max: maxMs,
                               activeColor: OneDarkColors.cyan,
                               inactiveColor: OneDarkColors.border,
-                              onChanged: (v) => p.seek(
-                                Duration(milliseconds: v.toInt()),
-                              ),
+                              onChanged: durMs > 0
+                                  ? (v) => p.seek(
+                                        Duration(milliseconds: v.toInt()),
+                                      )
+                                  : null,
                             ),
                           ),
                           Padding(

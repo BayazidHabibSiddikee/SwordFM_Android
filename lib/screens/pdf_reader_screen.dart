@@ -167,6 +167,12 @@ class _PdfReaderState extends State<PdfReaderScreen>
         return;
       }
       await _renderPagesAround(1);
+      // Wait for page 1 to actually finish rendering before clearing
+      // the loading spinner. Without this the body builds once with an
+      // empty _pageRenders map, falls through to the metadata card,
+      // and the user sees a blank "no pages" screen until the fire-
+      // and-forget _renderPage future completes.
+      await _renderPage(1);
       if (mounted) setState(() => _loading = false);
       // Background-render the second page so the first swipe is instant.
       if (_totalPages > 1) {

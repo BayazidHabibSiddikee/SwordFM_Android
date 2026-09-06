@@ -227,9 +227,6 @@ class _PreviewPanelState extends State<PreviewPanel> {
       width: widget.width,
       height: widget.height,
       child: GestureDetector(
-        // Tapping anywhere on the panel closes it (the close button and inner
-        // controls still win the gesture arena for their own taps).
-        onTap: widget.onClose,
         onPanUpdate: (details) {
           // Swipe horizontally to open full screen
           if (details.delta.dx.abs() > 50) {
@@ -305,56 +302,19 @@ class _PreviewPanelState extends State<PreviewPanel> {
     final item = widget.item!;
     final cs = Theme.of(context).colorScheme;
     if (item.isPdf) {
-      // All pages — render them as a vertical list so the user can scroll
-      // through the document without leaving the preview panel. Each page
-      // thumbnail is tappable to open the full-screen reader. Falls back to
-      // the metadata card when pdfx can't render anything.
       if (_pdfPageThumbs.isNotEmpty) {
         final capped = _pdfPageCount > _kPdfPreviewCap;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (var i = 0; i < _pdfPageThumbs.length; i++)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: GestureDetector(
-                  onTap: () => _openFullScreen(item),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: Container(
-                          color: cs.surface,
-                          width: double.infinity,
-                          // InteractiveViewer lets the user pinch-zoom a
-                          // single page inside the preview panel (up to
-                          // 6×). The outer SingleChildScrollView still
-                          // handles vertical scrolling; the viewer only
-                          // claims the gesture once a pinch starts.
-                          child: InteractiveViewer(
-                            minScale: 1.0,
-                            maxScale: 6.0,
-                            panEnabled: true,
-                            child: Image.file(
-                              File(_pdfPageThumbs[i]),
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, _, _) =>
-                                  _buildMetadataCard(),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Page ${i + 1}'
-                        '${capped ? " (showing first $_kPdfPreviewCap of $_pdfPageCount)" : (_pdfPageCount > 1 ? " of $_pdfPageCount" : "")}',
-                        style: TextStyle(
-                            color: cs.onSurfaceVariant, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
+              _PdfPagePreview(
+                thumbPath: _pdfPageThumbs[i],
+                pageIndex: i,
+                pageCount: _pdfPageCount,
+                capped: capped,
+                maxPreview: _kPdfPreviewCap,
+                onFullScreen: () => _openFullScreen(item),
               ),
             if (capped)
               Padding(
@@ -419,61 +379,9 @@ class _PreviewPanelState extends State<PreviewPanel> {
       );
     }
     if (item.isImage) {
-      return GestureDetector(
-        onTap: () => _openFullScreen(item),
-        child: Column(
-        children: [
-          // InteractiveViewer lets the user pinch-zoom on the preview
-          // image, which is especially useful for large photos where the
-          // down-sampled preview would otherwise be too small to inspect.
-          // `constrained: false` lets the image grow with the scale so
-          // zoomed-in pixels aren't clipped.
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: InteractiveViewer(
-              minScale: 1.0,
-              maxScale: 6.0,
-              constrained: false,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 320),
-                child: Image.file(
-                  File(item.path),
-                  fit: BoxFit.contain,
-                  // Decode at most 1000px wide — full-res photos (10MB+)
-                  // are slow to decode on mobile and would stall the
-                  // preview. Zoom-in uses the same cache so it stays
-                  // sharp.
-                  cacheWidth: 1000,
-                  errorBuilder: (_, _, _) => Icon(
-                    Icons.broken_image,
-                    size: 48,
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          FilledButton.tonalIcon(
-            onPressed: () async {
-              try {
-                await OpenWithService.openDefault(item.path);
-              } catch (_) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: const Text('No app can open this file'),
-                      backgroundColor: OneDarkColors.red,
-                    ),
-                  );
-                }
-              }
-            },
-            icon: const Icon(Icons.open_in_new, size: 16),
-            label: const Text('Open with…'),
-          ),
-        ],
-      ),
+      return _ImagePreviewTile(
+        item: item,
+        onFullScreen: () => _openFullScreen(item),
       );
     }
     if (item.isMarkdown) {
@@ -781,6 +689,229 @@ String pptxOutlineFromPath(String sourcePath) {
 String _slideNumber(String name) {
   final m = RegExp(r'slide(\d+)\.xml$').firstMatch(name);
   return m?.group(1) ?? '?';
+}
+
+/// A single PDF page preview with zoom +/- buttons and fullscreen button.
+/// Replaces InteractiveViewer (which ate taps) with explicit controls.
+class _PdfPagePreview extends StatefulWidget {
+  final String thumbPath;
+  final int pageIndex;
+  final int pageCount;
+  final bool capped;
+  final int maxPreview;
+  final VoidCallback onFullScreen;
+
+  const _PdfPagePreview({
+    required this.thumbPath,
+    required this.pageIndex,
+    required this.pageCount,
+    required this.capped,
+    required this.maxPreview,
+    required this.onFullScreen,
+  });
+
+  @override
+  State<_PdfPagePreview> createState() => _PdfPagePreviewState();
+}
+
+class _PdfPagePreviewState extends State<_PdfPagePreview> {
+  double _scale = 1.0;
+
+  void _zoomIn() => setState(() => _scale = (_scale + 0.5).clamp(1.0, 6.0));
+  void _zoomOut() => setState(() => _scale = (_scale - 0.5).clamp(1.0, 6.0));
+  void _resetZoom() => setState(() => _scale = 1.0);
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: Container(
+              color: cs.surface,
+              width: double.infinity,
+              child: GestureDetector(
+                onDoubleTap: _resetZoom,
+                child: Transform.scale(
+                  scale: _scale,
+                  alignment: Alignment.topCenter,
+                  child: Image.file(
+                    File(widget.thumbPath),
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => const Icon(
+                      Icons.broken_image,
+                      size: 48,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Text(
+                'Page ${widget.pageIndex + 1}'
+                '${widget.capped ? " (first ${widget.maxPreview} of ${widget.pageCount})" : (widget.pageCount > 1 ? " of ${widget.pageCount}" : "")}',
+                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11),
+              ),
+              const Spacer(),
+              // Zoom controls
+              _zoomBtn(Icons.remove, cs, _zoomOut),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  '${(_scale * 100).round()}%',
+                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10),
+                ),
+              ),
+              _zoomBtn(Icons.add, cs, _zoomIn),
+              const SizedBox(width: 4),
+              // Fullscreen button — guaranteed to fire, no gesture arena fights
+              IconButton(
+                icon: Icon(Icons.fullscreen, size: 16, color: cs.primary),
+                onPressed: widget.onFullScreen,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                tooltip: 'Open in reader',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _zoomBtn(IconData icon, ColorScheme cs, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Icon(icon, size: 14, color: cs.onSurface),
+      ),
+    );
+  }
+}
+
+/// Image preview with zoom controls and fullscreen button.
+class _ImagePreviewTile extends StatefulWidget {
+  final FileItem item;
+  final VoidCallback onFullScreen;
+
+  const _ImagePreviewTile({
+    required this.item,
+    required this.onFullScreen,
+  });
+
+  @override
+  State<_ImagePreviewTile> createState() => _ImagePreviewTileState();
+}
+
+class _ImagePreviewTileState extends State<_ImagePreviewTile> {
+  double _scale = 1.0;
+
+  void _zoomIn() => setState(() => _scale = (_scale + 0.5).clamp(1.0, 6.0));
+  void _zoomOut() => setState(() => _scale = (_scale - 0.5).clamp(1.0, 6.0));
+  void _resetZoom() => setState(() => _scale = 1.0);
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: GestureDetector(
+              onDoubleTap: _resetZoom,
+              child: Transform.scale(
+                scale: _scale,
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  child: Image.file(
+                    File(widget.item.path),
+                    fit: BoxFit.contain,
+                    cacheWidth: 1000,
+                    errorBuilder: (_, _, _) => Icon(
+                      Icons.broken_image,
+                      size: 48,
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Zoom + fullscreen controls
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _zoomBtn(Icons.remove, cs, _zoomOut),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  '${(_scale * 100).round()}%',
+                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
+                ),
+              ),
+              _zoomBtn(Icons.add, cs, _zoomIn),
+              const SizedBox(width: 12),
+              IconButton(
+                icon: Icon(Icons.fullscreen, size: 18, color: cs.primary),
+                onPressed: widget.onFullScreen,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                tooltip: 'Open full screen',
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            onPressed: () async {
+              try {
+                await OpenWithService.openDefault(widget.item.path);
+              } catch (_) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text('No app can open this file'),
+                      backgroundColor: OneDarkColors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: const Text('Open with…'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _zoomBtn(IconData icon, ColorScheme cs, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Icon(icon, size: 16, color: cs.onSurface),
+      ),
+    );
+  }
 }
 
 /// Renders a video preview: a real frame thumbnail (extracted from the file

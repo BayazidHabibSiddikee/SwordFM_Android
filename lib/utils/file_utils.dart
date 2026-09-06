@@ -394,6 +394,14 @@ class FileItem {
 
   bool get isHidden => name.startsWith('.');
   bool get isImage => _kImageExtensions.contains(extension);
+
+  /// Static helper: checks whether a raw file path points to an image extension.
+  /// Avoids constructing a full [FileItem] when you only need the extension check.
+  static bool isImagePath(String path) {
+    final ext = p.extension(path).toLowerCase();
+    return _kImageExtensions.contains(ext);
+  }
+
   static const _kImageExtensions = {
     '.png',
     '.jpg',

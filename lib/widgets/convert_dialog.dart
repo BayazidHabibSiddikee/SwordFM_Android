@@ -41,11 +41,14 @@ class _ConvertDialogState extends State<ConvertDialog> {
         case 'HTML':
           outPath = await DocConverter.markdownFileToHtml(widget.filePath);
           break;
+        case 'Markdown':
+          outPath = await DocConverter.toMarkdown(widget.filePath);
+          break;
         default: // TXT
-          if (widget.filePath.toLowerCase().endsWith('.docx')) {
-            outPath = await DocConverter.fromDocx(widget.filePath);
-          } else if (widget.filePath.toLowerCase().endsWith('.pdf')) {
+          if (widget.filePath.toLowerCase().endsWith('.pdf')) {
             outPath = await DocConverter.fromPdf(widget.filePath);
+          } else if (widget.filePath.toLowerCase().endsWith('.docx')) {
+            outPath = await DocConverter.fromDocx(widget.filePath);
           } else {
             outPath = await DocConverter.toText(widget.filePath);
           }
@@ -56,13 +59,13 @@ class _ConvertDialogState extends State<ConvertDialog> {
       } else {
         if (mounted) {
           setState(() => _error =
-              'Conversion failed — the source may be empty, encrypted, '
-              'or the output folder is not writable. Try saving to SwordFM '
-              'Downloads.');
+              'Conversion produced no output. The source may be empty, '
+              'encrypted, or contain only images. Saved copies go to the '
+              'SwordFM Downloads folder.');
         }
       }
     } catch (e) {
-      if (mounted) setState(() => _error = 'Error: $e');
+      if (mounted) setState(() => _error = 'Conversion error: $e');
     } finally {
       if (mounted) setState(() => _converting = false);
     }
@@ -166,6 +169,22 @@ class _ConvertDialogState extends State<ConvertDialog> {
                       ),
                     ),
                   ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _converting ? null : () => _convert('Markdown'),
+                      icon: Icon(
+                        Icons.code,
+                        size: 18,
+                        color: OneDarkColors.purple,
+                      ),
+                      label: const Text('Markdown'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: OneDarkColors.purple,
+                        side: BorderSide(color: OneDarkColors.purple),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ] else ...[
@@ -235,6 +254,26 @@ class _ConvertDialogState extends State<ConvertDialog> {
                       style: OutlinedButton.styleFrom(
                         foregroundColor: OneDarkColors.green,
                         side: BorderSide(color: OneDarkColors.green),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _converting ? null : () => _convert('Markdown'),
+                      icon: Icon(
+                        Icons.code,
+                        size: 18,
+                        color: OneDarkColors.purple,
+                      ),
+                      label: const Text('Markdown'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: OneDarkColors.purple,
+                        side: BorderSide(color: OneDarkColors.purple),
                       ),
                     ),
                   ),
