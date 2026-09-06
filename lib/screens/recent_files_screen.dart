@@ -295,13 +295,19 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
 }
 
 /// Scans [dirs] recursively for files modified after [cutoffMs].
-/// Runs inside a background isolate: sync I/O, depth-capped (3 levels) and
+/// Runs inside a background isolate: sync I/O, depth-capped (5 levels) and
 /// result-capped (500 entries) so the scan always terminates quickly.
+///
+/// Depth 5 covers realistic user trees like
+/// `Documents/Study/University/3-2/Sessionals/ME 3256/file.pdf` (5 subdirs)
+/// from the source folder; bumping past 3 unblocks the study folder where
+/// Sessionals live 4 levels down. Result cap stays at 500 so a phone with
+/// a huge media tree still returns in well under a second.
 List<Map<String, Object>> _scanRecent(List<String> dirs, int cutoffMs) {
   final cutoff = DateTime.fromMillisecondsSinceEpoch(cutoffMs);
   final entries = <Map<String, Object>>[];
   const maxEntries = 500;
-  const maxDepth = 3;
+  const maxDepth = 5;
 
   void scan(String dirPath, int depth) {
     if (entries.length >= maxEntries) return;
