@@ -166,15 +166,17 @@ class _PdfReaderState extends State<PdfReaderScreen>
         if (mounted) setState(() => _error = 'PDF has no pages.');
         return;
       }
-      await _renderPagesAround(1);
-      // Wait for page 1 to actually finish rendering before clearing
-      // the loading spinner. Without this the body builds once with an
-      // empty _pageRenders map, falls through to the metadata card,
-      // and the user sees a blank "no pages" screen until the fire-
-      // and-forget _renderPage future completes.
+      // Render page 1 directly and await it before clearing the loading
+      // spinner. _renderPagesAround(1) used to precede this and fire page 1
+      // via unawaited — which marked page 1 as in-flight but didn't yield.
+      // The subsequent await _renderPage(1) then saw the in-flight flag and
+      // returned instantly while the actual render was still running, so the
+      // body built against an empty _pageRenders map and showed 'This PDF has
+      // no renderable pages.' on every valid PDF. Render page 1 directly.
       await _renderPage(1);
       if (mounted) setState(() => _loading = false);
-      // Background-render the second page so the first swipe is instant.
+      // Background-render page 2 so the first swipe is instant. Subsequent
+      // pages render on demand via _renderPagesAround from onPageChanged.
       if (_totalPages > 1) {
         unawaited(_renderPage(2));
       }
