@@ -143,6 +143,14 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Files you open appear here.',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                    ),
+                  ),
                 ],
               ),
             )

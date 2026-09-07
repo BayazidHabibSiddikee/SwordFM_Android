@@ -59,13 +59,12 @@ class _ConvertDialogState extends State<ConvertDialog> {
       } else {
         if (mounted) {
           setState(() => _error =
-              'Conversion produced no output. The source may be empty, '
-              'encrypted, or contain only images. Saved copies go to the '
-              'SwordFM Downloads folder.');
+              'Could not convert this file. It may be encrypted, password-'
+              'protected, or contain only images.');
         }
       }
     } catch (e) {
-      if (mounted) setState(() => _error = 'Conversion error: $e');
+      if (mounted) setState(() => _error = 'Conversion failed: $e');
     } finally {
       if (mounted) setState(() => _converting = false);
     }

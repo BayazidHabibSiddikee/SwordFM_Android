@@ -579,12 +579,11 @@ class _FileBrowserState extends State<FileBrowser> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      String msg = 'Failed to list directory: $e';
+      String msg = 'Could not open this folder';
       if (e.toString().contains('Permission denied') && rootModeNotifier.value) {
-        msg = 'Permission denied — device may not be rooted. '
-            'Root Mode allows browsing, but /system and /data require root access.';
+        msg = 'Access denied — you may need root privileges to view this folder.';
       } else if (e.toString().contains('Permission denied')) {
-        msg = 'Permission denied — grant "All files access" in Settings';
+        msg = 'Access denied — please grant "All files access" in your device Settings.';
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1236,7 +1235,7 @@ class _FileBrowserState extends State<FileBrowser> {
         .catchError((Object e) {
           if (!mounted) return;
           final msg = e.toString().contains('Permission denied')
-              ? 'Permission denied — grant "All files access" in Settings'
+              ? 'Access denied — please grant "All files access" in Settings'
               : 'Paste failed: $e';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(

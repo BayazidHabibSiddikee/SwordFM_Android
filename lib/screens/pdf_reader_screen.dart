@@ -324,7 +324,7 @@ class _PdfReaderState extends State<PdfReaderScreen>
                     Icon(Icons.error_outline, size: 48, color: cs.error),
                     const SizedBox(height: 12),
                     Text(
-                      'Cannot open PDF',
+                      'Cannot open this PDF',
                       style: TextStyle(color: cs.onSurface),
                     ),
                     const SizedBox(height: 8),
@@ -352,7 +352,7 @@ class _PdfReaderState extends State<PdfReaderScreen>
               : _pageRenders.isEmpty
                   ? Center(
                       child: Text(
-                        'This PDF has no renderable pages.',
+                        'This document has no pages or is unreadable.',
                         style: TextStyle(color: cs.onSurfaceVariant),
                       ),
                     )
