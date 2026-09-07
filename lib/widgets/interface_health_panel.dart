@@ -340,4 +340,3 @@ Widget _summaryChip() {
         InterfaceHealth.down => 'DOWN',
       };
 }
-}
