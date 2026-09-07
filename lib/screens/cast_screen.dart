@@ -52,7 +52,7 @@ class _CastScreenState extends State<CastScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Connect failed: $e'), backgroundColor: OneDarkColors.red),
+          SnackBar(content: const Text("Couldn't connect to device"), backgroundColor: OneDarkColors.red),
         );
       }
     }
@@ -73,7 +73,7 @@ class _CastScreenState extends State<CastScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Cast failed: $e'), backgroundColor: OneDarkColors.red),
+          SnackBar(content: const Text("Couldn't cast to device"), backgroundColor: OneDarkColors.red),
         );
       }
     }

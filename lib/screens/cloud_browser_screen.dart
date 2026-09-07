@@ -215,7 +215,7 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to connect to Google Drive')),
+            const SnackBar(content: Text('Couldn\'t connect to Google Drive — check your internet')),
           );
         }
       }
@@ -304,7 +304,7 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to connect to Dropbox')),
+            const SnackBar(content: Text('Couldn\'t connect to Dropbox — check your internet')),
           );
         }
       }
@@ -373,7 +373,7 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to connect to OpenDrive')),
+            const SnackBar(content: Text('Couldn\'t connect to OpenDrive — check your internet')),
           );
         }
       }
@@ -411,7 +411,7 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Upload failed')),
+            const SnackBar(content: Text('Upload didn\'t go through — please retry')),
           );
         }
       }
@@ -419,7 +419,7 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
       if (mounted) {
         setState(() => _uploading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload error: $e')),
+          SnackBar(content: const Text('Upload didn't go through — please retry')),
         );
       }
     }

@@ -2518,7 +2518,7 @@ class _FileBrowserState extends State<FileBrowser> {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Failed: $e'),
+                        content: const Text('Rename failed — try again later'),
                         backgroundColor: OneDarkColors.red,
                       ),
                     );
@@ -2566,7 +2566,7 @@ class _FileBrowserState extends State<FileBrowser> {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Failed: $e'),
+                        content: const Text('Rename failed — try again later'),
                         backgroundColor: OneDarkColors.red,
                       ),
                     );

@@ -90,7 +90,7 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Failed to load recent files: $e';
+          _error = 'Couldn't load recent files — please try again';
           _loading = false;
         });
       }
