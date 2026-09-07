@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/network_service.dart';
 import '../theme/theme.dart';
+import '../widgets/interface_health_panel.dart';
 
 /// Network connections screen — manage WebDAV/SFTP profiles and browse remote files.
 class NetworkScreen extends StatefulWidget {
@@ -124,7 +125,16 @@ class _NetworkScreenState extends State<NetworkScreen> {
           ),
         ],
       ),
-      body: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
+      body: Column(
+        children: [
+          // Local interface health (link state, speed, errors/drops/collisions).
+          // Collapsed on phones to save vertical space; expanded on desktop.
+          InterfaceHealthPanel(expandedByDefault: !isMobile),
+          Expanded(
+            child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
+          ),
+        ],
+      ),
     );
   }
 
