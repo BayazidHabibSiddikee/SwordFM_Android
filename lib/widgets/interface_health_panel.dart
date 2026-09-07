@@ -205,29 +205,34 @@ Widget _summaryChip() {
         ),
       );
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (_measuring)
-          const LinearProgressIndicator(minHeight: 2),
-        for (final i in _ifaces) _ifaceTile(i, cs),
-        if (_diffs != null) ...[
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: Text(
-              'Trend over last measurement',
-              style: TextStyle(
-                color: OneDarkColors.cyan,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 320),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_measuring)
+              const LinearProgressIndicator(minHeight: 2),
+            for (final i in _ifaces) _ifaceTile(i, cs),
+            if (_diffs != null) ...[
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                child: Text(
+                  'Trend over last measurement',
+                  style: TextStyle(
+                    color: OneDarkColors.cyan,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
-            ),
-          ),
-          for (var k = 0; k < _ifaces.length && k < _diffs!.length; k++)
-            _diffTile(_ifaces[k].name, _diffs![k], cs),
-        ],
-      ],
+              for (var k = 0; k < _ifaces.length && k < _diffs!.length; k++)
+                _diffTile(_ifaces[k].name, _diffs![k], cs),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
