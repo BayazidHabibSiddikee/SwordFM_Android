@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:swordfm/services/terminal_service.dart';
 import 'package:swordfm/screens/terminal_screen.dart';
 import 'package:flutter/material.dart';
 

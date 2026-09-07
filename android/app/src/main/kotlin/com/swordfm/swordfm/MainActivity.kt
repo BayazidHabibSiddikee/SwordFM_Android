@@ -88,6 +88,7 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
     }
 
     private var pendingInstallResult: MethodChannel.Result? = null
+    private var fileIntentsChannel: MethodChannel? = null
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -154,6 +155,8 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     }
                     true
                 }
+            // File-open intents from external apps (PDF viewer, file manager, etc.)
+            fileIntentsChannel = MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/file_intents")
             // Cast stub — returns empty list until Cast SDK is integrated.
             MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/cast")
                 .setMethodCallHandler { call, result ->
@@ -167,6 +170,65 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
                     true
                 }
         }
+        // Handle file-open intent when app cold-starts from an external viewer
+        handleOpenIntent(intent)
+    }
+
+    /**
+     * Copies a content:// or file:// URI to a local temp file and sends the
+     * path to Flutter via the "onFileOpened" method channel event.
+     * Called from [onCreate] (cold start) and [onNewIntent] (warm start).
+     */
+    private fun handleOpenIntent(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action
+        val uri = intent.data ?: intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)?.data
+        if (uri == null) return
+        if (action != Intent.ACTION_VIEW && action != Intent.ACTION_SEND) return
+        // Copy to app-internal cache so Flutter can read it by path
+        thread {
+            try {
+                val inputStream = contentResolver.openInputStream(uri) ?: return@thread
+                val fileName = getFileName(uri) ?: "opened_file"
+                val cacheFile = File(cacheDir, "opened/$fileName")
+                cacheFile.parentFile?.mkdirs()
+                inputStream.use { input ->
+                    cacheFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                val path = cacheFile.absolutePath
+                runOnMain {
+                    fileIntentsChannel?.invokeMethod("onFileOpened", mapOf(
+                        "path" to path,
+                        "mimeType" to (contentResolver.getType(uri) ?: ""),
+                        "fileName" to fileName,
+                    ))
+                }
+            } catch (e: Exception) {
+                runOnMain {
+                    fileIntentsChannel?.invokeMethod("onFileOpened", mapOf(
+                        "path" to "",
+                        "error" to e.message,
+                    ))
+                }
+            }
+        }
+    }
+
+    private fun getFileName(uri: Uri): String? {
+        var name: String? = null
+        if (uri.scheme == "content") {
+            val cursor = contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0) name = it.getString(idx)
+                }
+            }
+        }
+        if (name == null) name = uri.lastPathSegment
+        return name
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -411,6 +473,8 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
      */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // Handle file-open intents (PDF, DOCX, etc.) forwarded while app is running
+        handleOpenIntent(intent)
         val uri = intent.data ?: return
         if (uri.scheme == "storagesfm" && (uri.host == "dropbox-callback" || uri.host == "opendrive-callback")) {
             // Use the dedicated cloud channel so MainActivity keeps its

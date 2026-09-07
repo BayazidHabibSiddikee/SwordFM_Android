@@ -24,9 +24,6 @@ import '../screens/archive_browser_screen.dart';
 import 'preview_panel.dart';
 import 'convert_dialog.dart';
 import 'package:path/path.dart' as p;
-import 'package:provider/provider.dart';
-import '../services/entitlement_service.dart';
-import '../services/donation_service.dart';
 
 enum ViewMode { details, grid }
 
@@ -709,9 +706,8 @@ class _FileBrowserState extends State<FileBrowser> {
 
   /// Single-tap on a file: select it for the preview panel. On phones the
   /// side panel is hidden, so open the preview in a bottom sheet instead.
-  /// Video/audio open directly in the built-in players. PDFs and other
-  /// documents (docx/html/md/txt) open in the preview panel (never the
-  /// full-screen reader) so the user can tap the full-screen button from there.
+  /// Video/audio/PDF/images/DOCX open directly in their built-in readers.
+  /// Only plain text/markdown/etc. use the preview bottom sheet.
   Future<void> _showFile(FileItem item) async {
     widget.onItemSelected(item);
     final ext = item.extension.toLowerCase();
@@ -723,7 +719,25 @@ class _FileBrowserState extends State<FileBrowser> {
       await _openAudio(item);
       return;
     }
+    // On mobile: open documents directly in fullscreen readers
     if (MediaQuery.of(context).size.width < 600) {
+      if (ext == '.pdf') {
+        _openPdf(item.path);
+        return;
+      }
+      if (ext == '.docx') {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => DocxReaderScreen(filePath: item.path)),
+        );
+        return;
+      }
+      if (item.isImage) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => ImageViewerScreen(filePath: item.path)),
+        );
+        return;
+      }
+      // Text/markdown/code: show in bottom sheet with preview
       await showModalBottomSheet<void>(
         context: context,
         backgroundColor: Colors.transparent,
@@ -2196,8 +2210,6 @@ class _FileBrowserState extends State<FileBrowser> {
         parentBox.paintBounds.height - offset.dy - 240,
       );
     }
-    final isText =
-        !item.isDirectory && _kTextExtensions.contains(item.extension);
 
     final entries = <PopupMenuEntry<String>>[
       PopupMenuItem(

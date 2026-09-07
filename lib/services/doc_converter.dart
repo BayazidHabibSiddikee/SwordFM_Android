@@ -75,7 +75,7 @@ class DocConverter {
       final content = await _readSourceText(sourcePath);
       final text = markdownToText(_preprocessForMarkdown(sourcePath, content));
       final outPath = _resolveOutputPath(sourcePath, '.txt');
-      await _writeOutput(outPath, text.codeUnits);
+      await _writeOutput(outPath, utf8.encode(text));
       return outPath;
     } catch (e) {
       debugPrint('toText failed for $sourcePath: $e');
@@ -178,7 +178,7 @@ class DocConverter {
     if (text == null || text.isEmpty) return null;
     try {
       final outPath = _resolveOutputPath(sourcePath, '.txt');
-      await _writeOutput(outPath, text.codeUnits);
+      await _writeOutput(outPath, utf8.encode(text));
       return outPath;
     } catch (e) {
       debugPrint('fromPdf write failed for $sourcePath: $e');
@@ -347,7 +347,7 @@ class DocConverter {
           .replaceAll(RegExp(r'\n{3,}'), '\n\n')
           .trim();
       final outPath = _resolveOutputPath(sourcePath, '.txt');
-      await _writeOutput(outPath, text.codeUnits);
+      await _writeOutput(outPath, utf8.encode(text));
       return outPath;
     } catch (e) {
       debugPrint('fromDocx failed for $sourcePath: $e');

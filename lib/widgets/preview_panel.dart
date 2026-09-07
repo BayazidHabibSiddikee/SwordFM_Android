@@ -226,73 +226,72 @@ class _PreviewPanelState extends State<PreviewPanel> {
     return SizedBox(
       width: widget.width,
       height: widget.height,
-      child: GestureDetector(
-        onPanUpdate: (details) {
-          // Swipe horizontally to open full screen
-          if (details.delta.dx.abs() > 50) {
-            widget.onSwipe?.call();
-          }
-        },
-        child: Card(
-          margin: const EdgeInsets.all(8),
-          color: cs.surfaceContainerHighest,
-          child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Row(
-                children: [
-                  Icon(item.icon, color: item.iconColor, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      item.name,
-                      style: TextStyle(
-                        color: cs.onSurface,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      overflow: TextOverflow.ellipsis,
+      child: Card(
+        margin: const EdgeInsets.all(8),
+        color: cs.surfaceContainerHighest,
+        child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header — NO GestureDetector wrapping this Row.
+          // Each IconButton is an InkWell with its own TapGestureRecognizer
+          // that wins the arena by being the deepest hit-test target.
+          Container(
+            color: cs.surfaceContainerHighest,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              children: [
+                Icon(item.icon, color: item.iconColor, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    item.name,
+                    style: TextStyle(
+                      color: cs.onSurface,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  // Expand button — opens in full-screen reader/player
-                  IconButton(
-                    icon: const Icon(Icons.fullscreen, size: 18),
-                    onPressed: () => _openFullScreen(item),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    tooltip: 'Open full screen',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 18),
-                    onPressed: widget.onClose ?? () {},
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ],
-              ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.fullscreen, size: 20, color: cs.primary),
+                  onPressed: () => _openFullScreen(item),
+                  padding: const EdgeInsets.all(8),
+                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                  tooltip: 'Open full screen',
+                ),
+                IconButton(
+                  icon: Icon(Icons.close, size: 20, color: cs.onSurfaceVariant),
+                  onPressed: widget.onClose ?? () {},
+                  padding: const EdgeInsets.all(8),
+                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                  tooltip: 'Close preview',
+                ),
+              ],
             ),
-            const Divider(height: 1),
-            // Content
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _error != null
-                  ? Center(
+          ),
+          const Divider(height: 1),
+          // Content — no gesture detector here either
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
                       child: Text(
                         _error!,
                         style: TextStyle(color: cs.error),
+                        textAlign: TextAlign.center,
                       ),
-                    )
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.all(12),
-                      child: _buildPreview(),
                     ),
-            ),
-          ],
-        ),
+                  )
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.all(12),
+                    child: _buildPreview(),
+                  ),
+          ),
+        ],
         ),
       ),
     );
@@ -719,65 +718,72 @@ class _PdfPagePreviewState extends State<_PdfPagePreview> {
 
   void _zoomIn() => setState(() => _scale = (_scale + 0.5).clamp(1.0, 6.0));
   void _zoomOut() => setState(() => _scale = (_scale - 0.5).clamp(1.0, 6.0));
-  void _resetZoom() => setState(() => _scale = 1.0);
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: Container(
-              color: cs.surface,
-              width: double.infinity,
-              child: GestureDetector(
-                onDoubleTap: _resetZoom,
+          // Entire page thumbnail is tappable — opens fullscreen reader
+          Material(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(6),
+            child: InkWell(
+              onTap: widget.onFullScreen,
+              borderRadius: BorderRadius.circular(6),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
                 child: Transform.scale(
                   scale: _scale,
                   alignment: Alignment.topCenter,
                   child: Image.file(
                     File(widget.thumbPath),
                     fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => const Icon(
-                      Icons.broken_image,
-                      size: 48,
+                    width: double.infinity,
+                    errorBuilder: (_, _, _) => const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Icon(Icons.broken_image, size: 48),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
+          // Page label + zoom controls + fullscreen — all simple taps
           Row(
             children: [
               Text(
                 'Page ${widget.pageIndex + 1}'
-                '${widget.capped ? " (first ${widget.maxPreview} of ${widget.pageCount})" : (widget.pageCount > 1 ? " of ${widget.pageCount}" : "")}',
+                '${widget.capped ? " / ${widget.pageCount}" : (widget.pageCount > 1 ? " / ${widget.pageCount}" : "")}',
                 style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11),
               ),
               const Spacer(),
-              // Zoom controls
               _zoomBtn(Icons.remove, cs, _zoomOut),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Text(
                   '${(_scale * 100).round()}%',
-                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 10),
+                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11),
                 ),
               ),
               _zoomBtn(Icons.add, cs, _zoomIn),
-              const SizedBox(width: 4),
-              // Fullscreen button — guaranteed to fire, no gesture arena fights
-              IconButton(
-                icon: Icon(Icons.fullscreen, size: 16, color: cs.primary),
-                onPressed: widget.onFullScreen,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                tooltip: 'Open in reader',
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 28,
+                child: FilledButton.tonalIcon(
+                  onPressed: widget.onFullScreen,
+                  icon: const Icon(Icons.fullscreen, size: 14),
+                  label: const Text('Open', style: TextStyle(fontSize: 11)),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
               ),
             ],
           ),
@@ -787,10 +793,11 @@ class _PdfPagePreviewState extends State<_PdfPagePreview> {
   }
 
   Widget _zoomBtn(IconData icon, ColorScheme cs, VoidCallback onTap) {
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
       child: Container(
-        padding: const EdgeInsets.all(4),
+        padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
           color: cs.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(4),
@@ -820,7 +827,6 @@ class _ImagePreviewTileState extends State<_ImagePreviewTile> {
 
   void _zoomIn() => setState(() => _scale = (_scale + 0.5).clamp(1.0, 6.0));
   void _zoomOut() => setState(() => _scale = (_scale - 0.5).clamp(1.0, 6.0));
-  void _resetZoom() => setState(() => _scale = 1.0);
 
   @override
   Widget build(BuildContext context) {
@@ -828,23 +834,29 @@ class _ImagePreviewTileState extends State<_ImagePreviewTile> {
     return SingleChildScrollView(
       child: Column(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: GestureDetector(
-              onDoubleTap: _resetZoom,
-              child: Transform.scale(
-                scale: _scale,
-                alignment: Alignment.topCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 320),
-                  child: Image.file(
-                    File(widget.item.path),
-                    fit: BoxFit.contain,
-                    cacheWidth: 1000,
-                    errorBuilder: (_, _, _) => Icon(
-                      Icons.broken_image,
-                      size: 48,
-                      color: cs.onSurfaceVariant,
+          // Entire image is tappable — opens fullscreen viewer
+          Material(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(6),
+            child: InkWell(
+              onTap: widget.onFullScreen,
+              borderRadius: BorderRadius.circular(6),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Transform.scale(
+                  scale: _scale,
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 320),
+                    child: Image.file(
+                      File(widget.item.path),
+                      fit: BoxFit.contain,
+                      cacheWidth: 1000,
+                      errorBuilder: (_, _, _) => Icon(
+                        Icons.broken_image,
+                        size: 48,
+                        color: cs.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ),
@@ -852,7 +864,7 @@ class _ImagePreviewTileState extends State<_ImagePreviewTile> {
             ),
           ),
           const SizedBox(height: 8),
-          // Zoom + fullscreen controls
+          // Zoom + fullscreen + open-with controls
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -866,12 +878,18 @@ class _ImagePreviewTileState extends State<_ImagePreviewTile> {
               ),
               _zoomBtn(Icons.add, cs, _zoomIn),
               const SizedBox(width: 12),
-              IconButton(
-                icon: Icon(Icons.fullscreen, size: 18, color: cs.primary),
-                onPressed: widget.onFullScreen,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                tooltip: 'Open full screen',
+              SizedBox(
+                height: 32,
+                child: FilledButton.tonalIcon(
+                  onPressed: widget.onFullScreen,
+                  icon: const Icon(Icons.fullscreen, size: 14),
+                  label: const Text('Open', style: TextStyle(fontSize: 11)),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
               ),
             ],
           ),
@@ -900,8 +918,9 @@ class _ImagePreviewTileState extends State<_ImagePreviewTile> {
   }
 
   Widget _zoomBtn(IconData icon, ColorScheme cs, VoidCallback onTap) {
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
       child: Container(
         padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(

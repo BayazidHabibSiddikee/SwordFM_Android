@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path/path.dart' as p;
 import 'theme/theme.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'utils/app_paths.dart' show StoragePermissions;
@@ -24,13 +24,14 @@ import 'screens/document_scanner_screen.dart';
 import 'screens/app_analyzer_screen.dart';
 import 'screens/cast_screen.dart';
 import 'screens/cloud_browser_screen.dart';
+import 'screens/pdf_reader_screen.dart';
+import 'screens/docx_reader_screen.dart';
+import 'screens/video_player_screen.dart';
 import 'services/widget_service.dart';
 import 'services/entitlement_service.dart';
 import 'services/device_service.dart';
 import 'services/bookmarks_service.dart';
 import 'services/audio_handler.dart';
-import 'services/piano_synth.dart';
-import 'screens/splash_screen.dart';
 import 'package:audio_service/audio_service.dart';
 import 'utils/constants.dart' show AppPaths;
 
@@ -109,7 +110,7 @@ class SwordFM extends StatelessWidget {
                   title: 'SwordFM',
                   debugShowCheckedModeBanner: false,
                   theme: theme,
-                  home: const _SplashGate(),
+                  home: const MainScreen(),
                 ),
               ),
             );
@@ -129,42 +130,6 @@ class MainScreen extends StatefulWidget {
 
   @override
   State<MainScreen> createState() => _MainScreenState();
-}
-
-class _SplashGate extends StatefulWidget {
-  /// If true, skips the splash entirely — used by unit/widget tests.
-  final bool skip;
-  const _SplashGate({this.skip = false});
-
-  @override
-  State<_SplashGate> createState() => _SplashGateState();
-}
-
-class _SplashGateState extends State<_SplashGate> {
-  bool _shown = false;
-
-  @override
-  void initState() {
-    super.initState();
-    SharedPreferences.getInstance().then((prefs) {
-      if (!mounted) return;
-      setState(() => _shown = prefs.getBool('splash_shown') ?? false);
-    });
-  }
-
-  void _onCompleted() {
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const MainScreen()),
-      (_) => false,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (widget.skip || _shown) return const MainScreen();
-    return SplashScreen(onCompleted: _onCompleted);
-  }
 }
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
@@ -209,6 +174,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Listen for files opened from external apps (PDF viewer, file manager, etc.)
+    const MethodChannel('com.swordfm/file_intents').setMethodCallHandler((call) async {
+      if (call.method == 'onFileOpened') {
+        final path = call.arguments['path'] as String? ?? '';
+        if (path.isNotEmpty && mounted) {
+          _openFileFromIntent(path);
+        }
+      }
+    });
     // On Android, resolve the actual storage root synchronously after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _currentPath = AppPaths.home);
@@ -257,6 +231,42 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       final go = await _promptAllFilesAccess();
       if (go) await requestAllFilesAccess();
     } catch (_) {}
+  }
+
+  /// Opens a file received from an external intent (e.g. "Open with" from
+  /// another app). Routes to the correct reader screen based on extension.
+  void _openFileFromIntent(String path) {
+    final ext = p.extension(path).toLowerCase();
+    final file = File(path);
+    if (!file.existsSync()) return;
+    final item = FileItem(
+      entity: file,
+      name: p.basename(path),
+      path: path,
+      isDirectory: false,
+      size: file.lengthSync(),
+      lastModified: file.lastModifiedSync(),
+    );
+    if (ext == '.pdf') {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => PdfReaderScreen(filePath: path),
+      ));
+    } else if (ext == '.docx') {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => DocxReaderScreen(filePath: path),
+      ));
+    } else if (ext == '.mp4' || ext == '.mkv' || ext == '.avi' || ext == '.mov') {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => VideoPlayerScreen(filePath: path),
+      ));
+    } else {
+      // For text, markdown, images, etc. — use the preview panel by
+      // navigating to the file's directory and selecting it.
+      setState(() {
+        _currentPath = p.dirname(path);
+        _selectedItem = item;
+      });
+    }
   }
 
   Future<bool> _promptAllFilesAccess() async {
@@ -411,13 +421,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         Icons.home,
                                         'Home',
                                         AppPaths.home,
-                                        noteIndex: 0,
                                       ),
                                       _SidebarTile(
                                         icon: Icons.history,
                                         label: 'Recent',
                                         iconColor: cs.primary,
-                                        noteIndex: 1,
                                         onTap: () => Navigator.of(context)
                                             .push(
                                           MaterialPageRoute(
@@ -474,7 +482,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         label: 'Trash',
                                         iconColor: onSurfaceDim,
                                         textColor: onSurfaceDim,
-                                        noteIndex: 2,
                                         onTap: () => Navigator.of(context).push(
                                           MaterialPageRoute(
                                             builder: (_) => const TrashScreen(),
@@ -493,7 +500,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           () => _openSidebarTool(
                                             const DocumentScannerScreen(),
                                           ),
-                                          noteIndex: 3,
                                         ),
                                       _sidebarAction(
                                         Icons.note_add,
@@ -501,7 +507,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         () => _openSidebarTool(
                                           const NotepadScreen(),
                                         ),
-                                        noteIndex: 4,
                                       ),
                                       _sidebarAction(
                                         Icons.apps,
@@ -509,7 +514,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         () => _openSidebarTool(
                                           const AppAnalyzerScreen(),
                                         ),
-                                        noteIndex: 5,
                                       ),
                                       _sidebarAction(
                                         Icons.cast,
@@ -517,7 +521,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         () => _openSidebarTool(
                                           const CastScreen(),
                                         ),
-                                        noteIndex: 6,
                                       ),
                                       ], // tools
                                       const Divider(),
@@ -530,7 +533,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           Icons.wifi,
                                           'LAN Sharing',
                                           () => _openSidebarTab(1),
-                                          noteIndex: 7,
                                         ),
                                         _sidebarAction(
                                           Icons.cloud,
@@ -935,8 +937,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   /// Wrapper around [_SidebarTile] that adds the hover-state tracking
   /// we use for subtle background highlighting on desktop.
-  Widget _sidebarTile(int index, IconData icon, String label, String path,
-      {int? noteIndex}) {
+  Widget _sidebarTile(int index, IconData icon, String label, String path) {
     final isActive =
         _currentPath.startsWith(path) &&
         (_currentPath == path || _currentPath.startsWith('$path/'));
@@ -948,21 +949,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         label: label,
         active: isActive,
         tooltip: path,
-        noteIndex: noteIndex,
         onTap: () => setState(() => _currentPath = path),
       ),
     );
   }
 
-  Widget _sidebarAction(IconData icon, String label, VoidCallback onTap,
-      {int? noteIndex}) {
+  Widget _sidebarAction(IconData icon, String label, VoidCallback onTap) {
     final cs = Theme.of(context).colorScheme;
     return _SidebarTile(
       icon: icon,
       label: label,
       iconColor: cs.onSurfaceVariant,
       textColor: cs.onSurfaceVariant,
-      noteIndex: noteIndex,
       onTap: onTap,
     );
   }
@@ -1152,7 +1150,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 /// bookmarks, devices, recent, trash, volumes, plus the inline Recent
 /// entry — uses this widget so the drawer has a single visual rhythm
 /// (same height, same icon size, same text size, same padding).
-class _SidebarTile extends StatefulWidget {
+class _SidebarTile extends StatelessWidget {
   final IconData icon;
   final String label;
   final String? subtitle;
@@ -1162,9 +1160,6 @@ class _SidebarTile extends StatefulWidget {
   final bool active;
   final Color? iconColor;
   final Color? textColor;
-  /// If non-null, this tile plays the corresponding piano note on tap.
-  final int? noteIndex;
-  final ValueChanged<bool>? onNotePlay;
 
   const _SidebarTile({
     required this.icon,
@@ -1176,120 +1171,55 @@ class _SidebarTile extends StatefulWidget {
     this.active = false,
     this.iconColor,
     this.textColor,
-    this.noteIndex,
-    this.onNotePlay,
   });
-
-  @override
-  State<_SidebarTile> createState() => _SidebarTileState();
-}
-
-class _SidebarTileState extends State<_SidebarTile>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pressAnim;
-  bool _pressed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _pressAnim = AnimationController(vsync: this, duration: Duration(milliseconds: 80));
-  }
-
-  @override
-  void dispose() {
-    _pressAnim.dispose();
-    super.dispose();
-  }
-
-  void _onTap() {
-    final cb = widget.onTap;
-    final ni = widget.noteIndex;
-    if (ni != null) {
-      setState(() => _pressed = true);
-      _pressAnim.forward().then((_) => _pressAnim.reverse());
-      PianoSynth.instance.play(ni).whenComplete(() {
-        if (mounted) setState(() => _pressed = false);
-        widget.onNotePlay?.call(true);
-      });
-    }
-    cb?.call();
-  }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final effectiveIconColor =
-        widget.iconColor ?? (widget.active ? cs.primary : cs.onSurface);
+        iconColor ?? (active ? cs.primary : cs.onSurface);
     final effectiveTextColor =
-        widget.textColor ?? (widget.active ? cs.primary : cs.onSurface);
-    final isBlackKey = widget.noteIndex != null && [1, 3, 6].contains(widget.noteIndex);
-
-    // Piano key styling — use _pressed from state, not widget
-    final keyBg = isBlackKey
-        ? (_pressed ? Color(0xFF2A2A2A) : Color(0xFF1A1A1A))
-        : (_pressed ? Color(0xFFEDEBE5) : Color(0xFFF8F6F0));
-
-    final keyFgColor = isBlackKey ? cs.onSurface : effectiveTextColor;
-    final keyShadow = isBlackKey
-        ? BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 3, offset: Offset(0, 3))
-        : BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 2, offset: Offset(0, 2));
-
-    final content = Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(widget.icon, size: 18, color: effectiveIconColor),
-        const SizedBox(height: 4),
-        Text(
-          widget.label,
-          style: TextStyle(
-            color: keyFgColor,
-            fontSize: 11,
-            fontWeight: widget.active ? FontWeight.w600 : FontWeight.w500,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
+        textColor ?? (active ? cs.primary : cs.onSurface);
+    final tile = ListTile(
+      // All sidebar tiles share the same compact density so the drawer
+      // shows the same number of rows on every device. ListTile's
+      // default 56dp height is too tall for an 180px-wide drawer holding
+      // 10+ entries.
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+      horizontalTitleGap: 6,
+      minLeadingWidth: 0,
+      leading: Icon(icon, size: 18, color: effectiveIconColor),
+      title: Text(
+        label,
+        style: TextStyle(
+          color: effectiveTextColor,
+          fontSize: 13,
+          fontWeight: active ? FontWeight.w600 : FontWeight.w500,
         ),
-        if (widget.subtitle != null) ...[
-          const SizedBox(height: 2),
-          Text(
-            widget.subtitle!,
-            style: TextStyle(
-              color: isBlackKey ? cs.onSurfaceVariant.withValues(alpha: 0.6) : cs.onSurfaceVariant,
-              fontSize: 9,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ],
-    );
-
-    final keyWidget = MouseRegion(
-      onEnter: (_) {},
-      onExit: (_) {},
-      child: AnimatedContainer(
-        duration: Duration(milliseconds: 80),
-        curve: Curves.easeOut,
-        transform: Matrix4.translationValues(0, _pressed ? 2.0 : 0, 0),
-        decoration: BoxDecoration(
-          color: keyBg,
-          borderRadius: BorderRadius.circular(isBlackKey ? 4 : 6),
-          boxShadow: [keyShadow],
-        ),
-        margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: content,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
+      subtitle: subtitle == null
+          ? null
+          : Text(
+              subtitle!,
+              style: TextStyle(
+                color: cs.onSurfaceVariant,
+                fontSize: 11,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+      selected: active,
+      selectedTileColor: cs.primaryContainer.withValues(alpha: 0.3),
+      hoverColor: cs.onSurface.withValues(alpha: 0.08),
+      onTap: onTap,
+      onLongPress: onLongPress,
     );
-
-    return GestureDetector(
-      onTap: _onTap,
-      onLongPress: widget.onLongPress,
-      child: widget.tooltip == null
-          ? keyWidget
-          : Tooltip(message: widget.tooltip!, child: keyWidget),
-    );
+    if (tooltip == null) return tile;
+    return Tooltip(message: tooltip!, child: tile);
   }
 }

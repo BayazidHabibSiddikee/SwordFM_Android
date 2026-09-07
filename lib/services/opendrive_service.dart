@@ -13,7 +13,6 @@ class OpenDriveService {
   static const _kRefreshTokenKey = 'opendrive_refresh_token';
   static const _kApiKeyKey = 'opendrive_api_key';
   static const _kExpiryKey = 'opendrive_token_expiry';
-  static const _kBaseUrl = 'https://dev.openrazer.com/api';
 
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 

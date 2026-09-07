@@ -28,8 +28,6 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
   bool _loading = false;
   bool _uploading = false;
   String? _error;
-  // For Google Drive: store the resolved folder ID for the current path to avoid re-resolution.
-  String? _currentFolderId;
   String _currentPath = '/';
   bool _selectMode = false;
   Set<String> _selectedIds = {};

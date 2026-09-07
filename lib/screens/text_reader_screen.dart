@@ -4,8 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:path/path.dart' as p;
 
-import '../theme/theme.dart';
-
 /// Full-screen reader for text, code, and Markdown files.
 ///
 /// - Markdown files (`.md`, `.markdown`) get a real markdown renderer

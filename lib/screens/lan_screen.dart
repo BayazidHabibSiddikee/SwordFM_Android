@@ -203,15 +203,6 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
     }
   }
 
-  Future<void> _stopBtListening() async {
-    try {
-      await _btService.stopServer();
-    } catch (e) {
-      if (mounted) setState(() => _btStatusMessage = 'Stop failed: $e');
-    }
-    if (mounted) setState(() => _btStatusMessage = null);
-  }
-
   Future<void> _connectToDevice(BluetoothDeviceItem device) async {
     if (!mounted || device.name.isEmpty || device.address.isEmpty) return;
     setState(() => _btStatusMessage = 'Connecting to ${device.name}...');
@@ -268,17 +259,6 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
       case BluetoothState.connected: return Icons.bluetooth_connected;
       case BluetoothState.sending: return Icons.upload_file;
       case BluetoothState.receiving: return Icons.file_download;
-    }
-  }
-
-  String _btStateLabel(BluetoothState s) {
-    switch (s) {
-      case BluetoothState.disconnected: return 'Disconnected';
-      case BluetoothState.listening: return 'Listening for connections…';
-      case BluetoothState.connecting: return 'Connecting…';
-      case BluetoothState.connected: return 'Connected';
-      case BluetoothState.sending: return 'Sending file…';
-      case BluetoothState.receiving: return 'Receiving file…';
     }
   }
 
