@@ -24,5 +24,18 @@ void main() {
       );
       expect(find.text('Select a profile to connect'), findsOneWidget);
     });
+
+    testWidgets('renders the Interface Health panel header and toggles', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: NetworkScreen(),
+        ),
+      );
+      // The header is always present on the Network screen.
+      expect(find.text('Interface Health'), findsOneWidget);
+      expect(find.byIcon(Icons.refresh), findsWidgets);
+    });
   });
 }
