@@ -458,7 +458,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: const Text('No app can open this file'),
+                      content: const Text("We couldn't find an app that opens this file type"),
                       backgroundColor: cs.error,
                     ),
                   );
@@ -902,7 +902,7 @@ class _ImagePreviewTileState extends State<_ImagePreviewTile> {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: const Text('No app can open this file'),
+                      content: const Text("We couldn't find an app that opens this file type"),
                       backgroundColor: OneDarkColors.red,
                     ),
                   );

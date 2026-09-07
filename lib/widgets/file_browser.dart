@@ -523,7 +523,7 @@ class _FileBrowserState extends State<FileBrowser> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('System directory — enable Root Mode in Settings to browse'),
+              content: Text('This folder is protected — enable Root Mode in Settings to browse it'),
               backgroundColor: OneDarkColors.amber,
             ),
           );
@@ -1236,7 +1236,7 @@ class _FileBrowserState extends State<FileBrowser> {
           if (!mounted) return;
           final msg = e.toString().contains('Permission denied')
               ? 'Access denied — please grant "All files access" in Settings'
-              : 'Paste failed: $e';
+              : 'Couldn't paste file — ${e.toString().split(':').last.trim()}';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(msg),
@@ -2072,7 +2072,7 @@ class _FileBrowserState extends State<FileBrowser> {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Paste failed: $e'),
+                    content: Text('Couldn't paste file'),
                     backgroundColor: OneDarkColors.red,
                   ),
                 );
@@ -3566,7 +3566,7 @@ class _FileBrowserState extends State<FileBrowser> {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Paste failed: $e'),
+                    content: Text('Couldn't paste file'),
                     backgroundColor: OneDarkColors.red,
                   ),
                 );

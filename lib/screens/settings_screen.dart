@@ -563,7 +563,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: const Text(
-                        'https://github.com/BayazidHabibSiddikee/SwordFM_Android',
+                      content: const Text("Couldn't open link — please check your connection"),
                       ),
                       backgroundColor: OneDarkColors.bgDark,
                     ),
