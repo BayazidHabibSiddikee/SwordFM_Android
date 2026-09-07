@@ -90,7 +90,7 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Couldn't load recent files — please try again';
+          _error = 'Couldn\'t load recent files -- please try again';
           _loading = false;
         });
       }
@@ -179,7 +179,7 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
                     child: _buildEntryList(),
                   ),
                 ),
-                // Expanded — PreviewPanel sizes itself with a Column+Expanded,
+                // Expanded -- PreviewPanel sizes itself with a Column+Expanded,
                 // so a null/loose height constraint crashes the layout
                 // ("RenderFlex children have non-zero flex…") the moment a
                 // preview item is tapped on phones.
@@ -329,7 +329,7 @@ List<Map<String, Object>> _scanRecent(List<String> dirs, int cutoffMs) {
     try {
       children = Directory(dirPath).listSync(followLinks: false);
     } catch (_) {
-      return; // unreadable directory — skip
+      return; // unreadable directory -- skip
     }
     for (final entity in children) {
       if (entries.length >= maxEntries) return;

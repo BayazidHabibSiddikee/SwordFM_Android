@@ -92,7 +92,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       user = auth.currentUser;
     } catch (_) {
-      // Firebase not initialized in test environment — proceed with null user
+      // Firebase not initialized in test environment -- proceed with null user
     }
     final entService = context.read<EntitlementService>();
     setState(() {
@@ -200,7 +200,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: _isPremium ? 'Premium Unlocked' : 'Get Premium',
             subtitle: _isPremium
                 ? 'Enjoy ad-free, unlimited conversions'
-                : 'Support development — remove limits',
+                : 'Support development -- remove limits',
             trailing: _isPremium
                 ? Icon(Icons.check_circle, color: OneDarkColors.amber)
                 : const Icon(Icons.chevron_right),
@@ -371,7 +371,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: Icons.admin_panel_settings,
                     title: 'Root Mode',
                     subtitle: isRooted
-                        ? 'System dirs browsable — requires rooted device for /system, /data'
+                        ? 'System dirs browsable -- requires rooted device for /system, /data'
                         : 'Enable to browse /proc, /sys, /dev and other system dirs (requires root)',
                     trailing: isRooted
                         ? Switch(
@@ -562,9 +562,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   if (!mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: const Text(
-                      content: const Text("Couldn't open link — please check your connection"),
-                      ),
+                      content: const Text("Couldn't open link -- please check your connection"),
                       backgroundColor: OneDarkColors.bgDark,
                     ),
                   );

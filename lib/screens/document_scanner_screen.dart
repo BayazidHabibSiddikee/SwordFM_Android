@@ -9,7 +9,7 @@ import 'package:open_file/open_file.dart';
 import '../theme/theme.dart';
 import '../utils/constants.dart' show AppPaths;
 
-/// Document scanner — capture pages from camera or gallery, assemble into PDF.
+/// Document scanner -- capture pages from camera or gallery, assemble into PDF.
 class DocumentScannerScreen extends StatefulWidget {
   const DocumentScannerScreen({super.key});
   @override
@@ -131,7 +131,7 @@ class _ScannerState extends State<DocumentScannerScreen> {
       if (mounted) {
         setState(() => _building = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: const Text('Couldn\'t build document — please try again'), backgroundColor: OneDarkColors.red),
+          SnackBar(content: const Text('Couldn\'t build document -- please try again'), backgroundColor: OneDarkColors.red),
         );
       }
     }

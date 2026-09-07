@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/theme.dart';
 
-/// Cast screen — discover and connect to Chromecast / DLNA devices.
+/// Cast screen -- discover and connect to Chromecast / DLNA devices.
 /// Uses Android MediaRouter via MethodChannel.
 class CastScreen extends StatefulWidget {
   const CastScreen({super.key});

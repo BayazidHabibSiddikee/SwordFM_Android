@@ -27,13 +27,13 @@ import 'package:path/path.dart' as p;
 
 enum ViewMode { details, grid }
 
-/// Persisted default view mode — Settings → "Default View" writes here,
+/// Persisted default view mode -- Settings → "Default View" writes here,
 /// every FileBrowser instance follows it live.
 final ValueNotifier<ViewMode> viewModeNotifier = ValueNotifier<ViewMode>(
   ViewMode.details,
 );
 
-/// Shared toggle for showing hidden (dotfile) entries — the toolbar button
+/// Shared toggle for showing hidden (dotfile) entries -- the toolbar button
 /// and the Settings screen both write to this notifier.
 final ValueNotifier<bool> showHiddenNotifier = ValueNotifier<bool>(false);
 
@@ -366,12 +366,12 @@ class _FileBrowserState extends State<FileBrowser> {
   SortOption _sortOption = SortOption.name;
   SortDir _sortDir = SortDir.asc;
   SelectionMode _selectionMode = SelectionMode.none;
-  // ignore: prefer_final_fields — mutated via setState
+  // ignore: prefer_final_fields -- mutated via setState
   Set<String> _selectedPaths = {};
   final Set<String> _markedPaths =
       {}; // persistent mark state across directory changes
   /// When true, tapping any item toggles its mark (like the top "Select"
-  /// button) — entered after marking an item via long-press so the user can
+  /// button) -- entered after marking an item via long-press so the user can
   /// continue marking other documents by tapping them.
   bool _markMode = false;
   final Map<String, int> _folderSizes = {};
@@ -424,7 +424,7 @@ class _FileBrowserState extends State<FileBrowser> {
   void didUpdateWidget(covariant FileBrowser oldWidget) {
     super.didUpdateWidget(oldWidget);
     // When the parent changes initialPath (sidebar/breadcrumb navigation),
-    // navigate internally without destroying state — preserves history.
+    // navigate internally without destroying state -- preserves history.
     if (widget.initialPath != oldWidget.initialPath &&
         widget.initialPath.isNotEmpty) {
       _suppressCallback = true;
@@ -491,7 +491,7 @@ class _FileBrowserState extends State<FileBrowser> {
     return result;
   }
 
-  /// True when the type/date filter is active — the browser then searches the
+  /// True when the type/date filter is active -- the browser then searches the
   /// whole subtree (Linux: "find these anywhere under here").
   bool get _isRecursiveFilterActive =>
       _filterType != FileTypeFilter.all || _dateFrom != null || _dateTo != null;
@@ -523,7 +523,7 @@ class _FileBrowserState extends State<FileBrowser> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('This folder is protected — enable Root Mode in Settings to browse it'),
+              content: Text('This folder is protected -- enable Root Mode in Settings to browse it'),
               backgroundColor: OneDarkColors.amber,
             ),
           );
@@ -581,9 +581,9 @@ class _FileBrowserState extends State<FileBrowser> {
       setState(() => _isLoading = false);
       String msg = 'Could not open this folder';
       if (e.toString().contains('Permission denied') && rootModeNotifier.value) {
-        msg = 'Access denied — you may need root privileges to view this folder.';
+        msg = 'Access denied -- you may need root privileges to view this folder.';
       } else if (e.toString().contains('Permission denied')) {
-        msg = 'Access denied — please grant "All files access" in your device Settings.';
+        msg = 'Access denied -- please grant "All files access" in your device Settings.';
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -755,7 +755,7 @@ class _FileBrowserState extends State<FileBrowser> {
             ),
             child: Column(
               children: [
-                // Grab handle — drag up for fullscreen, down to close.
+                // Grab handle -- drag up for fullscreen, down to close.
                 Container(
                   margin: const EdgeInsets.symmetric(vertical: 8),
                   width: 40,
@@ -906,7 +906,7 @@ class _FileBrowserState extends State<FileBrowser> {
     _notifyMarksChanged();
   }
 
-  /// Toggles the mark on a single item — used by the long-press context menu
+  /// Toggles the mark on a single item -- used by the long-press context menu
   /// and by mark mode. Exits mark mode automatically when the last mark is
   /// cleared.
   void _toggleMarkItem(String path) {
@@ -1235,8 +1235,8 @@ class _FileBrowserState extends State<FileBrowser> {
         .catchError((Object e) {
           if (!mounted) return;
           final msg = e.toString().contains('Permission denied')
-              ? 'Access denied — please grant "All files access" in Settings'
-              : 'Couldn't paste file — ${e.toString().split(':').last.trim()}';
+              ? 'Access denied -- please grant "All files access" in Settings'
+              : 'Couldn\'t paste file -- ${e.toString().split(':').last.trim()}';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(msg),
@@ -1372,7 +1372,7 @@ class _FileBrowserState extends State<FileBrowser> {
   }
 
   /// Shares [paths] (files only) through the Android share sheet.
-  /// Directories are filtered out — the share sheet cannot share a folder.
+  /// Directories are filtered out -- the share sheet cannot share a folder.
   Future<void> _sharePaths(List<String> paths) async {
     final files = <String>[];
     for (final path in paths) {
@@ -2072,7 +2072,7 @@ class _FileBrowserState extends State<FileBrowser> {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Couldn't paste file'),
+                    content: Text('Couldn\'t paste file'),
                     backgroundColor: OneDarkColors.red,
                   ),
                 );
@@ -2397,7 +2397,7 @@ class _FileBrowserState extends State<FileBrowser> {
         ),
         content: !item.isDirectory
             ? Text(
-                'The shredder uses a blazing-fast 64KB chunked I/O pattern — '
+                'The shredder uses a blazing-fast 64KB chunked I/O pattern -- '
                 'reads/writes in 64KB blocks to minimize syscalls while still '
                 'securely overwriting every byte. The 3-pass pattern '
                 '(random → complement → random) is the same approach used by '
@@ -2518,7 +2518,7 @@ class _FileBrowserState extends State<FileBrowser> {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: const Text('Rename failed — try again later'),
+                        content: const Text('Rename failed -- try again later'),
                         backgroundColor: OneDarkColors.red,
                       ),
                     );
@@ -2566,7 +2566,7 @@ class _FileBrowserState extends State<FileBrowser> {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: const Text('Rename failed — try again later'),
+                        content: const Text('Rename failed -- try again later'),
                         backgroundColor: OneDarkColors.red,
                       ),
                     );
@@ -2725,7 +2725,7 @@ class _FileBrowserState extends State<FileBrowser> {
               onPressed: () => widget.onBookmarkCurrentPath?.call(_currentPath),
               tooltip: 'Bookmark This Folder',
             ),
-            // Folder graph — same feature as Linux SwordFM F3.
+            // Folder graph -- same feature as Linux SwordFM F3.
             IconButton(
               icon: Icon(Icons.account_tree, color: OneDarkColors.fgDim),
               onPressed: () {
@@ -3438,7 +3438,7 @@ class _FileBrowserState extends State<FileBrowser> {
             Expanded(
               child: Text(
                 _markMode
-                    ? '${paths.length} marked — tap more documents to mark'
+                    ? '${paths.length} marked -- tap more documents to mark'
                     : '${paths.length} marked',
                 style:
                     TextStyle(color: OneDarkColors.fg, fontSize: 13),
@@ -3464,7 +3464,7 @@ class _FileBrowserState extends State<FileBrowser> {
                 );
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('${paths.length} item(s) copied — use Paste'),
+                    content: Text('${paths.length} item(s) copied -- use Paste'),
                     backgroundColor: OneDarkColors.green,
                   ),
                 );
@@ -3485,7 +3485,7 @@ class _FileBrowserState extends State<FileBrowser> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content:
-                        Text('${paths.length} item(s) cut — use Paste to move'),
+                        Text('${paths.length} item(s) cut -- use Paste to move'),
                     backgroundColor: OneDarkColors.amber,
                   ),
                 );
@@ -3566,7 +3566,7 @@ class _FileBrowserState extends State<FileBrowser> {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Couldn't paste file'),
+                    content: Text('Couldn\'t paste file'),
                     backgroundColor: OneDarkColors.red,
                   ),
                 );
