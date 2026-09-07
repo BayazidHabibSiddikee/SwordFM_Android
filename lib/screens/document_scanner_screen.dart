@@ -131,7 +131,7 @@ class _ScannerState extends State<DocumentScannerScreen> {
       if (mounted) {
         setState(() => _building = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: OneDarkColors.red),
+          SnackBar(content: const Text('Couldn\'t build document — please try again'), backgroundColor: OneDarkColors.red),
         );
       }
     }
