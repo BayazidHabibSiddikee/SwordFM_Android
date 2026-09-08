@@ -39,15 +39,17 @@ class SwiftAudioHandler extends BaseAudioHandler
           MediaControl.skipToPrevious,
           if (playing) MediaControl.pause else MediaControl.play,
           MediaControl.skipToNext,
+          MediaControl.stop,          // ← Stop button always visible
         ],
         systemActions: const {
           MediaAction.seek,
           MediaAction.seekForward,
           MediaAction.seekBackward,
+          MediaAction.stop,           // ← allows swipe-to-dismiss on Android
         },
+        androidCompactActionIndices: const [0, 1, 2], // prev|play|next in compact view
         playing: playing,
-        processingState: processingState == ProcessingState.completed ||
-                processingState == ProcessingState.idle
+        processingState: processingState == ProcessingState.completed
             ? AudioProcessingState.completed
             : AudioProcessingState.ready,
         updatePosition: _player.position,
@@ -126,6 +128,13 @@ class SwiftAudioHandler extends BaseAudioHandler
   @override
   Future<void> stop() async {
     await _player.stop();
-    // Do not call super.stop() here to avoid a second stop broadcast loop.
+    // Broadcast idle so the system removes the ongoing notification
+    // and the lock-screen controls disappear immediately.
+    playbackState.add(playbackState.value.copyWith(
+      controls: [],
+      processingState: AudioProcessingState.idle,
+      playing: false,
+    ));
+    mediaItem.add(null);
   }
 }

@@ -49,11 +49,37 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
         setState(() => _initialized = true);
         _video.play();
         _registerWithAudioService();
+        _listenToNotificationCommands();
         _scheduleHide();
       }).catchError((e) {
         if (mounted) setState(() => _error = e.toString());
       });
     _video.addListener(_onVideoUpdate);
+  }
+
+  /// Listens to playback state changes pushed from the notification buttons
+  /// (Stop / Pause / Play) so tapping Stop on the lock screen actually stops
+  /// the video and closes the notification.
+  void _listenToNotificationCommands() {
+    final handler = swiftAudioHandler;
+    if (handler == null) return;
+    handler.playbackState.listen((state) {
+      if (!mounted || !_initialized) return;
+      // Stop tapped from notification
+      if (state.processingState == AudioProcessingState.idle &&
+          state.controls.isEmpty) {
+        if (_video.value.isPlaying) _video.pause();
+        if (mounted) Navigator.of(context).maybePop();
+        return;
+      }
+      // Play/Pause tapped from notification
+      if (state.playing && !_video.value.isPlaying) {
+        _video.play();
+      } else if (!state.playing && _video.value.isPlaying &&
+          state.processingState != AudioProcessingState.idle) {
+        _video.pause();
+      }
+    });
   }
 
   /// Registers the currently playing video with audio_service so Android
@@ -79,7 +105,8 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
         MediaControl.fastForward,
         MediaControl.stop,
       ],
-      systemActions: const {MediaAction.seek},
+      systemActions: const {MediaAction.seek, MediaAction.stop},
+      androidCompactActionIndices: const [0, 1, 3], // rewind|pause|stop
       playing: true,
       processingState: AudioProcessingState.ready,
       updatePosition: Duration.zero,
@@ -97,6 +124,7 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
         MediaControl.fastForward,
         MediaControl.stop,
       ],
+      androidCompactActionIndices: const [0, 1, 3],
       playing: playing,
       updatePosition: _video.value.position,
     ));
