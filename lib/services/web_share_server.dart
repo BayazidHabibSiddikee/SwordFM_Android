@@ -117,8 +117,6 @@ class WebShareServer {
               );
             } else if (path.startsWith('/api/list')) {
               await _serveApiList(request, rawQuery);
-            } else if (path == '/api/pin') {
-              _sendJsonResponse(request, {'pin': _pin});
             } else {
               _sendResponse(request, 404, 'Not Found');
             }
@@ -135,7 +133,7 @@ class WebShareServer {
           }
         } catch (e) {
           debugPrint('WebShareServer error: $e');
-          _sendResponse(request, 500, 'Internal Server Error: $e');
+          _sendResponse(request, 500, 'Internal Server Error');
         }
       });
 
@@ -492,7 +490,6 @@ class WebShareServer {
       _sendJsonResponse(request, {
         'files': files,
         'currentDir': subDir,
-        'pin': _pin,
       });
     } catch (e) {
       _sendJsonResponse(request, {'files': <dynamic>[], 'currentDir': ''});

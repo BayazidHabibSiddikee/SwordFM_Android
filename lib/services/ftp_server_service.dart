@@ -17,6 +17,9 @@ class FtpServerService {
 
   bool get isRunning => _server != null;
 
+  /// PIN required to authenticate. Empty string = no auth (legacy).
+  String sharePin = '';
+
   /// The actually-bound port (differs from [port] when 0 = ephemeral).
   int get boundPort => _server?.port ?? port;
 
@@ -122,6 +125,9 @@ class _FtpSession {
       case 'USER':
         return '331 Password required.\r\n';
       case 'PASS':
+        if (sharePin.isNotEmpty && arg != sharePin) {
+          return '530 Login incorrect.\r\n';
+        }
         return '230 Logged in.\r\n';
       case 'SYST':
         return '215 UNIX Type: L8\r\n';

@@ -19,6 +19,13 @@ class _FtpServerScreenState extends State<FtpServerScreen> {
   bool _starting = false;
   String? _status;
   String _shareRoot = AppPaths.home;
+  final _pinController = TextEditingController(text: '');
+
+  @override
+  void dispose() {
+    _pinController.dispose();
+    super.dispose();
+  }
 
   Future<void> _toggle() async {
     if (_server.isRunning) {
@@ -27,6 +34,7 @@ class _FtpServerScreenState extends State<FtpServerScreen> {
       return;
     }
     setState(() => _starting = true);
+    _server.sharePin = _pinController.text.trim();
     await _server.start(shareRootOverride: _shareRoot);
     if (mounted) {
       setState(() {
@@ -127,6 +135,39 @@ class _FtpServerScreenState extends State<FtpServerScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
+                    // PIN authentication field
+                    TextField(
+                      controller: _pinController,
+                      enabled: !_server.isRunning,
+                      obscureText: true,
+                      keyboardType: TextInputType.number,
+                      maxLength: 8,
+                      style: TextStyle(color: OneDarkColors.fg),
+                      decoration: InputDecoration(
+                        labelText: 'FTP Password (optional)',
+                        labelStyle: TextStyle(color: OneDarkColors.fgDim),
+                        hintText: 'Leave empty for no password',
+                        hintStyle: TextStyle(
+                            color: OneDarkColors.fgDim, fontSize: 12),
+                        prefixIcon:
+                            Icon(Icons.lock_outline, color: OneDarkColors.fgDim),
+                        counterStyle:
+                            TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide:
+                              BorderSide(color: OneDarkColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide:
+                              BorderSide(color: OneDarkColors.cyan),
+                        ),
+                        disabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(
+                              color: OneDarkColors.border.withValues(alpha: 0.4)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
@@ -157,7 +198,8 @@ class _FtpServerScreenState extends State<FtpServerScreen> {
             Text(
               'On a PC on the same Wi-Fi, open any FTP client and connect to\n'
               'ftp://<phone IP>:2121\n\n'
-              'Any username and password are accepted. Files are served from '
+              'Use any username and the password you set above (leave blank if '
+              'you set no password). Files are served from '
               'the share root above; navigation outside it is blocked.\n\n'
               'Windows Explorer: type the ftp:// address in the address bar.\n'
               'FileZilla: use Host=<IP>, Port=2121, Quickconnect.',
