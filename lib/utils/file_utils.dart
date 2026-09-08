@@ -335,6 +335,16 @@ class FileItem {
     ].contains(ext)) {
       return Icons.description;
     }
+    if (const ['.docx', '.doc', '.odt', '.rtf', '.wps'].contains(ext)) {
+      return Icons.article;
+    }
+    if (const ['.xlsx', '.xls', '.ods', '.csv', '.numbers'].contains(ext)) {
+      return Icons.table_chart;
+    }
+    if (const ['.pptx', '.ppt', '.odp', '.key'].contains(ext)) {
+      return Icons.slideshow;
+    }
+    if (ext == '.apk') return Icons.android;
     return Icons.insert_drive_file;
   }
 
@@ -486,11 +496,29 @@ class FileItem {
     '.diff',
   ].contains(extension);
   bool get isPdf => extension == '.pdf';
-  bool get isVideo => const ['.mp4', '.mkv', '.avi', '.mov', '.webm'].contains(extension);
+  bool get isVideo => kVideoExtensions.contains(extension);
   /// True for PowerPoint files. We support .pptx (the modern ZIP format);
   /// the legacy .ppt binary format is not supported.
   bool get isPptx => extension == '.pptx';
   bool get isDocx => extension == '.docx';
+  /// True for all spreadsheet formats (.xls, .xlsx, .ods, .csv).
+  bool get isSpreadsheet => const {
+    '.xls', '.xlsx', '.ods', '.csv', '.numbers',
+  }.contains(extension);
+  /// True for legacy .doc (Word 97-2003) files.
+  bool get isDoc => extension == '.doc';
+  /// True for all Office/LibreOffice document types we can open via system.
+  bool get isOfficeDoc => const {
+    '.doc', '.docx', '.odt', '.rtf', '.wps',
+  }.contains(extension);
+  /// True for Office presentation formats.
+  bool get isPresentation => const {
+    '.pptx', '.ppt', '.odp', '.key',
+  }.contains(extension);
+  /// True when we render this natively in-app (as opposed to needing a system app).
+  bool get hasNativeViewer =>
+      isPdf || isDocx || isImage || isVideo || isText || isCode ||
+      isMarkdown || isPptx;
 }
 
 /// Sort options for the file browser.

@@ -9,8 +9,9 @@ import 'theme/theme.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'utils/app_paths.dart' show StoragePermissions;
 import 'widgets/file_browser.dart';
-import 'utils/file_utils.dart' show FileItem, FileUtils;
+import 'utils/file_utils.dart' show FileItem, FileUtils, kAudioExtensions, kVideoExtensions;
 import 'widgets/preview_panel.dart';
+import 'widgets/now_playing_mini_bar.dart';
 import 'screens/search_screen.dart';
 import 'screens/trash_screen.dart';
 import 'screens/lan_screen.dart';
@@ -27,6 +28,9 @@ import 'screens/cloud_browser_screen.dart';
 import 'screens/pdf_reader_screen.dart';
 import 'screens/docx_reader_screen.dart';
 import 'screens/video_player_screen.dart';
+import 'screens/music_player_screen.dart';
+import 'screens/image_viewer_screen.dart';
+import 'screens/text_reader_screen.dart';
 import 'services/widget_service.dart';
 import 'services/entitlement_service.dart';
 import 'services/device_service.dart';
@@ -247,26 +251,61 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       size: file.lengthSync(),
       lastModified: file.lastModifiedSync(),
     );
+    // PDF → built-in reader
     if (ext == '.pdf') {
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => PdfReaderScreen(filePath: path),
       ));
+    // DOCX → built-in reader
     } else if (ext == '.docx') {
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => DocxReaderScreen(filePath: path),
       ));
-    } else if (ext == '.mp4' || ext == '.mkv' || ext == '.avi' || ext == '.mov') {
+    // Video → built-in player
+    } else if (kVideoExtensions.contains(ext)) {
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => VideoPlayerScreen(filePath: path),
       ));
+    // Audio → built-in music player
+    } else if (kAudioExtensions.contains(ext)) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => MusicPlayerScreen(filePath: path),
+      ));
+    // Images → built-in viewer
+    } else if (FileItem.isImagePath(path)) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ImageViewerScreen(filePath: path),
+      ));
+    // Text/code/markdown → text reader
+    } else if (item.isText || item.isCode || item.isMarkdown) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => TextReaderScreen(filePath: path),
+      ));
     } else {
-      // For text, markdown, images, etc. — use the preview panel by
-      // navigating to the file's directory and selecting it.
+      // Unknown type — navigate to its directory and select for preview panel.
       setState(() {
         _currentPath = p.dirname(path);
         _selectedItem = item;
       });
     }
+  }
+
+  /// Whether the compact now-playing bar should show (audio is loaded).
+  bool get _showMiniPlayer => swiftAudioHandler?.mediaItem.value != null;
+
+  /// Opens the full music player for whatever the handler already has
+  /// loaded, without restarting playback.
+  void _openNowPlaying() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const MusicPlayerScreen()),
+    );
+  }
+
+  /// Stops background audio from anywhere in the app (kills the
+  /// notification and the mini bar with it).
+  Future<void> _stopNowPlaying() async {
+    await swiftAudioHandler?.stop();
+    if (mounted) setState(() {});
   }
 
   Future<bool> _promptAllFilesAccess() async {
@@ -384,7 +423,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         }
       },
       child: Scaffold(
-        body: SafeArea(
+        body: Column(
+        children: [
+          Expanded(
+            child: SafeArea(
         child: IndexedStack(
           index: _selectedIndex,
           children: [
@@ -823,6 +865,17 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 : const SizedBox.shrink(),
           ],
         ),
+            ),
+          ),
+          // Now-playing mini bar — visible on every tab while audio plays,
+          // so background audio is never invisible. Tap opens the player;
+          // ✕ stops it (removing the media notification too).
+          if (_showMiniPlayer)
+            NowPlayingMiniBar(
+              onOpen: _openNowPlaying,
+              onStop: _stopNowPlaying,
+            ),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
