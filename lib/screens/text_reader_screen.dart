@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:path/path.dart' as p;
+import 'package:webview_flutter/webview_flutter.dart';
 
 /// Full-screen reader for text, code, and Markdown files.
 ///
@@ -35,6 +36,11 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
   bool get _isMarkdown {
     final ext = p.extension(widget.filePath).toLowerCase();
     return ext == '.md' || ext == '.markdown';
+  }
+
+  bool get _isHtml {
+    final ext = p.extension(widget.filePath).toLowerCase();
+    return ext == '.html' || ext == '.htm';
   }
 
   String get _fileName => widget.filePath.split('/').last;
@@ -106,35 +112,47 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
         foregroundColor: cs.onSurface,
         iconTheme: IconThemeData(color: cs.onSurface),
         actions: [
-          IconButton(
-            icon: Icon(Icons.zoom_out, color: cs.onSurfaceVariant, size: 20),
-            tooltip: 'Zoom out',
-            onPressed: _content == null ? null : () => _setScale(_scale - 0.1),
-          ),
-          IconButton(
-            icon: Icon(Icons.zoom_in, color: cs.onSurfaceVariant, size: 20),
-            tooltip: 'Zoom in',
-            onPressed: _content == null ? null : () => _setScale(_scale + 0.1),
-          ),
-          IconButton(
-            icon: Icon(Icons.content_copy, color: cs.onSurfaceVariant, size: 20),
-            tooltip: 'Copy all',
-            onPressed: _content == null ? null : _copyAll,
-          ),
+          if (!_isHtml) ...[
+            IconButton(
+              icon: Icon(Icons.zoom_out, color: cs.onSurfaceVariant, size: 20),
+              tooltip: 'Zoom out',
+              onPressed: _content == null ? null : () => _setScale(_scale - 0.1),
+            ),
+            IconButton(
+              icon: Icon(Icons.zoom_in, color: cs.onSurfaceVariant, size: 20),
+              tooltip: 'Zoom in',
+              onPressed: _content == null ? null : () => _setScale(_scale + 0.1),
+            ),
+            IconButton(
+              icon: Icon(Icons.content_copy, color: cs.onSurfaceVariant, size: 20),
+              tooltip: 'Copy all',
+              onPressed: _content == null ? null : _copyAll,
+            ),
+          ],
         ],
       ),
       body: _error != null
           ? _buildError(cs, _error!)
           : _content == null
               ? const Center(child: CircularProgressIndicator())
-              : InteractiveViewer(
-                  minScale: 0.5,
-                  maxScale: 4.0,
-                  child: _isMarkdown
-                      ? _buildMarkdown(cs)
-                      : _buildPlainText(cs),
-                ),
+              : _isHtml
+                  ? _buildHtmlView()
+                  : InteractiveViewer(
+                      minScale: 0.5,
+                      maxScale: 4.0,
+                      child: _isMarkdown
+                          ? _buildMarkdown(cs)
+                          : _buildPlainText(cs),
+                    ),
     );
+  }
+
+  /// Renders HTML files in a full WebView — proper styling, images, links.
+  Widget _buildHtmlView() {
+    final controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..loadFile(widget.filePath);
+    return WebViewWidget(controller: controller);
   }
 
   Widget _buildMarkdown(ColorScheme cs) {

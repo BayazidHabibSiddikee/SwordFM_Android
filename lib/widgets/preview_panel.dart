@@ -8,6 +8,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:pdfx/pdfx.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import '../screens/docx_reader_screen.dart';
 import '../screens/image_viewer_screen.dart';
 import '../screens/pdf_reader_screen.dart';
@@ -477,6 +478,14 @@ class _PreviewPanelState extends State<PreviewPanel> {
     if (item.isImage) {
       return _ImagePreviewTile(
         item: item,
+        onFullScreen: () => _openFullScreen(item),
+      );
+    }
+    // HTML — render in a mini WebView (fixed height) with open-fullscreen
+    final ext = item.extension.toLowerCase();
+    if (ext == '.html' || ext == '.htm') {
+      return _HtmlPreviewTile(
+        filePath: item.path,
         onFullScreen: () => _openFullScreen(item),
       );
     }
@@ -1275,6 +1284,55 @@ class _VideoPreviewTileState extends State<_VideoPreviewTile> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Renders an HTML file in a fixed-height mini WebView with an open-fullscreen
+/// button. Used in the preview panel for .html / .htm files.
+class _HtmlPreviewTile extends StatefulWidget {
+  final String filePath;
+  final VoidCallback onFullScreen;
+
+  const _HtmlPreviewTile({
+    required this.filePath,
+    required this.onFullScreen,
+  });
+
+  @override
+  State<_HtmlPreviewTile> createState() => _HtmlPreviewTileState();
+}
+
+class _HtmlPreviewTileState extends State<_HtmlPreviewTile> {
+  late final WebViewController _webController;
+
+  @override
+  void initState() {
+    super.initState();
+    _webController = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..loadFile(widget.filePath);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            height: 300,
+            child: WebViewWidget(controller: _webController),
+          ),
+        ),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          onPressed: widget.onFullScreen,
+          icon: const Icon(Icons.fullscreen, size: 16),
+          label: const Text('Open full screen'),
+        ),
+      ],
     );
   }
 }
