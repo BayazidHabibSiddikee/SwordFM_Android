@@ -22,7 +22,6 @@ import 'screens/recent_files_screen.dart';
 import 'screens/terminal_screen.dart';
 import 'screens/notepad_screen.dart';
 import 'screens/document_scanner_screen.dart';
-import 'screens/app_analyzer_screen.dart';
 import 'screens/cast_screen.dart';
 import 'screens/cloud_browser_screen.dart';
 import 'screens/pdf_reader_screen.dart';
@@ -548,13 +547,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                         'Notepad',
                                         () => _openSidebarTool(
                                           const NotepadScreen(),
-                                        ),
-                                      ),
-                                      _sidebarAction(
-                                        Icons.apps,
-                                        'App Analyzer',
-                                        () => _openSidebarTool(
-                                          const AppAnalyzerScreen(),
                                         ),
                                       ),
                                       _sidebarAction(

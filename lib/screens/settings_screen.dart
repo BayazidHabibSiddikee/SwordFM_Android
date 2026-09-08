@@ -19,7 +19,6 @@ import '../widgets/file_browser.dart'
 import 'privacy_policy_screen.dart';
 import 'auth_screen.dart';
 import 'duplicates_screen.dart';
-import 'app_analyzer_screen.dart';
 import 'document_scanner_screen.dart';
 import 'cast_screen.dart';
 import 'notepad_screen.dart';
@@ -498,15 +497,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          _settingTile(
-            icon: Icons.speed,
-            title: 'App Analyzer',
-            subtitle: 'Device info & installed apps',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const AppAnalyzerScreen()),
-            ),
-          ),
           const SizedBox(height: 8),
           _settingTile(
             icon: Icons.cast,
