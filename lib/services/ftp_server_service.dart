@@ -125,7 +125,7 @@ class _FtpSession {
       case 'USER':
         return '331 Password required.\r\n';
       case 'PASS':
-        if (sharePin.isNotEmpty && arg != sharePin) {
+        if (service.sharePin.isNotEmpty && arg != service.sharePin) {
           return '530 Login incorrect.\r\n';
         }
         return '230 Logged in.\r\n';
