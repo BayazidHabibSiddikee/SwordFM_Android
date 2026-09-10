@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/web_share_server.dart';
 import '../services/ftp_server_service.dart';
 import '../services/bluetooth_share_service.dart';
@@ -44,10 +46,17 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
   bool _btPermissionsReady = false;
   List<String> _btSendingFiles = [];
 
+  // ── mDNS / UDP discovery ──────────────────────────────────────────────
+  static const _discoveryPort = 5350;
+  RawDatagramSocket? _discoverySocket;
+  final List<Map<String, dynamic>> _nearbyDevices = [];
+  Timer? _deviceExpireTimer;
+
   @override
   void initState() {
     super.initState();
     _listenBtStreams();
+    _startDiscovery();
     // When opened from "Share via LAN…" on a folder, surface the chosen
     // path immediately and auto-start the server so the user just has to
     // scan the QR — no extra Start tap.
@@ -62,7 +71,70 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
   @override
   void dispose() {
     for (final sub in _btSubs) sub.cancel();
+    _stopDiscovery();
     super.dispose();
+  }
+
+  // ── mDNS / UDP discovery ─────────────────────────────────────────────
+  Future<void> _startDiscovery() async {
+    try {
+      _discoverySocket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        _discoveryPort,
+        reuseAddress: true,
+        reusePort: true,
+      );
+      _discoverySocket!.listen((event) {
+        if (event != RawSocketEvent.read) return;
+        final datagram = _discoverySocket!.receive();
+        if (datagram == null) return;
+        try {
+          final json = jsonDecode(utf8.decode(datagram.data))
+              as Map<String, dynamic>;
+          if (json['app'] != 'SwordFM') return;
+          final ip = json['ip'] as String?;
+          final port = json['port'] as int?;
+          final name = json['name'] as String? ?? ip ?? 'Unknown';
+          if (ip == null || port == null) return;
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (!mounted) return;
+          setState(() {
+            // Upsert by IP
+            final idx = _nearbyDevices.indexWhere((d) => d['ip'] == ip);
+            final entry = {
+              'ip': ip,
+              'port': port,
+              'name': name,
+              'url': 'http://$ip:$port',
+              'lastSeen': now,
+            };
+            if (idx >= 0) {
+              _nearbyDevices[idx] = entry;
+            } else {
+              _nearbyDevices.add(entry);
+            }
+          });
+          // Expire devices not seen in 90 s
+          _deviceExpireTimer?.cancel();
+          _deviceExpireTimer = Timer(const Duration(seconds: 90), () {
+            if (!mounted) return;
+            final cutoff = DateTime.now().millisecondsSinceEpoch - 90000;
+            setState(() => _nearbyDevices
+                .removeWhere((d) => (d['lastSeen'] as int) < cutoff));
+          });
+        } catch (_) {}
+      });
+    } catch (_) {
+      // Permission denied or port in use — discovery silently unavailable
+    }
+  }
+
+  void _stopDiscovery() {
+    _deviceExpireTimer?.cancel();
+    try {
+      _discoverySocket?.close();
+    } catch (_) {}
+    _discoverySocket = null;
   }
 
   Future<void> _startServer() async {
@@ -113,14 +185,25 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
 
   // ── FTP Server helpers ──────────────────────────────────────────────
 
-  Future<void> _startFtp() async {
+  void _startFtp() async {
+    // Guard: refuse to start FTP with an empty PIN — that leaves every mutating
+    // command (LIST, RETR, STOR, DELE) open to any LAN client.
+    if (_server.pin.isEmpty) {
+      if (mounted) {
+        setState(() => _ftpStatus =
+            'Cannot start FTP: the LAN share has no PIN. Start the web server first.');
+      }
+      return;
+    }
     setState(() => _ftpStatus = 'Starting FTP server…');
     try {
+      // FTP enforces the same PIN as the web share (no anonymous access).
+      _ftpServer.sharePin = _server.pin;
       await _ftpServer.start();
       if (mounted) {
         setState(() {
           _ftpStatus =
-              'Running at ftp://${_ftpServer.currentIp ?? '?'}:${_ftpServer.boundPort}';
+              'Running at ftp://${_ftpServer.currentIp ?? '?'}:${_ftpServer.boundPort} (PIN protected)';
         });
       }
     } catch (e) {
@@ -451,6 +534,82 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
             ),
             const SizedBox(height: 16),
 
+            // ── Nearby Devices (mDNS/UDP discovery) ──────────────────────
+            Card(
+              color: OneDarkColors.bgDark,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.devices, color: OneDarkColors.cyan, size: 20),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text('Nearby SwordFM Devices',
+                              style: TextStyle(
+                                  color: OneDarkColors.fg,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        const Spacer(),
+                        if (_nearbyDevices.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: OneDarkColors.cyan.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text('${_nearbyDevices.length}',
+                                style: TextStyle(
+                                    color: OneDarkColors.cyan, fontSize: 12)),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (_nearbyDevices.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          'Listening for nearby devices…\n'
+                          'Other SwordFM instances on your Wi-Fi will appear here automatically.',
+                          style: TextStyle(
+                              color: OneDarkColors.fgDim, fontSize: 12),
+                        ),
+                      )
+                    else
+                      for (final device in _nearbyDevices)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.computer,
+                              color: OneDarkColors.green, size: 20),
+                          title: Text(device['name'] as String,
+                              style: TextStyle(
+                                  color: OneDarkColors.fg, fontSize: 13)),
+                          subtitle: Text(device['url'] as String,
+                              style: TextStyle(
+                                  color: OneDarkColors.cyan, fontSize: 11)),
+                          trailing: OutlinedButton(
+                            onPressed: () async {
+                              final url =
+                                  Uri.tryParse(device['url'] as String);
+                              if (url != null) {
+                                await launchUrl(url,
+                                    mode: LaunchMode.externalApplication);
+                              }
+                            },
+                            child: const Text('Open'),
+                          ),
+                        ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
             // ── FTP Server Section ────────────────────────────────────────
             Card(
               color: OneDarkColors.bgDark,
@@ -469,19 +628,25 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
                               : OneDarkColors.fgDim,
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          'FTP Server',
-                          style: TextStyle(
-                            color: OneDarkColors.fg,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
+                        Flexible(
+                          child: Text(
+                            'FTP Server',
+                            style: TextStyle(
+                              color: OneDarkColors.fg,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         const Spacer(),
                         if (_ftpServer.isRunning)
-                          Text(
-                            'ftp://${_ftpServer.currentIp ?? '?'}:${_ftpServer.boundPort}',
-                            style: TextStyle(color: OneDarkColors.cyan, fontSize: 12),
+                          Flexible(
+                            child: Text(
+                              'ftp://${_ftpServer.currentIp ?? '?'}:${_ftpServer.boundPort}',
+                              style: TextStyle(color: OneDarkColors.cyan, fontSize: 12),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                       ],
                     ),
@@ -544,12 +709,15 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
                           color: _btStateColor(_btService.state),
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          'Bluetooth',
-                          style: TextStyle(
-                            color: OneDarkColors.fg,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
+                        Flexible(
+                          child: Text(
+                            'Bluetooth',
+                            style: TextStyle(
+                              color: OneDarkColors.fg,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         const Spacer(),

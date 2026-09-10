@@ -16,6 +16,18 @@ class StoragePermissions {
   static Future<bool> ensurePermissions() async {
     if (!Platform.isAndroid) return true;
 
+    final sdkInt = await _sdkInt();
+
+    // Android 13+ (API 33): notifications are a RUNTIME permission. Without
+    // the grant, the audio_service media notification is silently dropped —
+    // the user has no way to see or stop background audio from the shade.
+    // Request it up front along with storage.
+    if (sdkInt == null || sdkInt >= 33) {
+      try {
+        await Permission.notification.request();
+      } catch (_) {}
+    }
+
     // Android 11+: the app relies on MANAGE_EXTERNAL_STORAGE for arbitrary
     // file access. Try it first so the browser can read past scoped-storage
     // boundaries (Downloads, DCIM, external SD, etc.).
@@ -23,7 +35,6 @@ class StoragePermissions {
     if (manage.isGranted) return true;
 
     // Fall back to the legacy runtime permissions below API 30.
-    final sdkInt = await _sdkInt();
     if (sdkInt != null && sdkInt >= 30) {
       // Prompt the "All files access" settings page. We return true only once
       // granted; otherwise the caller (startup) will show the permission

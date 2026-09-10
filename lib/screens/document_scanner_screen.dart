@@ -1,15 +1,22 @@
+import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:open_file/open_file.dart';
+import '../services/ocr_service.dart';
 import '../theme/theme.dart';
 import '../utils/constants.dart' show AppPaths;
 
-/// Document scanner -- capture pages from camera or gallery, assemble into PDF.
+/// Document scanner — capture pages from camera or gallery, assemble into PDF.
+/// Includes offline OCR (Tesseract) to pull text out of scanned pages,
+/// imported images, or any PDF on the device.
 class DocumentScannerScreen extends StatefulWidget {
   const DocumentScannerScreen({super.key});
   @override
@@ -20,6 +27,15 @@ class _ScannerState extends State<DocumentScannerScreen> {
   final List<_ScannedPage> _pages = [];
   final _picker = ImagePicker();
   bool _building = false;
+  bool _ocrRunning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Warm up OCR in the background (copies the bundled English trained data
+    // out of assets on first run) so the first recognition is snappier.
+    unawaited(OcrService.ensureReady().catchError((_) {}));
+  }
 
   Future<void> _capturePage(ImageSource source) async {
     final xfile = await _picker.pickImage(source: source, imageQuality: 95);
@@ -131,10 +147,256 @@ class _ScannerState extends State<DocumentScannerScreen> {
       if (mounted) {
         setState(() => _building = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: const Text('Couldn\'t build document -- please try again'), backgroundColor: OneDarkColors.red),
+          SnackBar(content: Text('Error: $e'), backgroundColor: OneDarkColors.red),
         );
       }
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // OCR (offline Tesseract)
+  // ---------------------------------------------------------------------
+
+  /// Recognises text on every scanned page and shows the combined result.
+  Future<void> _ocrAllPages() async {
+    if (_pages.isEmpty || _ocrRunning) return;
+    await _runOcr(
+      () async {
+        final buffer = StringBuffer();
+        for (var i = 0; i < _pages.length; i++) {
+          final text = await OcrService.extractText(_pages[i].path);
+          if (buffer.isNotEmpty) buffer.write('\n\n');
+          buffer.write('--- Page ${i + 1} ---\n$text');
+        }
+        return buffer.toString();
+      },
+    );
+  }
+
+  /// Opens a picker for any image/PDF on the device and recognises its text.
+  Future<void> _ocrPickFile() async {
+    if (_ocrRunning) return;
+    // file_picker 12.x returns the file list directly (no result wrapper).
+    final files = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'pdf'],
+    );
+    final path = files.isEmpty ? null : files.first.path;
+    if (path == null) return;
+    await _runOcr(
+      () => OcrService.extractFromDocument(
+        path,
+        onProgress: (page, total) {
+          _ocrStatus.value = 'Page $page of $total…';
+        },
+      ),
+    );
+  }
+
+  final ValueNotifier<String> _ocrStatus =
+      ValueNotifier<String>('Recognising text…');
+
+  /// Shared runner: progress dialog → OCR → result dialog with copy/save.
+  Future<void> _runOcr(Future<String> Function() job) async {
+    setState(() => _ocrRunning = true);
+    _ocrStatus.value = 'Recognising text…';
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: OneDarkColors.bgDark,
+          content: ValueListenableBuilder<String>(
+            valueListenable: _ocrStatus,
+            builder: (_, status, _) => Row(
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Text(
+                    status,
+                    style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    try {
+      final text = await job();
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop(); // progress dialog
+      _showOcrResult(text);
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('OCR failed: $e'),
+          backgroundColor: OneDarkColors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _ocrRunning = false);
+    }
+  }
+
+  void _showOcrResult(String text) {
+    showDialog<void>(
+      context: context,
+      builder: (resultContext) => AlertDialog(
+        backgroundColor: OneDarkColors.bgDark,
+        title: Text('Recognised text',
+            style: TextStyle(color: OneDarkColors.fg)),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 320,
+          child: text.trim().isEmpty
+              ? Text(
+                  'No text found in the image.\n\nTry a sharper photo, better '
+                  'lighting, or a different page-segmentation mode.',
+                  style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13),
+                )
+              : SingleChildScrollView(
+                  child: SelectableText(
+                    text,
+                    style: TextStyle(
+                      color: OneDarkColors.fg,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: text));
+              ScaffoldMessenger.of(resultContext).showSnackBar(
+                const SnackBar(content: Text('Copied to clipboard')),
+              );
+            },
+            child: const Text('Copy'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final name = 'ocr_${DateTime.now().millisecondsSinceEpoch}.txt';
+              final dir = AppPaths.documents;
+              try {
+                await Directory(dir).create(recursive: true);
+                await File(p.join(dir, name)).writeAsString(text);
+                if (resultContext.mounted) {
+                  ScaffoldMessenger.of(resultContext).showSnackBar(
+                    SnackBar(
+                      content: Text('Saved to $dir/$name'),
+                      backgroundColor: OneDarkColors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (resultContext.mounted) {
+                  ScaffoldMessenger.of(resultContext).showSnackBar(
+                    SnackBar(
+                      content: Text('Save failed: $e'),
+                      backgroundColor: OneDarkColors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Save .txt'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(resultContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Shows OCR options: recognition language (bundled English plus any extra
+  /// .traineddata files copied into the tessdata folder) and the page
+  /// segmentation mode Tesseract should use. Both persist across sessions.
+  Future<void> _showOcrSettings() async {
+    await OcrService.ensureReady();
+    if (!mounted) return;
+    final savedPrefs = await OcrService.loadPrefs();
+    String language = savedPrefs[0];
+    String psm = savedPrefs[1];
+    await showDialog<void>(
+      context: context,
+      builder: (settingsContext) => StatefulBuilder(
+        builder: (settingsContext, setDialogState) => AlertDialog(
+          backgroundColor: OneDarkColors.bgDark,
+          title:
+              Text('OCR settings', style: TextStyle(color: OneDarkColors.fg)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Language',
+                  style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+              const SizedBox(height: 4),
+              DropdownButton<String>(
+                value: OcrService.availableLanguages.contains(language)
+                    ? language
+                    : 'eng',
+                isExpanded: true,
+                dropdownColor: OneDarkColors.bg,
+                items: [
+                  for (final lang in OcrService.availableLanguages)
+                    DropdownMenuItem(
+                        value: lang, child: Text(lang, style: TextStyle(color: OneDarkColors.fg))),
+                ],
+                onChanged: (v) => setDialogState(() => language = v ?? 'eng'),
+              ),
+              const SizedBox(height: 12),
+              Text('Page segmentation',
+                  style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11)),
+              const SizedBox(height: 4),
+              DropdownButton<String>(
+                value: OcrService.psmModes.containsValue(psm)
+                    ? psm
+                    : '3',
+                isExpanded: true,
+                dropdownColor: OneDarkColors.bg,
+                items: [
+                  for (final entry in OcrService.psmModes.entries)
+                    DropdownMenuItem(
+                        value: entry.value,
+                        child: Text(entry.key,
+                            style: TextStyle(color: OneDarkColors.fg))),
+                ],
+                onChanged: (v) => setDialogState(() => psm = v ?? '3'),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Extra languages: copy a .traineddata file from the '
+                'Tesseract tessdata project into ${OcrService.tessDataPath.isEmpty ? "the app tessdata folder (available after first OCR run)" : OcrService.tessDataPath}.',
+                style: TextStyle(color: OneDarkColors.fgDim, fontSize: 10),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(settingsContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                OcrService.savePrefs(language: language, psm: psm);
+                Navigator.pop(settingsContext);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -150,6 +412,22 @@ class _ScannerState extends State<DocumentScannerScreen> {
         foregroundColor: OneDarkColors.fg,
         iconTheme: IconThemeData(color: OneDarkColors.fg),
         actions: [
+          IconButton(
+            icon: Icon(Icons.tune, color: OneDarkColors.fgDim),
+            tooltip: 'OCR settings (language, segmentation)',
+            onPressed: _ocrRunning ? null : _showOcrSettings,
+          ),
+          if (_pages.isNotEmpty)
+            IconButton(
+              icon: Icon(Icons.document_scanner, color: OneDarkColors.cyan),
+              tooltip: 'Recognize text (OCR) on all pages',
+              onPressed: _building || _ocrRunning ? null : _ocrAllPages,
+            ),
+          IconButton(
+            icon: Icon(Icons.find_in_page, color: OneDarkColors.cyan),
+            tooltip: 'Recognize text (OCR) from an image or PDF…',
+            onPressed: _ocrRunning ? null : _ocrPickFile,
+          ),
           if (_pages.isNotEmpty)
             IconButton(
               icon: Icon(Icons.picture_as_pdf, color: OneDarkColors.red),

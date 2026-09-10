@@ -9,6 +9,9 @@ import '../utils/constants.dart' show AppPaths;
 import '../widgets/preview_panel.dart';
 import 'video_player_screen.dart';
 import 'music_player_screen.dart';
+import 'pdf_reader_screen.dart';
+import 'docx_reader_screen.dart';
+import 'image_viewer_screen.dart';
 
 /// Shows recently modified files across common storage directories,
 /// similar to the "Recent" category in Google Files.
@@ -268,9 +271,19 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
     }
     final ext = item.extension.toLowerCase();
     if (kVideoExtensions.contains(ext)) {
+      // Auto-next across all recent videos (sibling-fire-and-remember).
+      final playlist = _entries
+          .where((r) => kVideoExtensions.contains(p.extension(r.path).toLowerCase()))
+          .map((r) => r.path)
+          .toList();
+      final index = playlist.indexOf(item.path);
       navigator.push(
         MaterialPageRoute(
-          builder: (_) => VideoPlayerScreen(filePath: item.path),
+          builder: (_) => VideoPlayerScreen(
+            filePath: item.path,
+            playlist: playlist,
+            initialIndex: index < 0 ? 0 : index,
+          ),
         ),
       );
       return;
@@ -279,6 +292,34 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
       navigator.push(
         MaterialPageRoute(
           builder: (_) => MusicPlayerScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
+    // PDF → built-in fullscreen reader (pinch-zoom, page nav). The preview
+    // panel alone buries a document behind an extra tap on phones.
+    if (ext == '.pdf') {
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => PdfReaderScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
+    // DOCX → built-in fullscreen reader.
+    if (ext == '.docx') {
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => DocxReaderScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
+    // Images → built-in fullscreen pinch-zoom viewer.
+    if (item.isImage) {
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => ImageViewerScreen(filePath: item.path),
         ),
       );
       return;

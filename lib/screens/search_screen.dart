@@ -10,6 +10,7 @@ import '../widgets/preview_panel.dart';
 import '../widgets/file_browser.dart' show rootModeNotifier;
 import 'video_player_screen.dart';
 import 'music_player_screen.dart';
+import 'docx_reader_screen.dart';
 
 /// Search screen — recursive filename search with result list.
 class SearchScreen extends StatefulWidget {
@@ -139,11 +140,20 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
     final ext = item.extension.toLowerCase();
-    // Video → built-in player
+    // Video → built-in player (playlist = all video hits)
     if (kVideoExtensions.contains(ext)) {
+      final playlist = _results
+          .where((r) => kVideoExtensions.contains(r.extension.toLowerCase()))
+          .map((r) => r.path)
+          .toList();
+      final index = playlist.indexOf(item.path);
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => VideoPlayerScreen(filePath: item.path),
+          builder: (_) => VideoPlayerScreen(
+            filePath: item.path,
+            playlist: playlist,
+            initialIndex: index < 0 ? 0 : index,
+          ),
         ),
       );
       return;
@@ -166,7 +176,19 @@ class _SearchScreenState extends State<SearchScreen> {
       );
       return;
     }
+    // DOCX → built-in reader (was external before — the reader renders real
+    // formatting, so there's no reason to leave the app).
+    if (ext == '.docx') {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => DocxReaderScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
     // Images/PDFs/text open in the in-app preview panel (like the browser).
+    // The panel's own fullscreen button routes PDF → PdfReaderScreen and
+    // images → ImageViewerScreen, so every hit has an in-app fullscreen path.
     if (item.isImage ||
         item.isPdf ||
         item.isMarkdown ||

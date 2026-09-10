@@ -9,17 +9,27 @@ import '../screens/pdf_reader_screen.dart';
 import '../screens/docx_reader_screen.dart';
 import '../screens/music_player_screen.dart';
 import '../screens/notepad_screen.dart';
+import '../screens/epub_reader_screen.dart';
+import '../screens/cbz_reader_screen.dart';
+import '../screens/spreadsheet_viewer_screen.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'dart:typed_data';
 import '../services/widget_service.dart';
-import '../utils/file_utils.dart';
+import '../utils/file_utils.dart'
+    show
+        FileItem,
+        FileUtils,
+        isBlockedPath,
+        isJunkName,
+        kAudioExtensions,
+        kVideoExtensions;
 import '../services/archive_service.dart';
 import '../services/open_with_service.dart';
 import '../services/installer_service.dart';
 import '../services/share_service.dart';
-import '../screens/terminal_screen.dart';
 import '../screens/folder_graph_screen.dart';
 import '../screens/lan_screen.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../screens/archive_browser_screen.dart';
 import 'preview_panel.dart';
 import 'convert_dialog.dart';
@@ -248,44 +258,11 @@ const Set<String> _kTextExtensions = {
   '.diff',
 };
 
-const Set<String> _kVideoExtensions = {
-  '.mp4',
-  '.mkv',
-  '.avi',
-  '.mov',
-  '.wmv',
-  '.flv',
-  '.webm',
-  '.m4v',
-  '.3gp',
-  '.3g2',
-  '.mts',
-  '.m2ts',
-  '.ts',
-  '.vob',
-  '.ogv',
-  '.rm',
-  '.rmvb',
-  '.asf',
-  '.divx',
-};
-
-const Set<String> _kAudioExtensions = {
-  '.mp3',
-  '.wav',
-  '.flac',
-  '.aac',
-  '.ogg',
-  '.wma',
-  '.m4a',
-  '.opus',
-  '.aiff',
-  '.ape',
-  '.alac',
-  '.mid',
-  '.midi',
-  '.amr',
-};
+/// File extensions routed to the built-in players. Canonical source is
+/// file_utils.dart ([kVideoExtensions]/[kAudioExtensions]) — only formats the
+/// engines can decode, so unsupported containers fall to "Open with".
+Set<String> get _kVideoExtensions => kVideoExtensions;
+Set<String> get _kAudioExtensions => kAudioExtensions;
 
 /// Aggregate info about the current multi-selection, reported to the parent
 /// via [FileBrowser.onSelectionChanged].
@@ -653,7 +630,7 @@ class _FileBrowserState extends State<FileBrowser> {
       final ext = item.extension.toLowerCase();
       // Video → built-in player
       if (_kVideoExtensions.contains(ext)) {
-        _openVideo(item.path);
+        await _openVideo(item);
         return;
       }
       // Audio → built-in music player (with sibling playlist)
@@ -693,6 +670,34 @@ class _FileBrowserState extends State<FileBrowser> {
         WidgetService.addRecentFile(item.path);
         return;
       }
+      // EPUB → built-in e-book reader
+      if (item.isEpub) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => EpubReaderScreen(filePath: item.path),
+          ),
+        );
+        WidgetService.addRecentFile(item.path);
+        return;
+      }
+      // CBZ (comic book ZIP) → built-in image pager
+      if (item.isCbz) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => CbzReaderScreen(filePath: item.path),
+          ),
+        );
+        WidgetService.addRecentFile(item.path);
+        return;
+      }
+      // Spreadsheets (.xlsx, .xls, .ods, .csv, .numbers) → built-in viewer
+      if (item.isSpreadsheet) {
+        await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => SpreadsheetViewerScreen(filePath: item.path),
+        ));
+        WidgetService.addRecentFile(item.path);
+        return;
+      }
       // Everything else → external app
       try {
         await OpenWithService.openDefault(item.path);
@@ -711,7 +716,7 @@ class _FileBrowserState extends State<FileBrowser> {
     widget.onItemSelected(item);
     final ext = item.extension.toLowerCase();
     if (_kVideoExtensions.contains(ext)) {
-      _openVideo(item.path);
+      await _openVideo(item);
       return;
     }
     if (_kAudioExtensions.contains(ext)) {
@@ -784,9 +789,27 @@ class _FileBrowserState extends State<FileBrowser> {
     }
   }
 
-  void _openVideo(String path) {
+  /// Opens the built-in video player with a playlist of sibling video files
+  /// in the same directory (auto-next works across a season/episode folder).
+  Future<void> _openVideo(FileItem item) async {
+    final siblings = <String>[];
+    try {
+      final items = await FileUtils.listDirectory(_currentPath);
+      for (final it in items) {
+        if (_kVideoExtensions.contains(it.extension.toLowerCase())) {
+          siblings.add(it.path);
+        }
+      }
+    } catch (_) {}
+    final index = siblings.indexOf(item.path);
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => VideoPlayerScreen(filePath: path)),
+      MaterialPageRoute(
+        builder: (_) => VideoPlayerScreen(
+          filePath: item.path,
+          playlist: siblings,
+          initialIndex: index < 0 ? 0 : index,
+        ),
+      ),
     );
   }
 
@@ -1161,9 +1184,6 @@ class _FileBrowserState extends State<FileBrowser> {
       case LogicalKeyboardKey.f2:
         _startInPlaceRename();
         return true;
-      case LogicalKeyboardKey.f4:
-        _openTerminalHere(_currentPath);
-        return true;
       case LogicalKeyboardKey.f5:
         _loadDirectory();
         return true;
@@ -1245,12 +1265,6 @@ class _FileBrowserState extends State<FileBrowser> {
             ),
           );
         });
-  }
-
-  Future<void> _openTerminalHere(String path) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => TerminalScreen(startPath: path)),
-    );
   }
 
   /// Ctrl+L: jump to a typed path.
@@ -1401,6 +1415,67 @@ class _FileBrowserState extends State<FileBrowser> {
           ok ? 'Sharing ${files.length} item(s)…' : 'Share not available here',
         ),
         backgroundColor: ok ? OneDarkColors.cyan : OneDarkColors.red,
+      ),
+    );
+  }
+
+  /// Shows a QR code dialog encoding a swordfm:// deep link for the file.
+  /// Scanning this on another SwordFM device opens the file directly.
+  void _showFileQrCode(FileItem item) {
+    final data = 'swordfm://open?path=${Uri.encodeComponent(item.path)}';
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: OneDarkColors.bgDark,
+        title: Row(
+          children: [
+            Icon(Icons.qr_code, color: OneDarkColors.cyan, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'QR Code',
+                style: TextStyle(color: OneDarkColors.fg, fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              color: Colors.white,
+              child: QrImageView(
+                data: data,
+                version: QrVersions.auto,
+                size: 200,
+                gapless: false,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              item.name,
+              style: TextStyle(
+                color: OneDarkColors.fg,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            SelectableText(
+              data,
+              style: TextStyle(color: OneDarkColors.fgDim, fontSize: 10),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
@@ -2020,11 +2095,9 @@ class _FileBrowserState extends State<FileBrowser> {
           )
         else
           _menuItem('Share…', Icons.share, () => _sharePaths([item.path])),
-        _menuItem(
-          'Open Terminal Here',
-          Icons.terminal,
-          () => _openTerminalHere(item.path),
-        ),
+        if (!item.isDirectory)
+          _menuItem('Show QR Code', Icons.qr_code,
+              () => _showFileQrCode(item)),
         const PopupMenuDivider(),
         _menuItem('Copy', Icons.copy, () {
           FileUtils.setClipboard(item.path, 'copy');
@@ -2713,12 +2786,6 @@ class _FileBrowserState extends State<FileBrowser> {
                 _loadDirectory();
               },
             ),
-            // Open the built-in terminal at the current directory.
-            IconButton(
-              icon: Icon(Icons.terminal, color: OneDarkColors.fgDim),
-              onPressed: () => _openTerminalHere(_currentPath),
-              tooltip: 'Open Terminal',
-            ),
             // Bookmark the current folder.
             IconButton(
               icon: Icon(Icons.bookmark_add, color: OneDarkColors.fgDim),
@@ -2947,7 +3014,8 @@ class _FileBrowserState extends State<FileBrowser> {
               onSecondaryTapDown: (details) =>
                   _showContextMenu(item, details.globalPosition),
               onTap: () => _handleItemTap(item, isSelected),
-              child: Stack(
+              child: ClipRect(
+                child: Stack(
                 children: [
                   Container(
                     decoration: BoxDecoration(
@@ -2962,7 +3030,7 @@ class _FileBrowserState extends State<FileBrowser> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.max,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         // Image files show a real thumbnail instead of an icon.
                         if (item.isImage)
@@ -3047,6 +3115,7 @@ class _FileBrowserState extends State<FileBrowser> {
                     ),
                 ],
               ),
+              ),  // ClipRect
             );
           },
         );
@@ -3526,11 +3595,6 @@ class _FileBrowserState extends State<FileBrowser> {
         parentBox.paintBounds.height - position.dy,
       ),
       items: <PopupMenuEntry<Object?>>[
-        _menuItem(
-          'Open Terminal Here',
-          Icons.terminal,
-          () => _openTerminalHere(_currentPath),
-        ),
         _menuItem(
           'Bookmark This Folder',
           Icons.bookmark_add,

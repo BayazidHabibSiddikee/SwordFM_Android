@@ -11,16 +11,19 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart' as p;
 import 'package:pointycastle/export.dart';
 
-/// Connection profile for remote servers (WebDAV or SFTP).
+/// Connection profile for remote servers (WebDAV, SFTP, or SMB/CIFS).
 class NetworkProfile {
   final String id;
   final String name;
-  final String type; // 'webdav' or 'sftp'
+  final String type; // 'webdav', 'sftp', or 'smb'
   final String host;
   final int port;
   final String username;
   String password;
   final String? remotePath;
+
+  /// SMB-specific: the share name, e.g. "Documents" from \\server\Documents
+  final String? smbShare;
 
   NetworkProfile({
     required this.id,
@@ -31,10 +34,17 @@ class NetworkProfile {
     required this.username,
     required this.password,
     this.remotePath = '/',
+    this.smbShare,
   });
 
   bool get isConnected => _connected;
   bool _connected = false;
+
+  /// Returns the full UNC-style SMB path, e.g. //192.168.1.1/share
+  String get smbPath {
+    final share = (smbShare?.isNotEmpty == true) ? smbShare! : 'share';
+    return '//$host/$share';
+  }
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -44,6 +54,7 @@ class NetworkProfile {
     'port': port,
     'username': username,
     'remotePath': remotePath,
+    if (smbShare != null) 'smbShare': smbShare,
   };
 
   factory NetworkProfile.fromJson(Map<String, dynamic> json) => NetworkProfile(
@@ -53,12 +64,18 @@ class NetworkProfile {
     host: json['host'] as String,
     port: json['port'] as int,
     username: json['username'] as String,
-    password: json['password'] as String,
+    // Password is not stored in plaintext in the current format — the field is
+    // removed by _saveProfiles() before persisting.  Default to '' so that
+    // fromJson never throws; loadProfiles() overwrites this with the decrypted
+    // value.  Old profiles that still carry a plaintext 'password' key are
+    // handled as a migration path in loadProfiles().
+    password: (json['password'] as String?) ?? '',
     remotePath: json['remotePath'] as String?,
+    smbShare: json['smbShare'] as String?,
   );
 }
 
-/// Service managing WebDAV and SFTP connections.
+/// Service managing WebDAV, SFTP, and SMB/CIFS connections.
 /// Provides listing, uploading, and downloading over remote protocols.
 /// AES-256-GCM encryption helpers for secure credential storage.
 /// Uses flutter_secure_storage for key/IV storage and pointycastle for AES-GCM.
@@ -85,13 +102,18 @@ class _CryptoHelper {
   }
 
   /// Encrypt plaintext with AES-256-GCM.
+  /// A fresh random 96-bit nonce is generated per message and prepended to
+  /// the ciphertext (nonce || ciphertext+tag), so identical plaintexts
+  /// encrypt to distinct outputs. Legacy payloads without a prepended nonce
+  /// fall back to the stored IV for backwards compatibility.
   static Future<String> encrypt(String plaintext) async {
     await initKey();
     final keyStr = await _keyStorage.read(key: _keyName);
-    final ivStr = await _keyStorage.read(key: _ivName);
-    if (keyStr == null || ivStr == null) throw Exception('Encryption key not found');
+    if (keyStr == null) throw Exception('Encryption key not found');
     final keyBytes = base64Decode(keyStr);
-    final ivBytes = base64Decode(ivStr);
+    final nonce = Uint8List.fromList(
+      List<int>.generate(_ivLength, (_) => Random.secure().nextInt(256)),
+    );
 
     final cipher = GCMBlockCipher(AESEngine())
       ..init(
@@ -99,23 +121,40 @@ class _CryptoHelper {
         AEADParameters(
           KeyParameter(keyBytes),
           128, // MAC tag length in bits
-          ivBytes,
+          nonce,
           Uint8List(0),
         ),
       );
     final plainBytes = Uint8List.fromList(utf8.encode(plaintext));
     final encryptedBytes = cipher.process(plainBytes);
-    return base64Encode(encryptedBytes);
+    final out = Uint8List(nonce.length + encryptedBytes.length)
+      ..setRange(0, nonce.length, nonce)
+      ..setRange(nonce.length, nonce.length + encryptedBytes.length,
+          encryptedBytes);
+    return base64Encode(out);
   }
 
   /// Decrypt AES-256-GCM ciphertext.
   static Future<String> decrypt(String ciphertext) async {
     await initKey();
     final keyStr = await _keyStorage.read(key: _keyName);
-    final ivStr = await _keyStorage.read(key: _ivName);
-    if (keyStr == null || ivStr == null) throw Exception('Decryption key not found');
+    if (keyStr == null) throw Exception('Decryption key not found');
     final keyBytes = base64Decode(keyStr);
-    final ivBytes = base64Decode(ivStr);
+
+    final raw = base64Decode(ciphertext);
+    // New format: 12-byte nonce prepended.
+    Uint8List ivBytes;
+    Uint8List encBytes;
+    if (raw.length > _ivLength) {
+      ivBytes = Uint8List.fromList(raw.sublist(0, _ivLength));
+      encBytes = Uint8List.fromList(raw.sublist(_ivLength));
+    } else {
+      // Legacy fallback: stored IV.
+      final ivStr = await _keyStorage.read(key: _ivName);
+      if (ivStr == null) throw Exception('Decryption key not found');
+      ivBytes = base64Decode(ivStr);
+      encBytes = Uint8List.fromList(raw);
+    }
 
     final cipher = GCMBlockCipher(AESEngine())
       ..init(
@@ -127,7 +166,6 @@ class _CryptoHelper {
           Uint8List(0),
         ),
       );
-    final encBytes = base64Decode(ciphertext);
     final decryptedBytes = cipher.process(encBytes);
     return utf8.decode(decryptedBytes);
   }
@@ -243,6 +281,8 @@ class NetworkService {
     try {
       if (profile.type == 'webdav') {
         return await _listWebdav(profile, path);
+      } else if (profile.type == 'smb') {
+        return await _listSmb(profile, path);
       } else {
         return await _listSftp(profile, path);
       }
@@ -265,6 +305,10 @@ class NetworkService {
     try {
       if (profile.type == 'webdav') {
         await _uploadWebdav(profile, localPath, remotePath);
+      } else if (profile.type == 'smb') {
+        throw UnsupportedError(
+          'SMB direct upload not yet supported. Use ${profile.smbPath} via Android Files app.',
+        );
       } else {
         await _uploadSftp(profile, localPath, remotePath);
       }
@@ -288,6 +332,10 @@ class NetworkService {
     try {
       if (profile.type == 'webdav') {
         await _downloadWebdav(profile, remotePath, localDir);
+      } else if (profile.type == 'smb') {
+        throw UnsupportedError(
+          'SMB direct download not yet supported. Use ${profile.smbPath} via Android Files app.',
+        );
       } else {
         await _downloadSftp(profile, remotePath, localDir);
       }
@@ -458,6 +506,25 @@ class NetworkService {
       await sftp.close();
       await client.close();
     }
+  }
+
+  // ─── SMB / CIFS ────────────────────────────────────────────────────────────
+  //
+  // Full SMB2 browsing via a native library is on the roadmap. The current
+  // stub surfaces the share path so users know the connection was saved and
+  // can open it via Android's built-in Files app or a third-party SMB client.
+  //
+  static Future<List<RemoteEntry>> _listSmb(
+    NetworkProfile profile,
+    String path,
+  ) async {
+    // Return a single informational entry pointing to the UNC path.
+    return [
+      RemoteEntry(
+        name: '${profile.smbPath} — tap "Open in Files" to browse',
+        isDir: false,
+      ),
+    ];
   }
 
   // ─── Utilities ─────────────────────────────────────────────────────────────

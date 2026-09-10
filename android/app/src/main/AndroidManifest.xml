@@ -47,6 +47,52 @@
     </queries>
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
+    <!-- Auto-start background audio / scheduled tasks after device reboot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Haptic feedback for file operations and notifications -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Camera — document scanner uses the camera to capture pages -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Microphone — voice input for search; declared only while the
+         voice-search feature ships. Remove if the feature is dropped. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- NFC — declared only while proximity-share ships. Remove if dropped. -->
+    <uses-permission android:name="android.permission.NFC" />
+
+    <!-- Biometric / fingerprint lock for the app -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+
+    <!-- Change network state — required for Wi-Fi Direct setup -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
+    <!-- Exact alarms — declared only while scheduled backups/reminders
+         ship (API 31+). Remove if the feature is dropped. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:minSdkVersion="31" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"
+        android:minSdkVersion="33" />
+
+    <!-- Background location — declared only while Wi-Fi Direct discovery
+         runs with the screen off (Android 10+). Remove if dropped. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- Keep CPU running during long background transfers — declared only
+         while the transfer service requests the exemption. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Write external storage (API ≤ 28) for older device compatibility -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <!-- Foreground service — data sync / cloud upload in background -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <application
         android:label="SwordFM"
         android:name="${applicationName}"
@@ -141,6 +187,15 @@
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="*/*" />
+            </intent-filter>
+
+            <!-- swordfm:// deep link — used by QR codes generated in-app.
+                 swordfm://open?path=<encoded-path> navigates to that file. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="swordfm" />
             </intent-filter>
         </activity>
 

@@ -100,6 +100,11 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
   final List<PdfMark> _marks = [];
   Offset? _dragStart, _dragCurrent;
 
+  // ── Search ────────────────────────────────────────────────────────────────
+  bool _searchMode = false;
+  final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+
   // ── Prefs keys ────────────────────────────────────────────────────────────
   String get _bmKey => 'pdf_bm_${widget.filePath.hashCode}';
   String get _markKey => 'pdf_mk_${widget.filePath.hashCode}';
@@ -126,6 +131,8 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
     _barAnim.dispose();
     _transform.dispose();
     _pageCtrl.dispose();
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
     _doc?.close();
     super.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -162,7 +169,7 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
     if (_rendering.contains(pageNum)) return null;
     _rendering.add(pageNum);
     try {
-      final page = await _doc!.getPage(pageNum, autoCloseAndroid: true);
+      final page = await _doc!.getPage(pageNum);
       final aspectRatio = page.height / page.width;
       final img = await page.render(
         width: _renderWidth,
@@ -327,6 +334,192 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
     _doc?.close().then((_) { _doc = null; _openDocument(); });
   }
 
+  // ── Search helpers ────────────────────────────────────────────────────────
+
+  void _openSearch() {
+    setState(() => _searchMode = true);
+    _autoHideTimer?.cancel();
+    _showBars();
+    Future.microtask(() => _searchFocus.requestFocus());
+  }
+
+  void _closeSearch() {
+    setState(() => _searchMode = false);
+    _searchCtrl.clear();
+    _searchFocus.unfocus();
+    _scheduleAutoHide();
+  }
+
+  /// Rough estimate: average PDF page is ~3 000 characters.
+  static const int _charsPerPage = 3000;
+
+  void _runSearch(String query) {
+    if (query.trim().isEmpty) return;
+    _searchFocus.unfocus();
+
+    final rawText = DocConverter.extractPdfText(widget.filePath);
+    if (rawText == null || rawText.trim().isEmpty) {
+      _toast('No text found in this PDF');
+      return;
+    }
+
+    final q = query.toLowerCase();
+    final text = rawText;
+    final results = <_SearchResult>[];
+    final lines = text.split(RegExp(r'\r?\n'));
+
+    // Walk through lines and collect every line (or pair) containing the query.
+    int charOffset = 0;
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      if (line.toLowerCase().contains(q)) {
+        // Build a 2-line context snippet.
+        final prev = i > 0 ? lines[i - 1].trim() : '';
+        final curr = line.trim();
+        final next = i + 1 < lines.length ? lines[i + 1].trim() : '';
+        final snippet = [if (prev.isNotEmpty) prev, curr, if (next.isNotEmpty) next]
+            .join('\n');
+        final pageEstimate = ((charOffset / _charsPerPage) + 1).round()
+            .clamp(1, _totalPages > 0 ? _totalPages : 9999);
+        results.add(_SearchResult(
+          snippet: snippet,
+          charOffset: charOffset,
+          pageEstimate: pageEstimate,
+          matchLine: curr,
+          query: query,
+        ));
+      }
+      charOffset += line.length + 1; // +1 for the newline
+    }
+
+    if (results.isEmpty) {
+      _toast('No results for "$query"');
+      return;
+    }
+
+    _showSearchResults(query, results);
+  }
+
+  void _showSearchResults(String query, List<_SearchResult> results) {
+    _autoHideTimer?.cancel();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E1E),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.55,
+          minChildSize: 0.3,
+          maxChildSize: 0.85,
+          builder: (_, scrollCtrl) => Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Handle
+                Center(
+                  child: Container(
+                    width: 40, height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                // Header
+                Row(children: [
+                  const Icon(Icons.search, color: Colors.lightBlueAccent, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '"$query" — ${results.length} result${results.length == 1 ? '' : 's'}',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ListView.separated(
+                    controller: scrollCtrl,
+                    itemCount: results.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(color: Colors.white12, height: 1),
+                    itemBuilder: (ctx, i) {
+                      final r = results[i];
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 4),
+                        leading: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.lightBlueAccent.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'p.${r.pageEstimate}',
+                            style: const TextStyle(
+                                color: Colors.lightBlueAccent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        title: _buildSnippetText(r.snippet, r.query),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _closeSearch();
+                          _goToPage(r.pageEstimate);
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    ).then((_) => _scheduleAutoHide());
+  }
+
+  /// Renders a snippet with the query terms highlighted in amber.
+  Widget _buildSnippetText(String snippet, String query) {
+    final q = query.toLowerCase();
+    final spans = <TextSpan>[];
+    int start = 0;
+    String lower = snippet.toLowerCase();
+    while (true) {
+      final idx = lower.indexOf(q, start);
+      if (idx == -1) {
+        spans.add(TextSpan(
+            text: snippet.substring(start),
+            style: const TextStyle(color: Colors.white60, fontSize: 12)));
+        break;
+      }
+      if (idx > start) {
+        spans.add(TextSpan(
+            text: snippet.substring(start, idx),
+            style: const TextStyle(color: Colors.white60, fontSize: 12)));
+      }
+      spans.add(TextSpan(
+          text: snippet.substring(idx, idx + query.length),
+          style: const TextStyle(
+              color: Colors.amber,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              backgroundColor: Color(0x33E5C07B))));
+      start = idx + query.length;
+    }
+    return Text.rich(TextSpan(children: spans),
+        maxLines: 3, overflow: TextOverflow.ellipsis);
+  }
+
   // ─── BUILD ────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -487,17 +680,9 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
     unawaited(_renderPage(pageNum));
     return Container(
       color: const Color(0xFF1A1A1A),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(
-                color: Colors.white54, strokeWidth: 2),
-            const SizedBox(height: 10),
-            Text('Page $pageNum / $_totalPages',
-                style: const TextStyle(color: Colors.white38, fontSize: 12)),
-          ],
-        ),
+      child: const Center(
+        child: CircularProgressIndicator(
+            color: Colors.white54, strokeWidth: 2),
       ),
     );
   }
@@ -523,22 +708,36 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
                 onPressed: () => Navigator.pop(context),
               ),
               Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_fileName,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600),
-                        overflow: TextOverflow.ellipsis),
-                    if (_totalPages > 0)
-                      Text('Page $_currentPage of $_totalPages',
-                          style: const TextStyle(
-                              color: Colors.white60, fontSize: 11)),
-                  ],
-                ),
+                child: _searchMode
+                    ? TextField(
+                        controller: _searchCtrl,
+                        focusNode: _searchFocus,
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                        cursorColor: Colors.white,
+                        decoration: InputDecoration(
+                          hintText: 'Search in PDF…',
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          border: InputBorder.none,
+                          suffixIcon: IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+                            onPressed: _closeSearch,
+                          ),
+                        ),
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: _runSearch,
+                      )
+                    : Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_fileName,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis),
+                        ],
+                      ),
               ),
               // Marking tools
               _toolBtn(Icons.highlight, MarkTool.highlight, Colors.yellow, 'Highlight'),
@@ -556,6 +755,11 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
                   icon: const Icon(Icons.list, color: Colors.white),
                   onPressed: _showBookmarksList,
                 ),
+              IconButton(
+                icon: const Icon(Icons.search, color: Colors.white),
+                tooltip: 'Search text',
+                onPressed: _openSearch,
+              ),
               IconButton(
                 icon: const Icon(Icons.find_in_page_outlined, color: Colors.white),
                 onPressed: _totalPages > 1 ? _showGoToPageDialog : null,
@@ -1080,4 +1284,21 @@ class _SavedMarkPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_SavedMarkPainter old) => old.marks != marks;
+}
+
+/// A single search result from text search across PDF pages.
+class _SearchResult {
+  final String snippet;
+  final int charOffset;
+  final int pageEstimate;
+  final String matchLine;
+  final String query;
+
+  _SearchResult({
+    required this.snippet,
+    required this.charOffset,
+    required this.pageEstimate,
+    required this.matchLine,
+    required this.query,
+  });
 }

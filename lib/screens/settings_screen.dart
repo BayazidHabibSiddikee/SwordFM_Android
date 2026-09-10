@@ -20,6 +20,8 @@ import 'privacy_policy_screen.dart';
 import 'auth_screen.dart';
 import 'duplicates_screen.dart';
 import 'document_scanner_screen.dart';
+import 'help_screen.dart';
+import '../services/ocr_service.dart';
 import 'cast_screen.dart';
 import 'notepad_screen.dart';
 import 'cloud_browser_screen.dart';
@@ -28,7 +30,7 @@ import 'storage_analysis_screen.dart';
 /// Settings screen for configuring the app.
 class SettingsScreen extends StatefulWidget {
   /// Callback fired when a settings button maps to an existing bottom-bar tab
-  /// (Storage=3, Cloud=5, App Analyzer=2+tool, Terminal=6). Instead of pushing
+  /// (Storage=3, Cloud=5, App Analyzer=2+tool). Instead of pushing
   /// a full-screen route (which hides the bottom navigation bar), the caller
   /// switches the bottom tab via this callback.
   final void Function(int index)? onToolTap;
@@ -212,7 +214,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // Appearance
           _sectionTitle('Appearance'),
-          _settingTile(
+          ValueListenableBuilder<int>(
+            valueListenable: themeNotifier,
+            builder: (context, _, __) => _settingTile(
             icon: isDarkTheme ? Icons.dark_mode : Icons.light_mode,
             title: 'Theme',
             subtitle: isDarkTheme ? 'One Dark (Default)' : 'Cream Light',
@@ -227,6 +231,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               } catch (_) {}
               themeNotifier.value++;
             },
+          ),
           ),
           ValueListenableBuilder<ViewMode>(
             valueListenable: viewModeNotifier,
@@ -520,6 +525,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 16),
 
+          // OCR
+          _sectionTitle('OCR / Text Recognition'),
+          _settingTile(
+            icon: Icons.translate,
+            title: 'Recognition Language',
+            subtitle: 'Language used by Tesseract OCR',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showOcrLanguagePicker(context),
+          ),
+          const SizedBox(height: 8),
+          _settingTile(
+            icon: Icons.tune,
+            title: 'Page Segmentation Mode',
+            subtitle: 'How Tesseract analyses the page layout',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showOcrPsmPicker(context),
+          ),
+          const SizedBox(height: 8),
+          _settingTile(
+            icon: Icons.help_outline,
+            title: 'Help & How-To',
+            subtitle: 'Learn how features and cloud storage work',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const HelpScreen()),
+            ),
+          ),
+          const SizedBox(height: 8),
           // About
           _sectionTitle('About'),
           _settingTile(
@@ -938,6 +971,85 @@ class _SettingsScreenState extends State<SettingsScreen> {
           await FileUtils.saveTrashAutoEmpty(v);
           setState(() => _trashAutoEmpty = v);
         },
+      ),
+    );
+  }
+
+  Future<void> _showOcrLanguagePicker(BuildContext ctx) async {
+    await OcrService.ensureReady();
+    final prefs = await OcrService.loadPrefs();
+    String current = prefs[0];
+    final langs = OcrService.availableLanguages;
+    if (!ctx.mounted) return;
+    await showDialog<void>(
+      context: ctx,
+      builder: (dc) => AlertDialog(
+        title: const Text('OCR Language'),
+        content: StatefulBuilder(
+          builder: (_, setSt) => SizedBox(
+            width: double.maxFinite,
+            child: ListView(
+              shrinkWrap: true,
+              children: langs.map((lang) {
+                return RadioListTile<String>(
+                  title: Text(lang),
+                  value: lang,
+                  groupValue: current,
+                  onChanged: (v) async {
+                    if (v == null) return;
+                    await OcrService.savePrefs(language: v);
+                    setSt(() => current = v);
+                  },
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dc),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showOcrPsmPicker(BuildContext ctx) async {
+    final prefs = await OcrService.loadPrefs();
+    String currentPsm = prefs[1];
+    final modes = OcrService.psmModes;
+    if (!ctx.mounted) return;
+    await showDialog<void>(
+      context: ctx,
+      builder: (dc) => AlertDialog(
+        title: const Text('Page Segmentation Mode'),
+        content: StatefulBuilder(
+          builder: (_, setSt) => SizedBox(
+            width: double.maxFinite,
+            child: ListView(
+              shrinkWrap: true,
+              children: modes.entries.map((e) {
+                return RadioListTile<String>(
+                  title: Text(e.key),
+                  value: e.value,
+                  groupValue: currentPsm,
+                  onChanged: (v) async {
+                    if (v == null) return;
+                    await OcrService.savePrefs(psm: v);
+                    setSt(() => currentPsm = v);
+                  },
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dc),
+            child: const Text('Done'),
+          ),
+        ],
       ),
     );
   }

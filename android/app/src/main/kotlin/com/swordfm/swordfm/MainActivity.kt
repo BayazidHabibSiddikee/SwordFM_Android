@@ -132,11 +132,8 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
         flutterEngine?.let {
             methodChannel = MethodChannel(it.dartExecutor.binaryMessenger, CHANNEL)
             methodChannel?.setMethodCallHandler(this)
-            // "Open With…" app chooser + "Open Terminal Here" (Termux) live on
-            // their own channels so the bluetooth channel stays focused.
+            // "Open With…" app chooser live on their own channel so the bluetooth channel stays focused.
             MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/openwith")
-                .setMethodCallHandler(this)
-            MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/terminal")
                 .setMethodCallHandler(this)
             MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/share")
                 .setMethodCallHandler(this)
@@ -185,6 +182,20 @@ class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
         val uri = intent.data ?: intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)?.data
         if (uri == null) return
         if (action != Intent.ACTION_VIEW && action != Intent.ACTION_SEND) return
+
+        // swordfm://open?path=<encoded-path> — deep link from QR code
+        if (uri.scheme == "swordfm" && uri.host == "open") {
+            val path = uri.getQueryParameter("path") ?: return
+            runOnMain {
+                fileIntentsChannel?.invokeMethod("onFileOpened", mapOf(
+                    "path" to path,
+                    "mimeType" to "",
+                    "fileName" to File(path).name,
+                ))
+            }
+            return
+        }
+
         // Copy to app-internal cache so Flutter can read it by path
         thread {
             try {

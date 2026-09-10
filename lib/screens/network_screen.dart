@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/network_service.dart';
 import '../theme/theme.dart';
-import '../widgets/interface_health_panel.dart';
+
 
 /// Network connections screen — manage WebDAV/SFTP profiles and browse remote files.
 class NetworkScreen extends StatefulWidget {
@@ -127,9 +127,6 @@ class _NetworkScreenState extends State<NetworkScreen> {
       ),
       body: Column(
         children: [
-          // Local interface health (link state, speed, errors/drops/collisions).
-          // Collapsed on phones to save vertical space; expanded on desktop.
-          InterfaceHealthPanel(expandedByDefault: !isMobile),
           Expanded(
             child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
           ),
@@ -170,7 +167,9 @@ class _NetworkScreenState extends State<NetworkScreen> {
                   leading: Icon(
                     profile.profile.type == 'webdav'
                         ? Icons.cloud
-                        : Icons.storage,
+                        : profile.profile.type == 'smb'
+                            ? Icons.dns
+                            : Icons.storage,
                     color: isActive ? OneDarkColors.cyan : OneDarkColors.fgDim,
                   ),
                   title: Text(
@@ -345,6 +344,7 @@ class _AddProfileDialogState extends State<_AddProfileDialog> {
   final _portCtrl = TextEditingController(text: '80');
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  final _smbShareCtrl = TextEditingController(text: 'share');
   String _type = 'webdav';
 
   @override
@@ -354,6 +354,7 @@ class _AddProfileDialogState extends State<_AddProfileDialog> {
     _portCtrl.dispose();
     _userCtrl.dispose();
     _passCtrl.dispose();
+    _smbShareCtrl.dispose();
     super.dispose();
   }
 
@@ -378,8 +379,17 @@ class _AddProfileDialogState extends State<_AddProfileDialog> {
                 items: const [
                   DropdownMenuItem(value: 'webdav', child: Text('WebDAV')),
                   DropdownMenuItem(value: 'sftp', child: Text('SFTP')),
+                  DropdownMenuItem(value: 'smb', child: Text('SMB / NAS (beta)')),
                 ],
-                onChanged: (v) => setState(() => _type = v!),
+                onChanged: (v) {
+                  setState(() {
+                    _type = v!;
+                    // Set default port for each protocol
+                    if (_type == 'webdav') _portCtrl.text = '80';
+                    if (_type == 'sftp') _portCtrl.text = '22';
+                    if (_type == 'smb') _portCtrl.text = '445';
+                  });
+                },
               ),
               const SizedBox(height: 8),
               TextFormField(
@@ -428,6 +438,18 @@ class _AddProfileDialogState extends State<_AddProfileDialog> {
                 obscureText: true,
                 style: TextStyle(color: OneDarkColors.fg),
               ),
+              if (_type == 'smb') ...[
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _smbShareCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Share Name',
+                    hintText: 'e.g. share',
+                    border: OutlineInputBorder(),
+                  ),
+                  style: TextStyle(color: OneDarkColors.fg),
+                ),
+              ],
             ],
           ),
         ),

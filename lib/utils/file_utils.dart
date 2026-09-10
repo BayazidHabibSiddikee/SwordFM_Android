@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -67,44 +68,35 @@ const Map<String, String> _mimeTypes = {
 };
 
 /// File extensions that open in the built-in video player.
+/// Only formats libmpv (media_kit) can decode are listed here.
+/// media_kit covers H.264/H.265/VP8/VP9/AV1 in MKV/MP4/AVI/MOV/WebM/TS
+/// plus AC3/DTS/EAC3/TrueHD audio tracks.
 const Set<String> kVideoExtensions = {
   '.mp4',
   '.mkv',
   '.avi',
   '.mov',
-  '.wmv',
   '.flv',
   '.webm',
   '.m4v',
   '.3gp',
   '.3g2',
-  '.mts',
-  '.m2ts',
   '.ts',
-  '.vob',
   '.ogv',
-  '.rm',
-  '.rmvb',
-  '.asf',
-  '.divx',
+  '.m2ts',
+  '.mts',
 };
 
 /// File extensions that open in the built-in music player.
+/// Only formats just_audio can decode natively are listed here.
 const Set<String> kAudioExtensions = {
   '.mp3',
   '.wav',
   '.flac',
   '.aac',
   '.ogg',
-  '.wma',
   '.m4a',
   '.opus',
-  '.aiff',
-  '.ape',
-  '.alac',
-  '.mid',
-  '.midi',
-  '.amr',
 };
 
 /// True for files whose contents the content-search can scan (text/code).
@@ -515,10 +507,12 @@ class FileItem {
   bool get isPresentation => const {
     '.pptx', '.ppt', '.odp', '.key',
   }.contains(extension);
+  bool get isEpub => extension == '.epub';
+  bool get isCbz => const {'.cbz', '.cbr'}.contains(extension);
   /// True when we render this natively in-app (as opposed to needing a system app).
   bool get hasNativeViewer =>
       isPdf || isDocx || isImage || isVideo || isText || isCode ||
-      isMarkdown || isPptx;
+      isMarkdown || isPptx || isEpub || isCbz || isSpreadsheet;
 }
 
 /// Sort options for the file browser.
@@ -583,36 +577,60 @@ bool isJunkName(String name) {
   return false;
 }
 
+/// Top-level worker for [FileUtils.listDirectory] — runs inside an isolate
+/// so stat() calls don't block the UI event loop on large directories.
+/// Returns a list of plain Maps so it crosses the isolate boundary safely.
+Future<List<Map<String, dynamic>>> _listDirectoryWorker(
+    (String, bool) args) async {
+  final (directoryPath, includeHidden) = args;
+  final dir = Directory(directoryPath);
+  if (!await dir.exists()) return [];
+  final entities = await dir.list().toList();
+  final result = <Map<String, dynamic>>[];
+  for (final entity in entities) {
+    final name = p.basename(entity.path);
+    if (!includeHidden && name.startsWith('.')) continue;
+    try {
+      final stat = await entity.stat();
+      result.add({
+        'path': entity.path,
+        'name': name,
+        'isDirectory': entity is Directory,
+        'size': stat.size,
+        'lastModified': stat.modified.millisecondsSinceEpoch,
+      });
+    } catch (_) {
+      // Unreadable entry — skip silently
+    }
+  }
+  return result;
+}
+
 /// Directory operations.
 class FileUtils {
-  /// Lists contents of [directoryPath].
+  /// Lists contents of [directoryPath] in a background isolate so heavy
+  /// stat() calls don't freeze the UI on large directories.
   /// If [includeHidden] is true, hidden files (dot-prefixed) are included.
   static Future<List<FileItem>> listDirectory(
     String directoryPath, {
     bool includeHidden = false,
   }) async {
-    final dir = Directory(directoryPath);
-    if (!await dir.exists()) return [];
-
-    final entities = await dir.list().toList();
-    final items = <FileItem>[];
-
-    for (final entity in entities) {
-      final name = p.basename(entity.path);
-      if (!includeHidden && name.startsWith('.')) continue;
-
-      final stat = await entity.stat();
-      items.add(
-        FileItem(
-          entity: entity,
-          name: name,
-          path: entity.path,
-          isDirectory: entity is Directory,
-          size: stat.size,
-          lastModified: stat.modified,
-        ),
+    final maps = await Isolate.run(
+        () => _listDirectoryWorker((directoryPath, includeHidden)));
+    final items = maps.map((m) {
+      final path = m['path'] as String;
+      final isDir = m['isDirectory'] as bool;
+      final entity = isDir ? Directory(path) as FileSystemEntity : File(path);
+      return FileItem(
+        entity: entity,
+        name: m['name'] as String,
+        path: path,
+        isDirectory: isDir,
+        size: m['size'] as int,
+        lastModified: DateTime.fromMillisecondsSinceEpoch(
+            m['lastModified'] as int),
       );
-    }
+    }).toList();
 
     // Directories first, then sort by name within each group
     items.sort((a, b) {

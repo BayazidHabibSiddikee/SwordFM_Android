@@ -15,78 +15,107 @@ import 'package:path/path.dart' as p;
 /// covered by the Dart `archive` package and remain unsupported here.
 import 'package:crypto/crypto.dart';
 
-class ArchiveService {
-  /// Compute SHA-256 hex digest of a file. Returns null on error.
-  static Future<String?> sha256OfFile(String path) async {
+/// Isolate-safe SHA-256 that streams the file in 1 MB chunks instead of
+/// loading it fully into memory — avoids OOM on multi-GB candidates.
+/// Returns the hex digest, or null on any read error.
+Future<String?> _hashFileChunked(String path) async {
+  try {
+    final raf = await File(path).open();
+    final cap = _DigestCapture();
+    final digest = sha256.startChunkedConversion(cap);
+    const chunkSize = 1024 * 1024;
+    while (true) {
+      final block = await raf.read(chunkSize);
+      if (block.isEmpty) break;
+      digest.add(block);
+    }
+    await raf.close();
+    digest.close();
+    final d = cap.value;
+    return d == null || d.bytes.isEmpty ? null : d.toString();
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Collects the single [Digest] emitted by a chunked hash conversion.
+class _DigestCapture implements Sink<Digest> {
+  Digest? value;
+
+  @override
+  void add(Digest value) {
+    if (this.value != null) throw StateError('add may only be called once.');
+    this.value = value;
+  }
+
+  @override
+  void close() {}
+}
+
+/// Top-level worker for [ArchiveService.findDuplicates] — runs inside a
+/// background isolate so SHA-256 hashing doesn't block the UI thread.
+Future<Map<String, List<String>>> _findDuplicatesWorker(
+    List<String> paths) async {
+  // Pass 1: group by size (cheap stat).
+  final bySize = <int, List<String>>{};
+  for (final path in paths) {
     try {
-      final bytes = await File(path).readAsBytes();
-      return sha256.convert(bytes).toString();
-    } catch (_) {
-      return null;
+      bySize.putIfAbsent(await File(path).length(), () => []).add(path);
+    } catch (_) {}
+  }
+
+  // Pass 2: head-hash (first 64 KB) on size-collision groups.
+  final headGroups = <String, List<String>>{};
+  for (final entry in bySize.entries) {
+    if (entry.value.length < 2) continue;
+    for (final path in entry.value) {
+      try {
+        final raf = await File(path).open();
+        final head = await raf.read(65536);
+        await raf.close();
+        final key = '${entry.key}|${sha256.convert(head)}';
+        headGroups.putIfAbsent(key, () => []).add(path);
+      } catch (_) {}
     }
   }
 
-  /// Fast three-pass duplicate detection.
+  final candidates = headGroups.values
+      .where((g) => g.length > 1)
+      .expand((g) => g)
+      .toList();
+  if (candidates.isEmpty) return {};
+
+  // Pass 3: full SHA-256 on survivors only (streamed, not loaded into RAM).
+  final fullGroups = <String, List<String>>{};
+  for (final path in candidates) {
+    try {
+      final h = await _hashFileChunked(path);
+      if (h != null) fullGroups.putIfAbsent(h, () => []).add(path);
+    } catch (_) {}
+  }
+  return {
+    for (final e in fullGroups.entries)
+      if (e.value.length > 1) e.key: e.value,
+  };
+}
+
+class ArchiveService {
+  /// Compute SHA-256 hex digest of a file. Returns null on error.
+  /// Streams in chunks so large files don't spike memory.
+  static Future<String?> sha256OfFile(String path) async {
+    return _hashFileChunked(path);
+  }
+
+  /// Fast three-pass duplicate detection — runs in a background isolate.
   ///
   /// Pass 1 — group by file size (cheap stat, no reads).
   /// Pass 2 — for each size group with 2+ members, read only the first 64 KB
-  ///          and re-group by (size + head hash).  Eliminates most false
-  ///          positive size collisions without reading full files.
+  ///          and re-group by (size + head hash).
   /// Pass 3 — full SHA-256 only on surviving candidates.
   static Future<Map<String, List<String>>> findDuplicates(
     List<String> paths,
   ) async {
-    // Pass 1: size -> paths (cheap stat).
-    final bySize = <int, List<String>>{};
-    for (final path in paths) {
-      try {
-        final size = await File(path).length();
-        bySize.putIfAbsent(size, () => []).add(path);
-      } catch (_) {}
-    }
-
-    // Pass 2: head-hash on size-collision groups.
-    final Map<String, List<String>> headGroups = {};
-    for (final entry in bySize.entries) {
-      if (entry.value.length < 2) continue;
-      for (final path in entry.value) {
-        try {
-          final head = await _readHead(File(path), 65536); // 64 KB
-          final key = '${entry.key}|${sha256.convert(head)}';
-          headGroups.putIfAbsent(key, () => []).add(path);
-        } catch (_) {}
-      }
-    }
-
-    // Only head-groups with 2+ candidates need full hashing.
-    final candidates = headGroups.values
-        .where((g) => g.length > 1)
-        .expand((g) => g)
-        .toList();
-    if (candidates.isEmpty) return {};
-
-    // Pass 3: full SHA-256 on candidates only.
-    final Map<String, List<String>> fullGroups = {};
-    for (final path in candidates) {
-      final h = await sha256OfFile(path);
-      if (h != null) {
-        fullGroups.putIfAbsent(h, () => []).add(path);
-      }
-    }
-    return {
-      for (final e in fullGroups.entries)
-        if (e.value.length > 1) e.key: e.value,
-    };
-  }
-
-  /// Reads the first [n] bytes of [file].
-  static Future<List<int>> _readHead(File file, int n) async {
-    final raf = await file.open(mode: FileMode.read);
-    try {
-      return await raf.read(n);
-    } finally {
-      await raf.close();
-    }
+    return Isolate.run(() => _findDuplicatesWorker(paths));
   }
 
   /// Supported extensions mapped to their operation type.
@@ -407,9 +436,25 @@ class ArchiveService {
     String entryName,
     String destDir,
   ) async {
+    // Safety: reject path traversal / NUL / absolute paths so a crafted entry
+    // can't escape [destDir] (mirrors the guards in [extract]).
+    var name = entryName;
+    if (name.contains('..') || name.contains(String.fromCharCode(0))) {
+      throw Exception('io:unsafe archive entry name: $entryName');
+    }
+    name = name.replaceAll('\\\\', '/');
+    while (name.startsWith('/')) {
+      name = name.substring(1);
+    }
+    if (name.isEmpty) {
+      throw Exception('io:empty archive entry name: $entryName');
+    }
     final files = await _decodeArchive(archivePath);
-    final af = files.where((f) => f.name == entryName && !f.isDirectory).first;
-    final destPath = p.join(destDir, entryName);
+    final af = files.where((f) => f.name == name && !f.isDirectory).firstOrNull;
+    if (af == null) {
+      throw Exception('io:no such archive entry: $entryName');
+    }
+    final destPath = p.join(destDir, name);
     await Directory(p.dirname(destPath)).create(recursive: true);
     final outStream = File(destPath).openWrite();
     outStream.add(af.content as List<int>);

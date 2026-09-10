@@ -72,10 +72,14 @@ class SwiftAudioHandler extends BaseAudioHandler
       }
     });
 
-    // Completion / errors
+    // Completion / auto-next: advance to the next track; stop only at end.
     _player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed) {
-        stop();
+        if (_player.hasNext) {
+          _player.seekToNext();
+        } else {
+          stop();
+        }
       }
     });
   }
@@ -136,5 +140,21 @@ class SwiftAudioHandler extends BaseAudioHandler
       playing: false,
     ));
     mediaItem.add(null);
+  }
+
+  /// Sets the playback speed (e.g. 0.5, 0.75, 1.0, 1.25, 1.5, 2.0).
+  Future<void> setSpeed(double speed) async {
+    await _player.setSpeed(speed);
+  }
+
+  /// Enables or disables shuffle mode on the underlying player.
+  @override
+  Future<void> setShuffleMode(AudioServiceShuffleMode mode) async {
+    await _player.setShuffleModeEnabled(mode == AudioServiceShuffleMode.all);
+  }
+
+  /// Sets the loop / repeat mode (off, one, all).
+  Future<void> setLoopMode(LoopMode mode) async {
+    await _player.setLoopMode(mode);
   }
 }

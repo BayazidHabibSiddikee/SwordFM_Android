@@ -5,8 +5,8 @@ import 'package:network_info_plus/network_info_plus.dart';
 import 'package:path/path.dart' as p;
 
 /// Minimal FTP server for transferring files between the phone and a PC over
-/// the local network. Chrooted to a share root; no real authentication
-/// (any user/pass is accepted — the LAN is trusted, like the WebShareServer).
+/// the local network. Chrooted to a share root; mutating commands require
+/// the LAN share PIN (see [FtpServerService.sharePin]).
 class FtpServerService {
   final int port;
   final NetworkInfo _networkInfo = NetworkInfo();
@@ -18,7 +18,13 @@ class FtpServerService {
   bool get isRunning => _server != null;
 
   /// PIN required to authenticate. Empty string = no auth (legacy).
+  /// WARNING: starting the server with an empty PIN leaves every mutating
+  /// FTP command open — the LAN UI must always set this from the web PIN.
   String sharePin = '';
+
+  /// True once the client passed USER/PASS with the current [sharePin].
+  /// Reset per control connection; empty-PIN servers stay authenticated.
+  bool _authenticated = false;
 
   /// The actually-bound port (differs from [port] when 0 = ephemeral).
   int get boundPort => _server?.port ?? port;
@@ -26,7 +32,10 @@ class FtpServerService {
   FtpServerService({this.port = 2121});
 
   /// Starts listening. [shareRootOverride] sets the browsable root.
-  Future<void> start({String? shareRootOverride}) async {
+  /// Pass [pin] (or set [sharePin]) so FTP enforces the same PIN as the
+  /// LAN web share — otherwise any LAN client can read/write/delete.
+  Future<void> start({String? shareRootOverride, String? pin}) async {
+    if (pin != null) sharePin = pin;
     if (shareRootOverride != null) shareRoot = shareRootOverride;
     if (_server != null) return;
     currentIp = await _networkInfo.getWifiIP();
@@ -45,6 +54,9 @@ class FtpServerService {
 
   Future<void> _serve(Socket control) async {
     final session = _FtpSession(control, this);
+    // Fresh control connection: require (re-)authentication unless the
+    // server was started with no PIN (legacy open mode).
+    _authenticated = sharePin.isEmpty;
     var buffer = '';
     control.timeout(const Duration(minutes: 10));
     try {
@@ -121,6 +133,14 @@ class _FtpSession {
     final space = line.indexOf(' ');
     final cmd = (space < 0 ? line : line.substring(0, space)).toUpperCase();
     final arg = space < 0 ? '' : line.substring(space + 1).trim();
+    // Gate every filesystem/data command on auth. Always allowed: greeting
+    // handshake (USER/PASS/SYST/FEAT/OPTS/TYPE), NOOP, QUIT, ABOR.
+    const openCmds = {
+      'USER', 'PASS', 'SYST', 'FEAT', 'OPTS', 'TYPE', 'NOOP', 'QUIT', 'ABOR',
+    };
+    if (!service._authenticated && !openCmds.contains(cmd)) {
+      return '530 Not logged in.\r\n';
+    }
     switch (cmd) {
       case 'USER':
         return '331 Password required.\r\n';
@@ -128,6 +148,7 @@ class _FtpSession {
         if (service.sharePin.isNotEmpty && arg != service.sharePin) {
           return '530 Login incorrect.\r\n';
         }
+        service._authenticated = true;
         return '230 Logged in.\r\n';
       case 'SYST':
         return '215 UNIX Type: L8\r\n';

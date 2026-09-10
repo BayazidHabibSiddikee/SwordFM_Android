@@ -81,9 +81,9 @@ class _AuthScreenState extends State<AuthScreen>
         password: _passCtrl.text,
       );
       // Load entitlement from Firestore after successful sign-in.
-      if (cred?.user != null) {
+      if (cred.user != null) {
         final ent = EntitlementService();
-        await ent.loadEntitlement(cred!.user!.uid);
+        await ent.loadEntitlement(cred.user!.uid);
       }
       if (mounted) {
         Navigator.pop(context, true);

@@ -1,20 +1,29 @@
 import 'dart:async';
-import 'dart:io';
-import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:video_player/video_player.dart';
-import '../services/audio_handler.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import '../theme/theme.dart';
 
-/// Full-screen video player with:
-/// - Hardware-accelerated playback via video_player
-/// - Background audio + lock-screen media notification via audio_service
-/// - Auto-hiding controls (tap to toggle)
-/// - Seek bar, ±10s, volume mute, fullscreen lock
+/// Full-screen video player backed by media_kit / libmpv.
+///
+/// Supports: MKV, MP4, AVI, MOV, WebM, TS, 3GP …
+/// Codecs: H.264/H.265/VP8/VP9/AV1, AC3, DTS, EAC3, TrueHD, MP3, AAC, FLAC
+/// Features: subtitles (.srt/.ass/embedded sidecars + embedded tracks),
+///           speed control, audio-track selection, auto-next playlist.
+/// Roadmap (not yet shipped): aspect-ratio switch, hardware-decode toggle, PiP.
 class VideoPlayerScreen extends StatefulWidget {
   final String filePath;
-  const VideoPlayerScreen({super.key, required this.filePath});
+  /// Optional playlist for auto-next (sibling files).
+  final List<String> playlist;
+  final int initialIndex;
+
+  const VideoPlayerScreen({
+    super.key,
+    required this.filePath,
+    this.playlist = const [],
+    this.initialIndex = 0,
+  });
 
   @override
   State<VideoPlayerScreen> createState() => _VideoPlayerState();
@@ -22,172 +31,103 @@ class VideoPlayerScreen extends StatefulWidget {
 
 class _VideoPlayerState extends State<VideoPlayerScreen>
     with WidgetsBindingObserver {
-  late VideoPlayerController _video;
-  bool _initialized = false;
-  bool _showControls = true;
-  String? _error;
-  Timer? _hideTimer;
+  Player? _player;
+  VideoController? _controller;
 
-  String get _fileName => widget.filePath.split('/').last;
+  bool _showControls = true;
+  Timer? _hideTimer;
+  double _speed = 1.0;
+  bool _showSubtitles = true;
+  String? _error;
+
+  List<String> get _playlist =>
+      widget.playlist.isNotEmpty ? widget.playlist : [widget.filePath];
+  int _currentIndex = 0;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Keep screen on while video plays
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    _initVideo();
+    _currentIndex = widget.initialIndex.clamp(0, _playlist.length - 1);
+    _initPlayer();
   }
 
-  void _initVideo() {
-    _video = VideoPlayerController.file(
-      File(widget.filePath),
-      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
-    )
-      ..initialize().then((_) {
-        if (!mounted) return;
-        setState(() => _initialized = true);
-        _video.play();
-        _registerWithAudioService();
-        _listenToNotificationCommands();
-        _scheduleHide();
-      }).catchError((e) {
-        if (mounted) setState(() => _error = e.toString());
+  Future<void> _initPlayer() async {
+    try {
+      _player = Player(
+        configuration: const PlayerConfiguration(
+          title: 'SwordFM',
+          logLevel: MPVLogLevel.warn,
+        ),
+      );
+      _controller = VideoController(
+        _player!,
+        configuration: const VideoControllerConfiguration(
+          enableHardwareAcceleration: false,
+        ),
+      );
+
+      _player!.stream.error.listen((err) {
+        if (mounted) setState(() => _error = err);
       });
-    _video.addListener(_onVideoUpdate);
-  }
 
-  /// Listens to playback state changes pushed from the notification buttons
-  /// (Stop / Pause / Play) so tapping Stop on the lock screen actually stops
-  /// the video and closes the notification.
-  void _listenToNotificationCommands() {
-    final handler = swiftAudioHandler;
-    if (handler == null) return;
-    handler.playbackState.listen((state) {
-      if (!mounted || !_initialized) return;
-      // Stop tapped from notification
-      if (state.processingState == AudioProcessingState.idle &&
-          state.controls.isEmpty) {
-        if (_video.value.isPlaying) _video.pause();
-        if (mounted) Navigator.of(context).maybePop();
-        return;
-      }
-      // Play/Pause tapped from notification
-      if (state.playing && !_video.value.isPlaying) {
-        _video.play();
-      } else if (!state.playing && _video.value.isPlaying &&
-          state.processingState != AudioProcessingState.idle) {
-        _video.pause();
-      }
-    });
-  }
+      _player!.stream.completed.listen((completed) {
+        if (completed) _tryPlayNext();
+      });
 
-  /// Registers the currently playing video with audio_service so Android
-  /// shows a media notification on the lock screen / notification shade
-  /// with Play/Pause and Stop controls. This is what keeps audio running
-  /// in the background when the screen locks.
-  void _registerWithAudioService() {
-    final handler = swiftAudioHandler;
-    if (handler == null) return;
-    final item = MediaItem(
-      id: widget.filePath,
-      title: _fileName.replaceAll(RegExp(r'\.[^.]+$'), ''),
-      artist: 'SwordFM Video',
-      duration: _video.value.duration,
-      extras: {'isVideo': true},
-    );
-    handler.mediaItem.add(item);
-    // Sync playback state so the notification shows correct play/pause
-    handler.playbackState.add(handler.playbackState.value.copyWith(
-      controls: [
-        MediaControl.rewind,
-        MediaControl.pause,
-        MediaControl.fastForward,
-        MediaControl.stop,
-      ],
-      systemActions: const {MediaAction.seek, MediaAction.stop},
-      androidCompactActionIndices: const [0, 1, 3], // rewind|pause|stop
-      playing: true,
-      processingState: AudioProcessingState.ready,
-      updatePosition: Duration.zero,
-    ));
-  }
-
-  void _updateNotificationState() {
-    final handler = swiftAudioHandler;
-    if (handler == null || !_initialized) return;
-    final playing = _video.value.isPlaying;
-    handler.playbackState.add(handler.playbackState.value.copyWith(
-      controls: [
-        MediaControl.rewind,
-        if (playing) MediaControl.pause else MediaControl.play,
-        MediaControl.fastForward,
-        MediaControl.stop,
-      ],
-      androidCompactActionIndices: const [0, 1, 3],
-      playing: playing,
-      updatePosition: _video.value.position,
-    ));
-  }
-
-  void _onVideoUpdate() {
-    if (!mounted) return;
-    setState(() {});
-    _updateNotificationState();
-    // Auto-stop at end
-    if (_video.value.position >= _video.value.duration &&
-        _video.value.duration > Duration.zero) {
-      _clearNotification();
+      await _openCurrent();
+      _scheduleHide();
+    } catch (e) {
+      // Surface construction/init failures in the error overlay too.
+      if (mounted) setState(() => _error = e.toString());
     }
   }
 
-  void _clearNotification() {
-    final handler = swiftAudioHandler;
-    if (handler == null) return;
-    handler.playbackState.add(handler.playbackState.value.copyWith(
-      playing: false,
-      processingState: AudioProcessingState.idle,
-    ));
-    handler.mediaItem.add(null);
-  }
-
-  // ── App lifecycle — pause video when app goes background ──────────────────
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
-      // Video visuals pause automatically, but audio continues in background
-      // via the foreground service. We keep _video playing so audio continues.
-      // The notification shows pause button so user can stop from lock screen.
-    } else if (state == AppLifecycleState.resumed) {
-      // Nothing to do — video was still playing.
+  Future<void> _openCurrent() async {
+    final path = _playlist[_currentIndex];
+    try {
+      await _player!.open(Media(path));
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
     }
   }
 
-  @override
-  void dispose() {
-    _hideTimer?.cancel();
-    _video.removeListener(_onVideoUpdate);
-    _video.dispose();
-    _clearNotification();
-    WidgetsBinding.instance.removeObserver(this);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    super.dispose();
-  }
-
-  // ── Controls auto-hide ────────────────────────────────────────────────────
-  void _onTap() {
-    setState(() => _showControls = !_showControls);
-    if (_showControls) _scheduleHide();
+  void _tryPlayNext() {
+    if (_currentIndex < _playlist.length - 1) {
+      setState(() => _currentIndex++);
+      _openCurrent();
+    }
   }
 
   void _scheduleHide() {
     _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 4), () {
+    _hideTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _showControls = false);
     });
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  void _toggleControls() {
+    setState(() => _showControls = !_showControls);
+    if (_showControls) _scheduleHide();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _hideTimer?.cancel();
+    _player?.dispose();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused && _player != null) _player!.pause();
+  }
+
+  String _fileName() => _playlist[_currentIndex].split('/').last;
+
   String _fmt(Duration d) {
     final h = d.inHours;
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -195,245 +135,376 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
     return h > 0 ? '$h:$m:$s' : '$m:$s';
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
-  @override
-  Widget build(BuildContext context) {
-    if (_error != null) return _buildError();
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _onTap,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // Video frame
-            if (_initialized)
-              Center(
-                child: AspectRatio(
-                  aspectRatio: _video.value.aspectRatio,
-                  child: VideoPlayer(_video),
-                ),
-              )
-            else
-              Center(
-                child: CircularProgressIndicator(color: OneDarkColors.cyan),
-              ),
-
-            // Controls overlay (auto-hide)
-            if (_initialized && _showControls) _buildControls(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildControls() {
-    final playing = _video.value.isPlaying;
-    final position = _video.value.position;
-    final duration = _video.value.duration;
-    final progress = duration.inMilliseconds > 0
-        ? (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0)
-        : 0.0;
-
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: RadialGradient(
-          center: Alignment.center,
-          radius: 1.5,
-          colors: [Colors.transparent, Colors.black54],
-        ),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  // ──────────────────────────────────────────────────────────────────────────
+  // Speed picker
+  // ──────────────────────────────────────────────────────────────────────────
+  void _showSpeedPicker() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: OneDarkColors.bg,
+      builder: (_) => Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // ── Top bar ──────────────────────────────────────────────────────
-          SafeArea(
-            bottom: false,
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xCC000000), Colors.transparent],
-                ),
-              ),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                  Expanded(
-                    child: Text(
-                      _fileName,
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  // Background playback indicator
-                  const Padding(
-                    padding: EdgeInsets.only(right: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.cast_connected,
-                            color: Colors.white54, size: 16),
-                        SizedBox(width: 4),
-                        Text('BG audio',
-                            style: TextStyle(
-                                color: Colors.white54, fontSize: 10)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text('Playback Speed',
+                style: TextStyle(
+                    color: OneDarkColors.fg, fontWeight: FontWeight.bold)),
+          ),
+          for (final s in [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0])
+            ListTile(
+              title: Text('${s}x',
+                  style: TextStyle(
+                      color: s == _speed
+                          ? OneDarkColors.cyan
+                          : OneDarkColors.fg)),
+              trailing: s == _speed
+                  ? Icon(Icons.check, color: OneDarkColors.cyan)
+                  : null,
+              onTap: () {
+                setState(() => _speed = s);
+                _player?.setRate(s);
+                Navigator.pop(context);
+              },
             ),
-          ),
-
-          // ── Center play/pause ────────────────────────────────────────────
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.replay_10,
-                    color: Colors.white, size: 36),
-                onPressed: () => _video.seekTo(
-                    position - const Duration(seconds: 10)),
-              ),
-              const SizedBox(width: 16),
-              IconButton(
-                icon: Icon(
-                  playing
-                      ? Icons.pause_circle_filled
-                      : Icons.play_circle_filled,
-                  color: Colors.white,
-                  size: 64,
-                ),
-                onPressed: () {
-                  playing ? _video.pause() : _video.play();
-                  _updateNotificationState();
-                  _scheduleHide();
-                },
-              ),
-              const SizedBox(width: 16),
-              IconButton(
-                icon: const Icon(Icons.forward_10,
-                    color: Colors.white, size: 36),
-                onPressed: () => _video.seekTo(
-                    position + const Duration(seconds: 10)),
-              ),
-            ],
-          ),
-
-          // ── Bottom bar ───────────────────────────────────────────────────
-          SafeArea(
-            top: false,
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [Color(0xCC000000), Colors.transparent],
-                ),
-              ),
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Column(
-                children: [
-                  // Seek slider
-                  SliderTheme(
-                    data: SliderThemeData(
-                      thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: 6),
-                      overlayShape: const RoundSliderOverlayShape(
-                          overlayRadius: 12),
-                      trackHeight: 2.5,
-                      activeTrackColor: OneDarkColors.cyan,
-                      inactiveTrackColor: Colors.white30,
-                      thumbColor: Colors.white,
-                      overlayColor: Colors.white24,
-                    ),
-                    child: Slider(
-                      value: progress,
-                      onChanged: (v) {
-                        final target = Duration(
-                            milliseconds:
-                                (v * duration.inMilliseconds).round());
-                        _video.seekTo(target);
-                      },
-                    ),
-                  ),
-                  // Time row
-                  Row(
-                    children: [
-                      Text(
-                        _fmt(position),
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 12),
-                      ),
-                      const Text(' / ',
-                          style: TextStyle(
-                              color: Colors.white54, fontSize: 12)),
-                      Text(
-                        _fmt(duration),
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 12),
-                      ),
-                      const Spacer(),
-                      // Mute
-                      IconButton(
-                        icon: Icon(
-                          _video.value.volume > 0
-                              ? Icons.volume_up
-                              : Icons.volume_off,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                        onPressed: () {
-                          _video.setVolume(
-                              _video.value.volume > 0 ? 0 : 1);
-                        },
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
+          const SizedBox(height: 12),
         ],
       ),
     );
   }
 
-  Widget _buildError() {
+  // ──────────────────────────────────────────────────────────────────────────
+  // Audio track picker
+  // ──────────────────────────────────────────────────────────────────────────
+  void _showAudioTracks() {
+    final tracks = _player?.state.tracks.audio;
+    if (tracks == null || tracks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No audio tracks found')),
+      );
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: OneDarkColors.bg,
+      builder: (_) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text('Audio Track',
+                style: TextStyle(
+                    color: OneDarkColors.fg, fontWeight: FontWeight.bold)),
+          ),
+          for (final t in tracks)
+            ListTile(
+              title: Text(
+                  t.title?.isNotEmpty == true
+                      ? t.title!
+                      : t.language?.isNotEmpty == true
+                          ? t.language!
+                          : 'Track ${t.id}',
+                  style: TextStyle(color: OneDarkColors.fg)),
+              onTap: () {
+                _player?.setAudioTrack(t);
+                Navigator.pop(context);
+              },
+            ),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Subtitle track picker
+  // ──────────────────────────────────────────────────────────────────────────
+  void _showSubtitleTracks() {
+    final tracks = _player?.state.tracks.subtitle;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: OneDarkColors.bg,
+      builder: (_) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text('Subtitles',
+                style: TextStyle(
+                    color: OneDarkColors.fg, fontWeight: FontWeight.bold)),
+          ),
+          ListTile(
+            title: Text('Off', style: TextStyle(color: OneDarkColors.fg)),
+            onTap: () {
+              setState(() => _showSubtitles = false);
+              _player?.setSubtitleTrack(SubtitleTrack.no());
+              Navigator.pop(context);
+            },
+          ),
+          for (final t in tracks ?? [])
+            ListTile(
+              title: Text(
+                  t.title?.isNotEmpty == true
+                      ? t.title!
+                      : t.language?.isNotEmpty == true
+                          ? t.language!
+                          : 'Track ${t.id}',
+                  style: TextStyle(color: OneDarkColors.fg)),
+              onTap: () {
+                setState(() => _showSubtitles = true);
+                _player?.setSubtitleTrack(t);
+                Navigator.pop(context);
+              },
+            ),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        foregroundColor: Colors.white,
-        title: Text(_fileName,
-            style: const TextStyle(color: Colors.white, fontSize: 14),
-            overflow: TextOverflow.ellipsis),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      body: GestureDetector(
+        onTap: _toggleControls,
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            Icon(Icons.videocam_off, size: 64, color: OneDarkColors.red),
-            const SizedBox(height: 16),
-            const Text('Playback error',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Text(_error!,
-                  style: const TextStyle(
-                      color: Colors.white54, fontSize: 12),
-                  textAlign: TextAlign.center),
+            // ── Video surface ──────────────────────────────────────────────
+            Video(
+              controller: _controller!,
+              subtitleViewConfiguration: SubtitleViewConfiguration(
+                visible: _showSubtitles,
+              ),
             ),
+
+            // ── Error overlay ──────────────────────────────────────────────
+            if (_error != null)
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.all(32),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Could not play this file.\n\n$_error',
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+
+            // ── Controls overlay ───────────────────────────────────────────
+            if (_showControls && _error == null) ...[
+              // Top bar
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.black87, Colors.transparent],
+                    ),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(4, 36, 8, 12),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      Expanded(
+                        child: Text(
+                          _fileName(),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      // Speed
+                      IconButton(
+                        icon: Text(
+                          '${_speed}x',
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 13),
+                        ),
+                        onPressed: _showSpeedPicker,
+                        tooltip: 'Playback speed',
+                      ),
+                      // Audio tracks
+                      IconButton(
+                        icon: const Icon(Icons.audiotrack,
+                            color: Colors.white, size: 20),
+                        onPressed: _showAudioTracks,
+                        tooltip: 'Audio track',
+                      ),
+                      // Subtitles
+                      IconButton(
+                        icon: Icon(
+                          _showSubtitles
+                              ? Icons.subtitles
+                              : Icons.subtitles_off,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                        onPressed: _showSubtitleTracks,
+                        tooltip: 'Subtitles',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Bottom controls
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [Colors.black87, Colors.transparent],
+                    ),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Seek bar
+                      StreamBuilder<Duration>(
+                        stream: _player?.stream.position,
+                        builder: (_, posSnap) {
+                          return StreamBuilder<Duration?>(
+                            stream: _player?.stream.duration,
+                            builder: (_, durSnap) {
+                              final pos = posSnap.data ?? Duration.zero;
+                              final dur = durSnap.data ?? Duration.zero;
+                              final durMs =
+                                  dur.inMilliseconds.toDouble();
+                              final maxMs = durMs > 0 ? durMs : 1.0;
+                              return Column(
+                                children: [
+                                  Slider(
+                                    value: pos.inMilliseconds
+                                        .toDouble()
+                                        .clamp(0.0, maxMs),
+                                    max: maxMs,
+                                    activeColor: OneDarkColors.cyan,
+                                    inactiveColor: Colors.white38,
+                                    onChanged: durMs > 0
+                                        ? (v) => _player?.seek(Duration(
+                                            milliseconds: v.toInt()))
+                                        : null,
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(_fmt(pos),
+                                            style: const TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 11)),
+                                        Text(_fmt(dur),
+                                            style: const TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 11)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 4),
+                      // Playback controls row
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Prev in playlist
+                          if (_playlist.length > 1)
+                            IconButton(
+                              icon: const Icon(Icons.skip_previous,
+                                  color: Colors.white, size: 28),
+                              onPressed: _currentIndex > 0
+                                  ? () {
+                                      setState(
+                                          () => _currentIndex--);
+                                      _openCurrent();
+                                    }
+                                  : null,
+                            ),
+                          // ± 10s
+                          IconButton(
+                            icon: const Icon(Icons.replay_10,
+                                color: Colors.white, size: 28),
+                            onPressed: () => _player?.seek(
+                                _player!.state.position -
+                                    const Duration(seconds: 10)),
+                          ),
+                          // Play / Pause
+                          const SizedBox(width: 8),
+                          StreamBuilder<bool>(
+                            stream: _player?.stream.playing,
+                            builder: (_, snap) {
+                              final playing = snap.data ?? false;
+                              return IconButton(
+                                icon: Icon(
+                                  playing
+                                      ? Icons.pause_circle_filled
+                                      : Icons.play_circle_filled,
+                                  color: OneDarkColors.cyan,
+                                  size: 56,
+                                ),
+                                onPressed: () => playing
+                                    ? _player?.pause()
+                                    : _player?.play(),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.forward_10,
+                                color: Colors.white, size: 28),
+                            onPressed: () => _player?.seek(
+                                _player!.state.position +
+                                    const Duration(seconds: 10)),
+                          ),
+                          // Next in playlist
+                          if (_playlist.length > 1)
+                            IconButton(
+                              icon: const Icon(Icons.skip_next,
+                                  color: Colors.white, size: 28),
+                              onPressed:
+                                  _currentIndex < _playlist.length - 1
+                                      ? () {
+                                          setState(
+                                              () => _currentIndex++);
+                                          _openCurrent();
+                                        }
+                                      : null,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),

@@ -6,18 +6,25 @@ import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:pdfx/pdfx.dart';
-import 'package:video_player/video_player.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import '../screens/archive_browser_screen.dart';
 import '../screens/docx_reader_screen.dart';
 import '../screens/image_viewer_screen.dart';
 import '../screens/pdf_reader_screen.dart';
+import '../screens/spreadsheet_viewer_screen.dart';
 import '../screens/text_reader_screen.dart';
 import '../screens/video_player_screen.dart';
+import '../services/archive_service.dart';
 import '../services/doc_converter.dart';
+import '../services/ocr_service.dart';
 import '../services/open_with_service.dart';
 import '../theme/theme.dart';
 import '../utils/file_utils.dart';
+import 'package:path/path.dart' as p;
 
 /// A collapsible panel that previews the selected file.
 class PreviewPanel extends StatefulWidget {
@@ -100,6 +107,14 @@ class _PreviewPanelState extends State<PreviewPanel> {
       );
       return;
     }
+    if (item.isSpreadsheet) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => SpreadsheetViewerScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
     if (item.isMarkdown || item.isText || item.isCode) {
       Navigator.of(context).push(
         MaterialPageRoute(
@@ -126,7 +141,21 @@ class _PreviewPanelState extends State<PreviewPanel> {
       );
       return;
     }
+    if (ArchiveService.isArchive(item.path)) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ArchiveBrowserScreen(archivePath: item.path),
+        ),
+      );
+      return;
+    }
     OpenWithService.openDefault(item.path);
+  }
+
+  /// Opens a file in its in-app viewer (same logic as _openFullScreen).
+  /// Called from archive browser "Browse contents" button.
+  void _openItem(FileItem item) {
+    _openFullScreen(item);
   }
 
   Future<void> _loadContent() async {
@@ -549,6 +578,10 @@ class _PreviewPanelState extends State<PreviewPanel> {
     if (item.isDirectory) {
       return _buildMetadataCard();
     }
+    // Archives: offer extraction and in-app browsing instead of a raw open.
+    if (ArchiveService.isArchive(item.path)) {
+      return _buildArchivePreview(item, cs);
+    }
     // Unsupported types: metadata + open button
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -662,6 +695,111 @@ class _PreviewPanelState extends State<PreviewPanel> {
       ),
     );
   }
+
+  /// Archive preview: metadata plus explicit Extract / Browse actions.
+  Widget _buildArchivePreview(FileItem item, ColorScheme cs) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.archive, size: 20, color: cs.primary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Archive — extract or browse contents',
+                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _buildMetadataCard(),
+        const SizedBox(height: 12),
+        Center(
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              FilledButton.icon(
+                onPressed: _extracting ? null : () => _extractArchive(item),
+                icon: _extracting
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.unarchive, size: 16),
+                label: const Text('Extract'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _openItem(item),
+                icon: const Icon(Icons.folder_open, size: 16),
+                label: const Text('Browse contents'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Whether an archive extraction is currently running.
+  bool _extracting = false;
+
+  /// Extracts [item] into a folder named after the archive, next to it.
+  Future<void> _extractArchive(FileItem item) async {
+    if (_extracting) return;
+    setState(() => _extracting = true);
+    final destDir = p.join(
+      p.dirname(item.path),
+      p.basenameWithoutExtension(item.path),
+    );
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        content: Row(
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(width: 20),
+            Expanded(
+              child: Text(
+                'Extracting ${p.basename(item.path)}…',
+                style: const TextStyle(fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    try {
+      await ArchiveService.extract(item.path, destDir);
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Extracted to ${p.basename(destDir)}'),
+            backgroundColor: OneDarkColors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Extract failed: $e'),
+            backgroundColor: OneDarkColors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _extracting = false);
+    }
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -901,9 +1039,84 @@ class _ImagePreviewTileState extends State<_ImagePreviewTile> {
             icon: const Icon(Icons.open_in_new, size: 16),
             label: const Text('Open with…'),
           ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => _runOcr(context),
+            icon: const Icon(Icons.document_scanner, size: 16),
+            label: const Text('Extract text (OCR)'),
+          ),
         ],
       ),
     );
+  }
+
+  /// Runs Tesseract OCR on this image and shows the result in a dialog.
+  Future<void> _runOcr(BuildContext ctx) async {
+    showDialog<void>(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Expanded(
+                child: Text('Recognising text…',
+                    style: TextStyle(fontSize: 13))),
+          ],
+        ),
+      ),
+    );
+    try {
+      final text = await OcrService.extractText(widget.item.path);
+      if (!ctx.mounted) return;
+      Navigator.of(ctx, rootNavigator: true).pop();
+      showDialog<void>(
+        context: ctx,
+        builder: (dc) => AlertDialog(
+          title: const Text('Recognised text'),
+          backgroundColor: OneDarkColors.bg,
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: SelectableText(
+                text.trim().isEmpty ? '(no text recognised)' : text,
+                style:
+                    TextStyle(color: OneDarkColors.fg, fontSize: 13),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dc),
+                child: const Text('Close')),
+            FilledButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: text));
+                Navigator.pop(dc);
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(
+                        content: Text('Copied to clipboard')),
+                  );
+                }
+              },
+              child: const Text('Copy'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (ctx.mounted) {
+        Navigator.of(ctx, rootNavigator: true).pop();
+        ScaffoldMessenger.of(ctx).showSnackBar(
+          SnackBar(
+              content: Text('OCR failed: $e'),
+              backgroundColor: OneDarkColors.red),
+        );
+      }
+    }
   }
 
   Widget _zoomBtn(IconData icon, ColorScheme cs, VoidCallback onTap) {
@@ -944,12 +1157,15 @@ class _VideoPreviewTileState extends State<_VideoPreviewTile> {
   String? _thumbPath;
   bool _thumbFailed = false;
 
-  // Inline player state. Initialized lazily on first tap so we don't decode
-  // a 1GB video the moment the user selects a file.
-  VideoPlayerController? _controller;
+  // Inline player state — lazily initialized on first tap via media_kit.
+  Player? _player;
+  VideoController? _videoController;
   bool _controllerReady = false;
   String? _controllerError;
   bool _muted = true; // start muted to avoid surprise audio
+  bool _playing = false;
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
 
   @override
   void initState() {
@@ -974,56 +1190,68 @@ class _VideoPreviewTileState extends State<_VideoPreviewTile> {
   }
 
   Future<void> _ensureController() async {
-    if (_controller != null) return;
-    final c = VideoPlayerController.file(
-      File(widget.path),
-      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+    if (_player != null) return;
+
+    _player = Player(
+      configuration: const PlayerConfiguration(
+        title: 'SwordFM',
+        logLevel: MPVLogLevel.warn,
+        muted: false,
+      ),
     );
-    _controller = c;
+
+    // Wire up stream listeners now that the player exists.
+    _player!.stream.position.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
+    _player!.stream.duration.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
+    _player!.stream.playing.listen((playing) {
+      if (mounted) setState(() => _playing = playing);
+    });
+
+    _videoController = VideoController(_player!);
+
     try {
-      // initialize() can hang on Android 14+ for some codecs (HEVC, certain
-      // MKV variants). Race it against a 6-second timeout so the user sees
-      // a usable error instead of a permanent spinner, and fall back to the
-      // full-screen player which uses the same controller but with more
-      // surface area for diagnostics.
-      await c.initialize().timeout(
-            const Duration(seconds: 6),
-            onTimeout: () => throw TimeoutException(
-                'VideoPlayerController.initialize timed out'),
-          );
-      await c.setVolume(_muted ? 0 : 1);
+      await _player!.open(Media(widget.path));
+      if (_muted) await _player!.setVolume(0);
+      // Give it a moment to buffer, then update ready state.
+      await Future.delayed(const Duration(milliseconds: 500));
       if (!mounted) return;
       setState(() {
         _controllerReady = true;
         _controllerError = null;
       });
     } catch (e) {
-      // Discard the failed controller so a tap-to-retry works.
-      try {
-        c.dispose();
-      } catch (_) {}
-      _controller = null;
+      _player?.dispose();
+      _player = null;
+      _videoController = null;
       if (!mounted) return;
       setState(() => _controllerError = e.toString());
     }
   }
 
   Future<void> _togglePlay() async {
+    if (_controllerError != null) {
+      // On error, fall back to full screen.
+      widget.onFullScreen();
+      return;
+    }
     await _ensureController();
     if (!_controllerReady || !mounted) return;
-    final c = _controller!;
-    if (c.value.isPlaying) {
-      await c.pause();
+    final p = _player!;
+    if (_playing) {
+      await p.pause();
     } else {
-      await c.play();
+      await p.play();
     }
-    if (mounted) setState(() {});
   }
 
   Future<void> _toggleMute() async {
-    if (_controller == null) return;
+    if (_player == null) return;
     final next = !_muted;
-    await _controller!.setVolume(next ? 0 : 1);
+    await _player!.setVolume(next ? 100 : 0);
     if (!mounted) return;
     setState(() => _muted = next);
   }
@@ -1037,35 +1265,30 @@ class _VideoPreviewTileState extends State<_VideoPreviewTile> {
 
   @override
   void dispose() {
-    _controller?.dispose();
+    _player?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final c = _controller;
 
     // Inline player is ready — render the live player with controls.
-    if (_controllerReady && c != null) {
+    if (_controllerReady && _player != null && _videoController != null) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: AspectRatio(
-              aspectRatio: c.value.aspectRatio == 0
-                  ? 16 / 9
-                  : c.value.aspectRatio,
+              aspectRatio: 16 / 9,
               child: Container(
                 color: Colors.black,
                 child: Stack(
                   alignment: Alignment.bottomCenter,
                   children: [
-                    Positioned.fill(
-                      child: VideoPlayer(c),
-                    ),
-                    if (!c.value.isPlaying)
+                    Video(controller: _videoController!),
+                    if (!_playing)
                       const Center(
                         child: Icon(
                           Icons.play_circle_filled,
@@ -1093,29 +1316,25 @@ class _VideoPreviewTileState extends State<_VideoPreviewTile> {
                           children: [
                             IconButton(
                               icon: Icon(
-                                c.value.isPlaying
-                                    ? Icons.pause
-                                    : Icons.play_arrow,
+                                _playing ? Icons.pause : Icons.play_arrow,
                                 color: Colors.white,
                               ),
                               onPressed: _togglePlay,
-                              tooltip: c.value.isPlaying
-                                  ? 'Pause'
-                                  : 'Play',
+                              tooltip: _playing ? 'Pause' : 'Play',
                             ),
                             Expanded(
-                              child: VideoProgressIndicator(
-                                c,
-                                allowScrubbing: true,
-                                colors: VideoProgressColors(
-                                  playedColor: cs.primary,
-                                  bufferedColor: cs.onSurfaceVariant,
-                                  backgroundColor: cs.outlineVariant,
-                                ),
+                              child: LinearProgressIndicator(
+                                value: _duration.inMilliseconds > 0
+                                    ? _position.inMilliseconds /
+                                        _duration.inMilliseconds
+                                    : 0.0,
+                                backgroundColor: cs.outlineVariant,
+                                color: cs.primary,
+                                minHeight: 4,
                               ),
                             ),
                             Text(
-                              '${_format(c.value.position)} / ${_format(c.value.duration)}',
+                              '${_format(_position)} / ${_format(_duration)}',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 10,
@@ -1159,7 +1378,7 @@ class _VideoPreviewTileState extends State<_VideoPreviewTile> {
     }
 
     // Controller is initializing (after a tap) — show progress.
-    if (_controller != null && !_controllerReady && _controllerError == null) {
+    if (_player != null && !_controllerReady && _controllerError == null) {
       return AspectRatio(
         aspectRatio: 16 / 9,
         child: Container(
@@ -1184,31 +1403,34 @@ class _VideoPreviewTileState extends State<_VideoPreviewTile> {
       );
     }
 
-    // Controller errored.
+    // Player errored — show error + tap to open full screen.
     if (_controllerError != null) {
-      return AspectRatio(
-        aspectRatio: 16 / 9,
-        child: Container(
-          decoration: BoxDecoration(
-            color: cs.surface,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.error_outline, color: cs.error, size: 36),
-                const SizedBox(height: 4),
-                Text(
-                  'Cannot play video',
-                  style: TextStyle(color: cs.onSurface, fontSize: 12),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Tap to open in full screen',
-                  style: TextStyle(color: cs.primary, fontSize: 11),
-                ),
-              ],
+      return GestureDetector(
+        onTap: widget.onFullScreen,
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: Container(
+            decoration: BoxDecoration(
+              color: cs.surface,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.error_outline, color: cs.error, size: 36),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Cannot play video',
+                    style: TextStyle(color: cs.onSurface, fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Tap to open in full screen',
+                    style: TextStyle(color: cs.primary, fontSize: 11),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

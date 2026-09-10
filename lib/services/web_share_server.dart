@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +15,232 @@ const int _kMaxAccessLog = 200;
 
 /// Maximum allowed name length after sanitization (prevents DoS from huge names).
 const int _kMaxSafeNameLen = 255;
+
+// ---------------------------------------------------------------------------
+// mDNS / LAN discovery beacon
+// ---------------------------------------------------------------------------
+
+/// Advertises the SwordFM web share service on the local network via two
+/// complementary mechanisms:
+///
+/// 1. **mDNS PTR record** (primary) — sends a minimal DNS response packet to
+///    the multicast group `224.0.0.251:5353` every 30 s so that standard
+///    mDNS-aware clients (Bonjour, Avahi, Android NSD) can discover the
+///    service under `SwordFM._http._tcp.local`.
+///
+/// 2. **JSON UDP broadcast** (fallback) — sends a plain JSON datagram to the
+///    directed broadcast address `255.255.255.255:5350` every 30 s so that
+///    custom SwordFM clients on the same LAN can discover the server without
+///    requiring multicast routing.
+///
+/// Both announcements are sent together; if either socket fails to bind (e.g.
+/// permission denied on the emulator) it is silently ignored so the other
+/// mechanism still operates.
+class _MdnsBeacon {
+  static const _mdnsAddress = '224.0.0.251';
+  static const _mdnsPort = 5353;
+  static const _discoveryPort = 5350;
+  static const _serviceName = 'SwordFM';
+  static const _interval = Duration(seconds: 30);
+
+  Timer? _timer;
+  RawDatagramSocket? _mdnsSocket;
+  RawDatagramSocket? _broadcastSocket;
+
+  /// Start periodic announcements with server metadata.
+  Future<void> startWithInfo(String pin, String ip, int serverPort) async {
+    _serverIp = ip;
+    _serverPort = serverPort;
+    await start(pin);
+  }
+
+  String? _serverIp;
+  int _serverPort = 8080;
+
+  /// Start periodic announcements.  [pin] is included in the JSON broadcast
+  /// so clients know a PIN is required (the PIN itself is not sent).
+  Future<void> start(String pin) async {
+    await stop(); // clean up any previous run
+
+    // --- (1) mDNS multicast socket ----------------------------------------
+    try {
+      _mdnsSocket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        0, // ephemeral source port — we only send, never receive
+        reuseAddress: true,
+        reusePort: false,
+      );
+      _mdnsSocket!.multicastLoopback = false;
+      // Join the multicast group so the OS picks an interface for outgoing
+      // multicast packets (not strictly required for *sending* but good practice).
+      _mdnsSocket!.joinMulticast(InternetAddress(_mdnsAddress));
+    } catch (e) {
+      debugPrint('[MdnsBeacon] mDNS socket init failed (non-fatal): $e');
+      _mdnsSocket?.close();
+      _mdnsSocket = null;
+    }
+
+    // --- (2) Broadcast socket for JSON discovery --------------------------
+    try {
+      _broadcastSocket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        0,
+        reuseAddress: true,
+        reusePort: false,
+      );
+      _broadcastSocket!.broadcastEnabled = true;
+    } catch (e) {
+      debugPrint('[MdnsBeacon] Broadcast socket init failed (non-fatal): $e');
+      _broadcastSocket?.close();
+      _broadcastSocket = null;
+    }
+
+    // Send immediately, then every 30 s.
+    _announce(pin);
+    _timer = Timer.periodic(_interval, (_) => _announce(pin));
+  }
+
+  /// Stop announcements and release sockets.
+  Future<void> stop() async {
+    _timer?.cancel();
+    _timer = null;
+    try {
+      _mdnsSocket?.close();
+    } catch (_) {}
+    _mdnsSocket = null;
+    try {
+      _broadcastSocket?.close();
+    } catch (_) {}
+    _broadcastSocket = null;
+  }
+
+  // --------------------------------------------------------------------------
+
+  void _announce(String pin) {
+    _sendMdnsAnnouncement();
+    _sendJsonBroadcast(pin);
+  }
+
+  /// Send a minimal mDNS response containing one PTR record:
+  ///   _http._tcp.local  PTR  SwordFM._http._tcp.local
+  ///
+  /// Packet layout (all big-endian):
+  ///   Header (12 bytes): ID=0, flags=0x8400, QDCount=0, ANCount=1,
+  ///                      NSCount=0, ARCount=0
+  ///   PTR record:
+  ///     NAME  : encoded label sequence for "_http._tcp.local"
+  ///     TYPE  : 0x000C  (PTR)
+  ///     CLASS : 0x0001  (IN)
+  ///     TTL   : 120
+  ///     RDATA : encoded label sequence for "SwordFM._http._tcp.local"
+  void _sendMdnsAnnouncement() {
+    if (_mdnsSocket == null) return;
+    try {
+      final packet = _buildMdnsPacket();
+      _mdnsSocket!.send(
+        packet,
+        InternetAddress(_mdnsAddress),
+        _mdnsPort,
+      );
+    } catch (e) {
+      debugPrint('[MdnsBeacon] mDNS send error (non-fatal): $e');
+    }
+  }
+
+  /// Encode a dot-separated DNS name as a sequence of length-prefixed labels
+  /// terminated by a zero byte, e.g. "_http._tcp.local" →
+  ///   [5, '_','h','t','t','p', 4, '_','t','c','p', 5, 'l','o','c','a','l', 0]
+  static Uint8List _encodeName(String name) {
+    final out = BytesBuilder();
+    for (final label in name.split('.')) {
+      final bytes = utf8.encode(label);
+      out.addByte(bytes.length);
+      out.add(bytes);
+    }
+    out.addByte(0); // root label
+    return out.toBytes();
+  }
+
+  static Uint8List _buildMdnsPacket() {
+    final serviceDomain = '_http._tcp.local';
+    final serviceInstance = '$_serviceName._http._tcp.local';
+
+    final nameBytes = _encodeName(serviceDomain);
+    final rdataBytes = _encodeName(serviceInstance);
+
+    final buf = BytesBuilder();
+
+    // --- DNS header (12 bytes) ---
+    // ID = 0
+    buf.addByte(0x00);
+    buf.addByte(0x00);
+    // Flags = 0x8400 (QR=1 response, AA=1 authoritative)
+    buf.addByte(0x84);
+    buf.addByte(0x00);
+    // QDCount = 0
+    buf.addByte(0x00);
+    buf.addByte(0x00);
+    // ANCount = 1
+    buf.addByte(0x00);
+    buf.addByte(0x01);
+    // NSCount = 0
+    buf.addByte(0x00);
+    buf.addByte(0x00);
+    // ARCount = 0
+    buf.addByte(0x00);
+    buf.addByte(0x00);
+
+    // --- PTR answer record ---
+    // NAME: encoded _http._tcp.local
+    buf.add(nameBytes);
+    // TYPE = 12 (PTR)
+    buf.addByte(0x00);
+    buf.addByte(0x0C);
+    // CLASS = 1 (IN)
+    buf.addByte(0x00);
+    buf.addByte(0x01);
+    // TTL = 120 seconds (0x00000078)
+    buf.addByte(0x00);
+    buf.addByte(0x00);
+    buf.addByte(0x00);
+    buf.addByte(0x78);
+    // RDLENGTH = length of rdataBytes
+    final rdLen = rdataBytes.length;
+    buf.addByte((rdLen >> 8) & 0xFF);
+    buf.addByte(rdLen & 0xFF);
+    // RDATA: encoded SwordFM._http._tcp.local
+    buf.add(rdataBytes);
+
+    return buf.toBytes();
+  }
+
+  /// Send a JSON UDP broadcast so custom SwordFM clients can auto-discover
+  /// without needing mDNS support.
+  ///
+  /// Payload: {"name":"SwordFM","port":8080,"pin_required":true}
+  void _sendJsonBroadcast(String pin) {
+    if (_broadcastSocket == null) return;
+    try {
+      final payload = jsonEncode({
+        'app': 'SwordFM',
+        'name': _serviceName,
+        'ip': _serverIp,
+        'port': _serverPort,
+        'pin_required': pin.isNotEmpty,
+      });
+      final data = utf8.encode(payload);
+      _broadcastSocket!.send(
+        data,
+        InternetAddress('255.255.255.255'),
+        _discoveryPort,
+      );
+    } catch (e) {
+      debugPrint('[MdnsBeacon] JSON broadcast send error (non-fatal): $e');
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 /// A pure-Dart LAN file sharing server for SwordFM Android.
 ///
@@ -36,6 +264,7 @@ class WebShareServer {
 
   HttpServer? _server;
   final NetworkInfo _networkInfo = NetworkInfo();
+  final _MdnsBeacon _beacon = _MdnsBeacon();
 
   String? _currentIp;
   bool _isRunning = false;
@@ -52,6 +281,10 @@ class WebShareServer {
   // In production you'd externalise this; suitable for a single-device app.
   final Map<String, String> _sessions = {};
 
+  // --- Auth rate-limit state (per client IP) --------------------------------
+  final Map<String, int> _authFailures = {};
+  final Map<String, DateTime> _authBlockedUntil = {};
+
   // --- Client access log (ring buffer) --------------------------------------
   final List<Map<String, dynamic>> _accessLog = [];
 
@@ -63,9 +296,10 @@ class WebShareServer {
   String get pin => _pin;
   String get shareRoot => _shareRoot;
 
-  /// Generate a random 6-digit PIN for client authorization.
+  /// Generate a random 6-digit PIN for client authorization (CSPRNG).
   String _generatePin() {
-    return (100000 + Random().nextInt(900000)).toString();
+    final r = Random.secure();
+    return (100000 + r.nextInt(900000)).toString();
   }
 
   /// Rotate to a fresh PIN and invalidate every existing session cookie.
@@ -96,6 +330,7 @@ class WebShareServer {
 
       _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
       _isRunning = true;
+      unawaited(_beacon.startWithInfo(_pin, _currentIp!, port));
 
       _server!.listen((HttpRequest request) async {
         try {
@@ -170,7 +405,8 @@ class WebShareServer {
   }
 
   static String randomHex(int byteCount) {
-    final bytes = List<int>.generate(byteCount, (_) => Random().nextInt(256));
+    final r = Random.secure();
+    final bytes = List<int>.generate(byteCount, (_) => r.nextInt(256));
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
@@ -214,6 +450,15 @@ class WebShareServer {
   // ---- Request handlers ----------------------------------------------------
 
   Future<void> _handleAuth(HttpRequest request) async {
+    // Rate-limit PIN guesses per client IP: 5 failures → 30s lockout.
+    final ip = request.connectionInfo?.remoteAddress.address ?? 'unknown';
+    final now = DateTime.now();
+    final blockedUntil = _authBlockedUntil[ip];
+    if (blockedUntil != null && now.isBefore(blockedUntil)) {
+      _sendJsonResponse(request, {'error': 'Too many attempts, try later'},
+          statusCode: 429);
+      return;
+    }
     final bodyStr = await _readBody(request);
     Map<dynamic, dynamic>? body;
     try {
@@ -225,9 +470,16 @@ class WebShareServer {
       return;
     }
     if (!constantTimeCompare(submittedPin, _pin)) {
+      final fails = (_authFailures[ip] ?? 0) + 1;
+      _authFailures[ip] = fails;
+      if (fails >= 5) {
+        _authBlockedUntil[ip] = now.add(const Duration(seconds: 30));
+        _authFailures[ip] = 0;
+      }
       _sendJsonResponse(request, {'error': 'Invalid pin'}, statusCode: 401);
       return;
     }
+    _authFailures.remove(ip);
     _grantSession(request, submittedPin);
   }
 
@@ -610,8 +862,9 @@ class WebShareServer {
       await sink.close();
       // Clean up partial file on error.
       if (await outFile.exists()) await outFile.delete();
+      debugPrint('WebShareServer upload failed: $e');
       _sendJsonResponse(request, {
-        'error': 'Upload failed: $e',
+        'error': 'Upload failed',
       }, statusCode: 500);
     }
   }
@@ -620,10 +873,11 @@ class WebShareServer {
 
   void _logAccess(HttpRequest request, String path, String query) {
     final ip = request.connectionInfo?.remoteAddress.address ?? 'unknown';
+    // Never log the query string: it can carry PINs/tokens. Keep path only.
     _accessLog.add({
       'ip': ip,
       'path': path,
-      'query': query,
+      'query': '',
       'ts': DateTime.now(),
     });
     if (_accessLog.length > _kMaxAccessLog) {
@@ -664,6 +918,7 @@ class WebShareServer {
   void stop() {
     _server?.close(force: true).catchError((_) {});
     _isRunning = false;
+    _beacon.stop();
   }
 
   Widget buildQrCode() {
