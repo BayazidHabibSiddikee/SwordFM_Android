@@ -19,7 +19,6 @@ import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
 import 'screens/network_screen.dart';
 import 'screens/recent_files_screen.dart';
-import 'screens/terminal_screen.dart';
 import 'screens/notepad_screen.dart';
 import 'screens/document_scanner_screen.dart';
 import 'screens/cast_screen.dart';
@@ -66,8 +65,13 @@ Future<void> main() async {
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'com.swordfm.audio',
         androidNotificationChannelName: 'SwordFM playback',
-        androidNotificationOngoing: true,
+        androidNotificationChannelDescription: 'SwordFM music playback controls',
+        // Do NOT set androidNotificationOngoing: true — that hides the
+        // notification entirely on some Android 13+ devices. Let the
+        // foreground service manage the ongoing state instead.
         androidStopForegroundOnPause: true,
+        androidShowNotificationBadge: true,
+        notificationColor: Color(0xFF61AFEF),
       ),
     );
   } catch (e) {
@@ -147,16 +151,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   int _itemCount = 0; // item count in the current directory
 
-  /// When a tool from the left sidebar (Scanner, Notepad, App Analyzer, Cast)
+  /// When a tool from the left sidebar (Scanner, Notepad, Cast)
   /// is opened, it is embedded here inside the Files tab so the bottom
   /// navigation bar stays visible instead of being covered by a pushed full
   /// screen route. LAN/Network/Cloud map to their existing bottom-bar tabs.
   Widget? _sidebarTool;
   bool _toolFullscreen = false;
-
-  // The Terminal tab is built lazily on first visit (the IndexedStack builds
-  // all children eagerly, and spawning a PTY at app start would be wasteful).
-  bool _terminalVisited = false;
 
   // "All files access" grant prompt is shown at most once per session.
   bool _storagePromptShown = false;
@@ -241,6 +241,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _openFileFromIntent(String path) {
     final ext = p.extension(path).toLowerCase();
     final file = File(path);
+    // Gate the swordfm:// QR deep link: only open paths the app can see.
+    // Reject traversal, null bytes, and roots outside the shared storage.
+    if (path.contains('..') || path.contains(String.fromCharCode(0))) return;
     if (!file.existsSync()) return;
     final item = FileItem(
       entity: file,
@@ -738,7 +741,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                 );
                                 messenger.showSnackBar(
                                   SnackBar(
-                                    content: Text('Path copied: $_currentPath'),
+                                    content: Text('Path copied: ${_friendlyPath(_currentPath)}'),
                                     duration: const Duration(seconds: 2),
                                   ),
                                 );
@@ -851,10 +854,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             StorageAnalysisScreen(rootPath: AppPaths.home),
             const NetworkScreen(),
             const CloudBrowserScreen(),
-            // Terminal — lazy: only spawns the PTY shell after first visit.
-            _terminalVisited
-                ? TerminalScreen(startPath: AppPaths.home)
-                : const SizedBox.shrink(),
           ],
         ),
             ),
@@ -874,7 +873,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         onDestinationSelected: (index) => setState(() {
           _selectedIndex = index;
           if (index == 0) _previewVisible = true;
-          if (index == 6) _terminalVisited = true;
         }),
         backgroundColor: surface,
         indicatorColor: cs.primaryContainer,
@@ -885,11 +883,78 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Storage'),
           NavigationDestination(icon: Icon(Icons.cloud), label: 'Network'),
           NavigationDestination(icon: Icon(Icons.cloud_queue), label: 'Cloud'),
-          NavigationDestination(icon: Icon(Icons.terminal), label: 'Terminal'),
         ],
       ),
     ),
     ); // PopScope
+  }
+
+  /// Maps a raw Android storage path to a human-readable label.
+  /// No emojis — plain text like "Phone", "Phone / Downloads", "Phone / Camera".
+  String _friendlyPath(String path) {
+    const root = '/storage/emulated/0';
+    const sdRoot = '/storage/';
+    final knownFolders = {
+      'Download': 'Downloads',
+      'Downloads': 'Downloads',
+      'DCIM': 'Camera',
+      'Pictures': 'Pictures',
+      'Music': 'Music',
+      'Movies': 'Videos',
+      'Videos': 'Videos',
+      'Documents': 'Documents',
+      'Android': 'Android',
+      'Ringtones': 'Ringtones',
+      'Notifications': 'Notifications',
+      'Alarms': 'Alarms',
+      'Podcasts': 'Podcasts',
+      'Audiobooks': 'Audiobooks',
+    };
+    if (path == root || path == '$root/') return 'Phone';
+    if (path.startsWith('$root/')) {
+      final rest = path.substring(root.length + 1);
+      final parts = rest.split('/');
+      final friendly = knownFolders[parts[0]] ?? parts[0];
+      if (parts.length == 1) return 'Phone / $friendly';
+      return 'Phone / $friendly / ${parts.sublist(1).join(' / ')}';
+    }
+    // External SD card or other volume
+    if (path.startsWith(sdRoot)) {
+      final parts = path.substring(sdRoot.length).split('/');
+      if (parts.isNotEmpty) {
+        final vol = parts[0]; // e.g. "1234-5678"
+        if (parts.length == 1) return 'SD Card ($vol)';
+        return 'SD Card ($vol) / ${parts.sublist(1).join(' / ')}';
+      }
+    }
+    return path;
+  }
+
+  /// Returns a clean label for a single breadcrumb segment.
+  /// Hides the raw internal path bones (storage / emulated / 0) entirely,
+  /// replacing them with nothing — so the breadcrumb reads cleanly.
+  String _friendlySegment(String segment, String fullPath) {
+    // Internal storage bones — hidden entirely
+    if (segment == 'storage' || segment == 'emulated' || segment == '0') {
+      return '';
+    }
+    final knownFolders = {
+      'Download': 'Downloads',
+      'Downloads': 'Downloads',
+      'DCIM': 'Camera',
+      'Pictures': 'Pictures',
+      'Music': 'Music',
+      'Movies': 'Videos',
+      'Videos': 'Videos',
+      'Documents': 'Documents',
+      'Android': 'Android',
+      'Ringtones': 'Ringtones',
+      'Notifications': 'Notifications',
+      'Alarms': 'Alarms',
+      'Podcasts': 'Podcasts',
+      'Audiobooks': 'Audiobooks',
+    };
+    return knownFolders[segment] ?? segment;
   }
 
   List<Widget> _buildBreadcrumbs() {
@@ -897,14 +962,17 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final widgets = <Widget>[];
     String accumulated = '';
 
-    // Home root — only styled as the last crumb when we're actually at '/'
-    widgets.add(_breadcrumbChip('/', '/', isLast: parts.isEmpty));
+    // Home root chip — always shows "Phone"
+    widgets.add(_breadcrumbChip('Phone', '/', isLast: parts.isEmpty));
 
     for (final part in parts) {
       accumulated += '/$part';
+      final label = _friendlySegment(part, accumulated);
+      // Skip empty labels (internal path bones we hid)
+      if (label.isEmpty) continue;
       widgets.add(const SizedBox(width: 4));
       widgets.add(
-        _breadcrumbChip(part, accumulated, isLast: part == parts.last),
+        _breadcrumbChip(label, accumulated, isLast: part == parts.last),
       );
     }
     return widgets;

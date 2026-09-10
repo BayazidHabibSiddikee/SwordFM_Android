@@ -48,7 +48,7 @@ class _ConvertDialogState extends State<ConvertDialog> {
 
   String _friendlyResultPath(String path) {
     if (path.startsWith('/storage/emulated/0/')) {
-      return '📱 Phone / ${path.substring(21)}';
+      return 'Phone / ${path.substring(21)}';
     }
     return path;
   }
