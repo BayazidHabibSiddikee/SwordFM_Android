@@ -6,6 +6,8 @@ import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'docx_reader.dart';
+import 'ocr_service.dart';
 import '../utils/constants.dart' show AppPaths;
 
 /// Document conversion utilities for SwordFM Android.
@@ -83,49 +85,6 @@ class DocConverter {
     }
   }
 
-  /// Converts a file to Markdown format, writing `<base>.md` next to the
-  /// source. For text/code/markdown files this is essentially a copy with
-  /// a `.md` extension. For PDF/DOCX the extracted text is saved as Markdown.
-  static Future<String?> toMarkdown(String sourcePath) async {
-    final ext = p.extension(sourcePath).toLowerCase();
-    if (ext == '.pdf') {
-      final text = _extractPdfTextSync(sourcePath);
-      if (text == null || text.isEmpty) return null;
-      try {
-        final outPath = _resolveOutputPath(sourcePath, '.md');
-        await _writeOutput(outPath, utf8.encode(text));
-        return outPath;
-      } catch (e) {
-        debugPrint('toMarkdown failed for $sourcePath: $e');
-        return null;
-      }
-    }
-    if (ext == '.docx') {
-      final text = await _readSourceText(sourcePath);
-      if (text.isEmpty) return null;
-      try {
-        final outPath = _resolveOutputPath(sourcePath, '.md');
-        await _writeOutput(outPath, utf8.encode(text));
-        return outPath;
-      } catch (e) {
-        debugPrint('toMarkdown failed for $sourcePath: $e');
-        return null;
-      }
-    }
-    if (!canConvert(sourcePath)) return null;
-    final file = File(sourcePath);
-    if (!await file.exists()) return null;
-    try {
-      final content = await _readSourceText(sourcePath);
-      final outPath = _resolveOutputPath(sourcePath, '.md');
-      await _writeOutput(outPath, utf8.encode(content));
-      return outPath;
-    } catch (e) {
-      debugPrint('toMarkdown failed for $sourcePath: $e');
-      return null;
-    }
-  }
-
   /// Reads any convertible source as text. `.docx` sources are ZIP binaries —
   /// the text is pulled from `word/document.xml`; everything else is decoded
   /// as UTF-8 with malformed bytes tolerated (previously a strict
@@ -172,18 +131,34 @@ class DocConverter {
   /// Extracts the plain text of a `.pdf` file, writing `<base>.txt` next to
   /// the source. Text is recovered by decompressing the FlateDecode content
   /// streams and pulling the literal strings from the text-showing operators
-  /// (Tj / TJ). Encrypted or image-only PDFs yield null.
+  /// (Tj / TJ). For image-only / scanned PDFs where that yields nothing,
+  /// falls back to Tesseract OCR (requires the bundled eng.traineddata).
   static Future<String?> fromPdf(String sourcePath) async {
+    // 1. Fast text-stream extraction (works for text-layer PDFs)
     final text = _extractPdfTextSync(sourcePath);
-    if (text == null || text.isEmpty) return null;
-    try {
-      final outPath = _resolveOutputPath(sourcePath, '.txt');
-      await _writeOutput(outPath, utf8.encode(text));
-      return outPath;
-    } catch (e) {
-      debugPrint('fromPdf write failed for $sourcePath: $e');
-      return null;
+    if (text != null && text.isNotEmpty) {
+      try {
+        final outPath = _resolveOutputPath(sourcePath, '.txt');
+        await _writeOutput(outPath, utf8.encode(text));
+        return outPath;
+      } catch (e) {
+        debugPrint('fromPdf write failed for $sourcePath: $e');
+        return null;
+      }
     }
+    // 2. OCR fallback for scanned / image-only PDFs
+    try {
+      // Import lazily to avoid a hard dependency when OCR is not needed.
+      final ocrText = await _ocrPdf(sourcePath);
+      if (ocrText != null && ocrText.trim().isNotEmpty) {
+        final outPath = _resolveOutputPath(sourcePath, '.txt');
+        await _writeOutput(outPath, utf8.encode(ocrText));
+        return outPath;
+      }
+    } catch (e) {
+      debugPrint('fromPdf OCR fallback failed: $e');
+    }
+    return null;
   }
 
   /// Synchronous PDF text extraction. Handles both `(…)Tj` literal strings and
@@ -211,11 +186,11 @@ class DocConverter {
         }
         String content;
         try {
-          final inflated = ZLibDecoder().decodeBytes(data.codeUnits);
+          final inflated = ZLibDecoder().decodeBytes(latin1.encode(data));
           content = latin1.decode(inflated, allowInvalid: true);
         } catch (_) {
           // Not FlateDecode — try the raw data as the content stream.
-          content = latin1.decode(data.codeUnits, allowInvalid: true);
+          content = data;
         }
         // Only text-showing content streams matter.
         if (!content.contains('BT') || !RegExp(r'\bTj\b|\bTJ\b').hasMatch(content)) {
@@ -241,6 +216,15 @@ class DocConverter {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Public convenience wrapper around [_extractPdfTextSync].
+  /// Returns the extracted text (capped at [maxChars]) or null.
+  /// Used by the preview panel and PDF reader text-fallback path.
+  static String? extractPdfText(String sourcePath, {int maxChars = 200000}) {
+    final text = _extractPdfTextSync(sourcePath);
+    if (text == null) return null;
+    return text.length > maxChars ? text.substring(0, maxChars) : text;
   }
 
   /// Decodes a PDF hex string (`<414243>` → `ABC`). Digits are pairs of hex
@@ -322,28 +306,16 @@ class DocConverter {
           .where((f) => f.name == 'word/document.xml')
           .firstOrNull;
       if (docXml == null) return null;
-      // readBytes() — archive 4.x-safe content read. The legacy `.content`
-      // getter maps a failed decompression to EMPTY bytes, so a corrupt/
-      // unsupported entry produced a silently EMPTY .txt with a success
-      // result. readBytes() returns null instead, letting us fail loudly
-      // (see ArchiveService for the same fix).
+      // readBytes() — archive 4.x-safe content read (see _readSourceText).
+      // docXml.content is unreliable on 4.x with certain compressions.
       final docXmlBytes = docXml.readBytes();
       if (docXmlBytes == null) return null;
-      // allowMalformed — tolerate stray invalid UTF-8 inside the XML.
-      final xml = utf8.decode(docXmlBytes, allowMalformed: true);
-      // Strip tags; break paragraphs/rows onto separate lines; decode XML
-      // entities so "&amp;" doesn't leak literally into the TXT output
-      // (mirrors the DOCX branch of [_readSourceText]).
+      final xml = utf8.decode(docXmlBytes);
+      // Strip tags; break paragraphs/rows onto separate lines.
       final text = xml
           .replaceAll(RegExp(r'</w:p>'), '\n')
           .replaceAll(RegExp(r'</w:tr>'), '\n')
-          .replaceAll('<w:tab/>', '\t')
           .replaceAll(RegExp(r'<[^>]+>'), '')
-          .replaceAll('&amp;', '&')
-          .replaceAll('&lt;', '<')
-          .replaceAll('&gt;', '>')
-          .replaceAll('&quot;', '"')
-          .replaceAll('&apos;', "'")
           .replaceAll(RegExp(r'\n{3,}'), '\n\n')
           .trim();
       final outPath = _resolveOutputPath(sourcePath, '.txt');
@@ -392,8 +364,309 @@ class DocConverter {
     await File(path).writeAsBytes(bytes);
   }
 
-  /// Prepares the raw file content for the shared markdown pipeline:
-  /// HTML → plain text (tags stripped), CSV → a markdown table, anything
+  // ---------------------------------------------------------------------------
+  // Markdown round-trip
+  //
+  // Goal: PDF → MD → DOCX, and DOCX → MD → PDF, with as much structure
+  // preserved as a pure-Dart text-recovery pass can manage. The PDF side is
+  // coordinate-aware: Tj/TJ strings are clustered by Y, lines by X-gap, and
+  // font-size jumps from the Tf operator infer headings. The DOCX side walks
+  // the structural docx_reader blocks. Image fidelity is not preserved — only
+  // text and basic block structure (headings, lists, tables, quotes).
+  // ---------------------------------------------------------------------------
+
+  /// Converts any convertible source to a `.md` file next to the source.
+  /// PDF sources use [_extractPdfMarkdownSync] (layout-aware), DOCX sources
+  /// use [DocxReader] and emit real markdown from the parsed blocks, and
+  /// text sources are normalised in place. Returns the output path or null.
+  static Future<String?> toMarkdown(String sourcePath) async {
+    if (!canConvert(sourcePath)) return null;
+    final file = File(sourcePath);
+    if (!await file.exists()) return null;
+    final ext = p.extension(sourcePath).toLowerCase();
+    try {
+      String md;
+      if (ext == '.pdf') {
+        md = _extractPdfMarkdownSync(sourcePath);
+        // Fallback: if text extraction yielded nothing (scanned/image PDF),
+        // use OCR to get text then treat it as plain markdown.
+        if (md.trim().isEmpty) {
+          final ocrText = await _ocrPdf(sourcePath);
+          md = ocrText ?? '';
+        }
+      } else if (ext == '.docx') {
+        final doc = await DocxReader.parse(sourcePath);
+        md = _docxBlocksToMarkdown(doc);
+      } else {
+        final raw = await _readSourceText(sourcePath);
+        md = _preprocessForMarkdown(sourcePath, raw);
+      }
+      final outPath = _resolveOutputPath(sourcePath, '.md');
+      await _writeOutput(outPath, utf8.encode(md));
+      return outPath;
+    } catch (e) {
+      debugPrint('toMarkdown failed for $sourcePath: $e');
+      return null;
+    }
+  }
+
+  /// Walks a parsed DOCX and emits markdown so DOCX → MD → PDF/DOCX
+  /// round-trip preserves headings, lists, tables, and blockquotes instead
+  /// of collapsing to flat paragraphs.
+  static String _docxBlocksToMarkdown(DocxDocument doc) {
+    final buf = StringBuffer();
+    for (final b in doc.blocks) {
+      if (b is DocxHeading) {
+        final level = b.level.clamp(1, 6);
+        buf.writeln('${'#' * level} ${_runsToInlineMd(b.runs)}');
+        buf.writeln();
+      } else if (b is DocxParagraph) {
+        final text = _runsToInlineMd(b.runs);
+        if (text.isEmpty) {
+          buf.writeln();
+        } else {
+          buf.writeln(text);
+          buf.writeln();
+        }
+      } else if (b is DocxList) {
+        var n = 0;
+        for (final item in b.items) {
+          if (b.ordered) {
+            n++;
+            buf.writeln('$n. ${_runsToInlineMd(item)}');
+          } else {
+            buf.writeln('- ${_runsToInlineMd(item)}');
+          }
+        }
+        buf.writeln();
+      } else if (b is DocxTable) {
+        if (b.rows.isEmpty) continue;
+        final header = b.rows.first;
+        buf.writeln('| ${header.map((c) => _runsToInlineMd(c)).join(' | ')} |');
+        buf.writeln('|${header.map((_) => '---').join('|')}|');
+        for (final row in b.rows.skip(1)) {
+          buf.writeln('| ${row.map((c) => _runsToInlineMd(c)).join(' | ')} |');
+        }
+        buf.writeln();
+      } else if (b is DocxDivider) {
+        buf.writeln('---');
+        buf.writeln();
+      } else if (b is DocxImage) {
+        // Embedded images can't be re-embedded via pure markdown; drop a
+        // placeholder so the structure stays visible.
+        buf.writeln('![image](${b.path})');
+        buf.writeln();
+      }
+    }
+    return buf.toString().trim();
+  }
+
+  /// Serialises inline runs (with bold/italic/strike/links) to markdown.
+  static String _runsToInlineMd(List<DocxRun> runs) {
+    final buf = StringBuffer();
+    for (final r in runs) {
+      if (r is DocxLineBreak) {
+        buf.write('  \n');
+        continue;
+      }
+      if (r is DocxInlineImage) {
+        buf.write('![image](${r.imagePath})');
+        continue;
+      }
+      var text = r.text;
+      if (r.bold) text = '**$text**';
+      if (r.italic) text = '*$text*';
+      if (r.strike) text = '~~$text~~';
+      if (r.link != null) {
+        text = '[$text](${r.link})';
+      }
+      buf.write(text);
+    }
+    return buf.toString();
+  }
+
+  /// Layout-aware PDF text extraction. Tracks Tm (text matrix) and Td
+  /// (text displacement) operators to recover x/y position for every
+  /// Tj/TJ string. Strings are clustered into lines by Y, into paragraphs
+  /// by Y-gap, and headings are inferred when a run's font size (from Tf)
+  /// is significantly above the modal size. Bullet/number prefixes are
+  /// detected from leading characters. Output is real markdown.
+  static String _extractPdfMarkdownSync(String sourcePath) {
+    try {
+      final file = File(sourcePath);
+      if (!file.existsSync()) return '';
+      if (file.lengthSync() > 32 * 1024 * 1024) return '';
+      final bytes = file.readAsBytesSync();
+      final raw = latin1.decode(bytes, allowInvalid: true);
+
+      final runs = <_PdfRun>[];
+      for (final part in raw.split('endstream')) {
+        final s = part.indexOf('stream');
+        if (s < 0) continue;
+        var data = part.substring(s + 'stream'.length);
+        if (data.startsWith('\r\n')) {
+          data = data.substring(2);
+        } else if (data.startsWith('\n') || data.startsWith('\r')) {
+          data = data.substring(1);
+        }
+        String content;
+        try {
+          final inflated = ZLibDecoder().decodeBytes(latin1.encode(data));
+          content = latin1.decode(inflated, allowInvalid: true);
+        } catch (_) {
+          content = data;
+        }
+        if (!content.contains('BT') ||
+            !RegExp(r'\bTj\b|\bTJ\b').hasMatch(content)) {
+          continue;
+        }
+        // PDF operators are postfix: we accumulate state (x, y, fontSize)
+        // as we walk lines, and stamp each Tj/TJ output with that state.
+        var x = 0.0;
+        var y = 0.0;
+        var fontSize = 12.0;
+        for (final line in content.split(RegExp(r'[\r\n]'))) {
+          final trimmed = line.trim();
+          if (trimmed.isEmpty) continue;
+          // Tf: /F1 14 Tf
+          final tf = RegExp(r'^(/\S+)\s+([\d.]+)\s+Tf$').firstMatch(trimmed);
+          if (tf != null) {
+            fontSize = double.tryParse(tf.group(2)!) ?? fontSize;
+            continue;
+          }
+          // Tm: a b c d e f Tm — we only care about e (x) and f (y).
+          final tm = RegExp(
+            r'^([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+Tm$',
+          ).firstMatch(trimmed);
+          if (tm != null) {
+            x = double.tryParse(tm.group(5)!) ?? x;
+            y = double.tryParse(tm.group(6)!) ?? y;
+            continue;
+          }
+          // Td: x y Td (relative)
+          final td = RegExp(r'^([-\d.]+)\s+([-\d.]+)\s+Td$').firstMatch(trimmed);
+          if (td != null) {
+            x += double.tryParse(td.group(1)!) ?? 0;
+            y += double.tryParse(td.group(2)!) ?? 0;
+            continue;
+          }
+          if (trimmed == 'T*' || trimmed == 'ET' || trimmed == 'BT') continue;
+          // Strip trailing Tj/TJ and pull parenthesised literals.
+          final opMatch = RegExp(r'\s+T[Jj]\s*$').firstMatch(trimmed);
+          if (opMatch == null) continue;
+          final body = trimmed.substring(0, opMatch.start);
+          for (final m
+              in RegExp(r'\(((?:\\.|[^()\\])*)\)').allMatches(body)) {
+            final text = _unescapePdfString(m.group(1)!);
+            if (text.trim().isEmpty) continue;
+            runs.add(_PdfRun(x, y, fontSize, text));
+          }
+        }
+      }
+
+      if (runs.isEmpty) return '';
+
+      // Modal font size — headings are anything significantly above this.
+      final sizes = runs.map((r) => r.fontSize).toList()..sort();
+      final modal = sizes[sizes.length ~/ 2];
+      final headingThreshold = modal * 1.25;
+
+      // Sort top-to-bottom (PDF Y grows up, so larger Y = higher on page).
+      runs.sort((a, b) {
+        final dy = b.y.compareTo(a.y);
+        if (dy.abs() > modal * 0.6) return dy;
+        return a.x.compareTo(b.x);
+      });
+
+      // Cluster into lines by Y (within ~0.6 × fontSize).
+      final lines = <_PdfLine>[];
+      _PdfLine? current;
+      for (final r in runs) {
+        if (current == null ||
+            (current.y - r.y).abs() > r.fontSize * 0.6) {
+          current = _PdfLine(y: r.y, runs: [r]);
+          lines.add(current);
+        } else {
+          current.runs.add(r);
+        }
+      }
+      // Within a line, sort by X and merge runs whose X-gap is small.
+      final mergedLines = <_PdfLine>[];
+      for (final ln in lines) {
+        ln.runs.sort((a, b) => a.x.compareTo(b.x));
+        final pieces = <_PdfRun>[];
+        for (final r in ln.runs) {
+          if (pieces.isNotEmpty) {
+            final last = pieces.last;
+            if (r.x - (last.x + last.text.length * last.fontSize * 0.5) <
+                last.fontSize * 0.3) {
+              pieces[pieces.length - 1] = _PdfRun(
+                last.x,
+                last.y,
+                last.fontSize,
+                '${last.text}${r.text}',
+              );
+              continue;
+            }
+          }
+          pieces.add(r);
+        }
+        mergedLines.add(_PdfLine(y: ln.y, runs: pieces));
+      }
+
+      // Group lines into paragraphs by Y-gap (>= 1.5× modal font size).
+      final paragraphs = <List<_PdfRun>>[];
+      var currentPara = <_PdfRun>[];
+      _PdfLine? prevLine;
+      for (final ln in mergedLines) {
+        if (prevLine != null &&
+            (prevLine.y - ln.y).abs() > modal * 1.5 &&
+            currentPara.isNotEmpty) {
+          paragraphs.add(currentPara);
+          currentPara = [];
+        }
+        currentPara.addAll(ln.runs);
+        prevLine = ln;
+      }
+      if (currentPara.isNotEmpty) paragraphs.add(currentPara);
+
+      // Emit markdown.
+      final md = StringBuffer();
+      for (final para in paragraphs) {
+        final maxSize = para
+            .map((r) => r.fontSize)
+            .reduce((a, b) => a > b ? a : b);
+        final text = para.map((r) => r.text).join().trim();
+        if (text.isEmpty) {
+          md.writeln();
+          continue;
+        }
+        if (maxSize >= headingThreshold) {
+          final level = maxSize >= headingThreshold * 1.4
+              ? 1
+              : maxSize >= headingThreshold * 1.2
+                  ? 2
+                  : 3;
+          md.writeln('${'#' * level} $text');
+          md.writeln();
+        } else if (RegExp(r'^\s*[-*+]\s+').hasMatch(text)) {
+          md.writeln('- ${text.replaceFirst(RegExp(r'^\s*[-*+]\s+'), '')}');
+          md.writeln();
+        } else if (RegExp(r'^\s*\d+[.)]\s+').hasMatch(text)) {
+          md.writeln(text);
+          md.writeln();
+        } else {
+          md.writeln(text);
+          md.writeln();
+        }
+      }
+      return md.toString().trim();
+    } catch (e) {
+      debugPrint('_extractPdfMarkdownSync failed: $e');
+      return '';
+    }
+  }
+
   /// else passes through unchanged.
   static String _preprocessForMarkdown(String sourcePath, String content) {
     final ext = p.extension(sourcePath).toLowerCase();
@@ -404,12 +677,18 @@ class DocConverter {
       return _csvToMarkdown(content);
     }
     if (ext == '.docx') {
-      // DOCX sources were already fully decoded (XML stripped, entities
-      // resolved) by [_readSourceText] — the markdown pipeline consumes
-      // plain text. Stripping again here double-decoded entities (a literal
-      // "&lt;" in the document became "&" then "<" and could get eaten by
-      // downstream markdown parsing).
-      return content;
+      // DOCX content is raw XML from word/document.xml — extract text
+      return content
+          .replaceAll('</w:p>', '\n')
+          .replaceAll('</w:tr>', '\n')
+          .replaceAll('<w:tab/>', '\t')
+          .replaceAll(RegExp(r'<[^>]+>'), '')
+          .replaceAll('&amp;', '&')
+          .replaceAll('&lt;', '<')
+          .replaceAll('&gt;', '>')
+          .replaceAll('&quot;', '"')
+          .replaceAll('&apos;', "'")
+          .trim();
     }
     return content;
   }
@@ -439,7 +718,7 @@ class DocConverter {
         .map((l) => _splitCsvLine(l))
         .toList();
     if (rows.isEmpty) return csv;
-    String cell(String s) => s.trim().replaceAll('|', r'\|');
+    final cell = (String s) => s.trim().replaceAll('|', '\\|');
     final header = rows.first;
     final sb = StringBuffer();
     sb.writeln('| ${header.map(cell).join(' | ')} |');
@@ -624,17 +903,20 @@ class DocConverter {
   }
 
   /// Converts Markdown content to plain text (strips formatting).
+  /// Fenced code blocks keep their content (fences removed); an unclosed
+  /// trailing fence keeps everything after it; stray inline markers are
+  /// closed so no bare `*` / `_` / backtick leaks into the output.
   static String markdownToText(String markdown) {
     var text = markdown;
-    // Fenced code blocks: strip the fence markers, KEEP the code content.
-    // Previously the regex deleted everything between fences, so converting
-    // a README with code samples to TXT silently dropped the code.
+    // Extract fenced code content first (keep code, drop fences).
+    final codeContents = <String>[];
     text = text.replaceAllMapped(
-      RegExp(r'^```[^\n]*\n([\s\S]*?)```', multiLine: true),
-      (m) => m.group(1)!,
+      RegExp(r'```[^\n]*\n([\s\S]*?)(```|$)'),
+      (m) {
+        codeContents.add(m.group(1)!);
+        return '\u0000CODE${codeContents.length - 1}\u0000';
+      },
     );
-    // Unclosed trailing fence: drop the marker, keep the code.
-    text = text.replaceAll(RegExp(r'^```[^\n]*\n', multiLine: true), '');
     // Headings
     text = text.replaceAllMapped(
       RegExp(r'^#{1,6}\s+(.+)$', multiLine: true),
@@ -670,14 +952,31 @@ class DocConverter {
       RegExp(r'^\s*(-{3,}|\*{3,}|_{3,})\s*$', multiLine: true),
       '',
     );
-    // Unmatched inline markers (a lone "*", "**", or "`" with no closing
-    // partner) previously leaked into TXT output. Matched pairs were
-    // already stripped above; drop any leftovers. Note: a literal
-    // "3 * 4" loses its asterisk — acceptable for plain-text output.
-    text = text.replaceAll('**', '');
-    text = text.replaceAll(RegExp(r'(?<!\*)\*(?!\*)'), '');
-    text = text.replaceAll('`', '');
-    return text.trim();
+    // Restore fenced-code content verbatim (no inline-marker stripping).
+    for (var i = 0; i < codeContents.length; i++) {
+      text = text.replaceAll('\u0000CODE${i}\u0000', codeContents[i].trim());
+    }
+    // Close stray inline markers so no bare runs leak out: drop a trailing
+    // run of the marker char when it has no closing partner on the line.
+    final lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (line.contains('\u0000CODE')) continue;
+      line = line.replaceAllMapped(
+        RegExp(r'(^|[\s(\[])\*([^*`\n]+)$'),
+        (m) => '${m.group(1)}${m.group(2)}',
+      );
+      line = line.replaceAllMapped(
+        RegExp(r'(^|[\s(\[])_([^_`\n]+)$'),
+        (m) => '${m.group(1)}${m.group(2)}',
+      );
+      line = line.replaceAllMapped(
+        RegExp(r'(^|[\s(\[])`([^`\n]+)$'),
+        (m) => '${m.group(1)}${m.group(2)}',
+      );
+      lines[i] = line;
+    }
+    return lines.join('\n').trim();
   }
 
   static String _inline(String text) {
@@ -735,9 +1034,13 @@ class DocConverter {
   }
 
   /// Lists available output formats for a given file (PDF→PDF is not offered —
-  /// the source is already a PDF).
+  /// the source is already a PDF). The Markdown option is what the PDF → DOCX
+  /// and DOCX → PDF round-trips flow through; once you have a `.md` you can
+  /// run it through `toPdf()` or `toDocx()` again.
   static List<String> getAvailableFormats(String path) {
     if (!canConvert(path)) return [];
+    // Canonical labels: 'Markdown' (not 'MD') — matches tests, help text,
+    // and the RUET round-trip suite. ConvertDialog maps both labels.
     final list = ['PDF', 'DOCX', 'HTML', 'TXT', 'Markdown'];
     if (p.extension(path).toLowerCase() == '.pdf') list.remove('PDF');
     return list;
@@ -1080,6 +1383,18 @@ class DocConverter {
     final List<int> zip = ZipEncoder().encode(archive);
     return Uint8List.fromList(zip);
   }
+
+  /// Rasterises each PDF page and runs Tesseract OCR on it.
+  /// Returns the joined text, or null if OCR service is unavailable.
+  static Future<String?> _ocrPdf(String pdfPath) async {
+    try {
+      final text = await OcrService.extractFromDocument(pdfPath);
+      return text.trim().isEmpty ? null : text;
+    } catch (e) {
+      debugPrint('_ocrPdf: $e');
+      return null;
+    }
+  }
 }
 
 /// A single classified Markdown block, shared by the PDF and DOCX builders.
@@ -1116,3 +1431,20 @@ const String _kDocxRels =
 const String _kDocxDocRels =
     '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>''';
+
+/// A single positioned text run recovered from a PDF content stream. Used
+/// by [_extractPdfMarkdownSync] to cluster strings into lines/paragraphs.
+class _PdfRun {
+  final double x;
+  final double y;
+  final double fontSize;
+  final String text;
+  const _PdfRun(this.x, this.y, this.fontSize, this.text);
+}
+
+/// A Y-cluster of runs forming a single visual line on the page.
+class _PdfLine {
+  final double y;
+  final List<_PdfRun> runs;
+  _PdfLine({required this.y, required this.runs});
+}
