@@ -38,6 +38,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
   LoopMode _loopMode = LoopMode.off;
   Timer? _sleepTimer;
   int? _sleepMinutesLeft;
+  StreamSubscription<int?>? _indexSubscription;
 
   @override
   void initState() {
@@ -61,7 +62,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
       _speed = _player!.speed;
       _shuffle = _player!.shuffleModeEnabled;
       _loopMode = _player!.loopMode;
-      _player!.currentIndexStream.listen((i) {
+      _indexSubscription = _player!.currentIndexStream.listen((i) {
         if (i != null && mounted) setState(() => _currentIndex = i);
       });
     } else {
@@ -77,7 +78,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
       );
       await _player!.setAudioSource(pl, initialIndex: widget.initialIndex);
       _currentIndex = widget.initialIndex;
-      _player!.currentIndexStream.listen((i) {
+      _indexSubscription = _player!.currentIndexStream.listen((i) {
         if (i != null && mounted) setState(() => _currentIndex = i);
       });
     }
@@ -88,6 +89,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
   @override
   void dispose() {
     _sleepTimer?.cancel();
+    _indexSubscription?.cancel();
     super.dispose();
   }
 
@@ -115,17 +117,22 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Text('Playback Speed',
-                style: TextStyle(
-                    color: OneDarkColors.fg, fontWeight: FontWeight.bold)),
+            child: Text(
+              'Playback Speed',
+              style: TextStyle(
+                color: OneDarkColors.fg,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
           for (final s in [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0])
             ListTile(
-              title: Text('${s}x',
-                  style: TextStyle(
-                      color: s == _speed
-                          ? OneDarkColors.cyan
-                          : OneDarkColors.fg)),
+              title: Text(
+                '${s}x',
+                style: TextStyle(
+                  color: s == _speed ? OneDarkColors.cyan : OneDarkColors.fg,
+                ),
+              ),
               trailing: s == _speed
                   ? Icon(Icons.check, color: OneDarkColors.cyan)
                   : null,
@@ -152,16 +159,21 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Text('Sleep Timer',
-                style: TextStyle(
-                    color: OneDarkColors.fg, fontWeight: FontWeight.bold)),
+            child: Text(
+              'Sleep Timer',
+              style: TextStyle(
+                color: OneDarkColors.fg,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
           if (_sleepTimer != null)
             ListTile(
               leading: Icon(Icons.timer_off, color: OneDarkColors.red),
               title: Text(
-                  'Cancel (${_sleepMinutesLeft ?? '?'} min left)',
-                  style: TextStyle(color: OneDarkColors.red)),
+                'Cancel (${_sleepMinutesLeft ?? '?'} min left)',
+                style: TextStyle(color: OneDarkColors.red),
+              ),
               onTap: () {
                 _cancelSleepTimer();
                 Navigator.pop(context);
@@ -170,8 +182,10 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
           for (final min in [5, 10, 15, 20, 30, 45, 60, 90])
             ListTile(
               leading: Icon(Icons.timer, color: OneDarkColors.amber),
-              title: Text('$min minutes',
-                  style: TextStyle(color: OneDarkColors.fg)),
+              title: Text(
+                '$min minutes',
+                style: TextStyle(color: OneDarkColors.fg),
+              ),
               onTap: () {
                 _startSleepTimer(min);
                 Navigator.pop(context);
@@ -188,7 +202,10 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
     setState(() => _sleepMinutesLeft = minutes);
     // Update countdown every minute
     Timer.periodic(const Duration(minutes: 1), (t) {
-      if (!mounted) { t.cancel(); return; }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
       setState(() => _sleepMinutesLeft = (_sleepMinutesLeft ?? 1) - 1);
       if (_sleepMinutesLeft! <= 0) {
         t.cancel();
@@ -202,13 +219,21 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
     });
     _sleepTimer = Timer(Duration(minutes: minutes), () {
       _player?.pause();
-      if (mounted) setState(() { _sleepTimer = null; _sleepMinutesLeft = null; });
+      if (mounted) {
+        setState(() {
+          _sleepTimer = null;
+          _sleepMinutesLeft = null;
+        });
+      }
     });
   }
 
   void _cancelSleepTimer() {
     _sleepTimer?.cancel();
-    setState(() { _sleepTimer = null; _sleepMinutesLeft = null; });
+    setState(() {
+      _sleepTimer = null;
+      _sleepMinutesLeft = null;
+    });
   }
 
   // ── Shuffle ────────────────────────────────────────────────────────────────
@@ -217,9 +242,9 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
     setState(() => _shuffle = next);
     await _player!.setShuffleModeEnabled(next);
     if (_handler != null) {
-      await _handler!.setShuffleMode(next
-          ? AudioServiceShuffleMode.all
-          : AudioServiceShuffleMode.none);
+      await _handler!.setShuffleMode(
+        next ? AudioServiceShuffleMode.all : AudioServiceShuffleMode.none,
+      );
     }
   }
 
@@ -228,8 +253,8 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
     final next = _loopMode == LoopMode.off
         ? LoopMode.all
         : _loopMode == LoopMode.all
-            ? LoopMode.one
-            : LoopMode.off;
+        ? LoopMode.one
+        : LoopMode.off;
     setState(() => _loopMode = next);
     await _player!.setLoopMode(next);
     if (_handler != null) await _handler!.setLoopMode(next);
@@ -262,15 +287,19 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                   Row(
                     children: [
                       IconButton(
-                        icon: Icon(Icons.arrow_downward, color: OneDarkColors.fg),
+                        icon: Icon(
+                          Icons.arrow_downward,
+                          color: OneDarkColors.fg,
+                        ),
                         onPressed: () => Navigator.pop(context),
                       ),
                       Expanded(
                         child: Text(
                           'Now Playing',
                           style: TextStyle(
-                              color: OneDarkColors.fg,
-                              fontWeight: FontWeight.bold),
+                            color: OneDarkColors.fg,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                       // Sleep timer indicator
@@ -280,12 +309,18 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.timer, size: 14, color: OneDarkColors.amber),
+                              Icon(
+                                Icons.timer,
+                                size: 14,
+                                color: OneDarkColors.amber,
+                              ),
                               const SizedBox(width: 2),
                               Text(
                                 '${_sleepMinutesLeft}m',
                                 style: TextStyle(
-                                    color: OneDarkColors.amber, fontSize: 11),
+                                  color: OneDarkColors.amber,
+                                  fontSize: 11,
+                                ),
                               ),
                             ],
                           ),
@@ -303,7 +338,11 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: OneDarkColors.border),
                     ),
-                    child: Icon(Icons.music_note, size: 80, color: OneDarkColors.cyan),
+                    child: Icon(
+                      Icons.music_note,
+                      size: 80,
+                      color: OneDarkColors.cyan,
+                    ),
                   ),
                   const SizedBox(height: 24),
 
@@ -313,9 +352,10 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                     child: Text(
                       _currentTitle(),
                       style: TextStyle(
-                          color: OneDarkColors.fg,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold),
+                        color: OneDarkColors.fg,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                       textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -336,34 +376,49 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                       final dur = p.duration ?? Duration.zero;
                       final durMs = dur.inMilliseconds.toDouble();
                       final maxMs = durMs > 0 ? durMs : 1.0;
-                      return Column(children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          child: Slider(
-                            value: pos.inMilliseconds.toDouble().clamp(0.0, maxMs),
-                            max: maxMs,
-                            activeColor: OneDarkColors.cyan,
-                            inactiveColor: OneDarkColors.border,
-                            onChanged: durMs > 0
-                                ? (v) => p.seek(Duration(milliseconds: v.toInt()))
-                                : null,
+                      return Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Slider(
+                              value: pos.inMilliseconds.toDouble().clamp(
+                                0.0,
+                                maxMs,
+                              ),
+                              max: maxMs,
+                              activeColor: OneDarkColors.cyan,
+                              inactiveColor: OneDarkColors.border,
+                              onChanged: durMs > 0
+                                  ? (v) => p.seek(
+                                      Duration(milliseconds: v.toInt()),
+                                    )
+                                  : null,
+                            ),
                           ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 32),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(_format(pos),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  _format(pos),
                                   style: TextStyle(
-                                      color: OneDarkColors.fgDim, fontSize: 11)),
-                              Text(_format(dur),
+                                    color: OneDarkColors.fgDim,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                Text(
+                                  _format(dur),
                                   style: TextStyle(
-                                      color: OneDarkColors.fgDim, fontSize: 11)),
-                            ],
+                                    color: OneDarkColors.fgDim,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ]);
+                        ],
+                      );
                     },
                   ),
                   const SizedBox(height: 8),
@@ -373,7 +428,11 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       IconButton(
-                        icon: Icon(Icons.skip_previous, color: OneDarkColors.fg, size: 32),
+                        icon: Icon(
+                          Icons.skip_previous,
+                          color: OneDarkColors.fg,
+                          size: 32,
+                        ),
                         onPressed: p.hasPrevious ? p.seekToPrevious : null,
                       ),
                       const SizedBox(width: 16),
@@ -395,7 +454,11 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                       ),
                       const SizedBox(width: 16),
                       IconButton(
-                        icon: Icon(Icons.skip_next, color: OneDarkColors.fg, size: 32),
+                        icon: Icon(
+                          Icons.skip_next,
+                          color: OneDarkColors.fg,
+                          size: 32,
+                        ),
                         onPressed: p.hasNext ? p.seekToNext : null,
                       ),
                     ],
@@ -410,7 +473,9 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                       IconButton(
                         icon: Icon(
                           Icons.shuffle,
-                          color: _shuffle ? OneDarkColors.cyan : OneDarkColors.fgDim,
+                          color: _shuffle
+                              ? OneDarkColors.cyan
+                              : OneDarkColors.fgDim,
                           size: 22,
                         ),
                         onPressed: _toggleShuffle,
@@ -423,8 +488,8 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                         tooltip: _loopMode == LoopMode.off
                             ? 'Repeat off'
                             : _loopMode == LoopMode.all
-                                ? 'Repeat all'
-                                : 'Repeat one',
+                            ? 'Repeat all'
+                            : 'Repeat one',
                       ),
                       const SizedBox(width: 8),
                       // Speed
@@ -432,12 +497,15 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                         onTap: _showSpeedPicker,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
                             border: Border.all(
-                                color: _speed != 1.0
-                                    ? OneDarkColors.cyan
-                                    : OneDarkColors.border),
+                              color: _speed != 1.0
+                                  ? OneDarkColors.cyan
+                                  : OneDarkColors.border,
+                            ),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
@@ -456,7 +524,9 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                       // Sleep timer
                       IconButton(
                         icon: Icon(
-                          _sleepTimer != null ? Icons.timer : Icons.timer_outlined,
+                          _sleepTimer != null
+                              ? Icons.timer
+                              : Icons.timer_outlined,
                           color: _sleepTimer != null
                               ? OneDarkColors.amber
                               : OneDarkColors.fgDim,
@@ -506,8 +576,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                 ],
               ),
             )
-          : Center(
-              child: CircularProgressIndicator(color: OneDarkColors.cyan)),
+          : Center(child: CircularProgressIndicator(color: OneDarkColors.cyan)),
     );
   }
 }
