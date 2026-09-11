@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../theme/theme.dart';
+import '../utils/media_kit_guard.dart';
 
 /// Full-screen video player backed by media_kit / libmpv.
 ///
@@ -55,6 +56,10 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
 
   Future<void> _initPlayer() async {
     try {
+      // Belt-and-braces: normally done once in main(); cheap no-op if already
+      // initialised, but if main's init was skipped (e.g. an earlier failure)
+      // this is what makes the error visible instead of a silent hang.
+      MediaKitGuard.ensure();
       _player = Player(
         configuration: const PlayerConfiguration(
           title: 'SwordFM',

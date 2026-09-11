@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:open_file/open_file.dart';
@@ -7,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../theme/theme.dart';
 import '../services/doc_converter.dart';
 import '../services/ocr_service.dart';
+import '../utils/safe_file_writer.dart';
 
 /// Dialog for converting a file. Uses the pure-Dart [DocConverter] — no
 /// external runtime, no Python, no Termux, no native shell.
@@ -51,6 +53,14 @@ class _ConvertDialogState extends State<ConvertDialog> {
       return 'Phone / ${path.substring(21)}';
     }
     return path;
+  }
+
+  String _friendlyBytes(int bytes) {
+    if (bytes >= 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    return '$bytes B';
   }
 
   Future<void> _convert(String format) async {
@@ -137,8 +147,8 @@ class _ConvertDialogState extends State<ConvertDialog> {
     ));
     final base = p.basenameWithoutExtension(widget.filePath);
     final outPath = p.join(p.dirname(widget.filePath), '$base.pdf');
-    await File(outPath).writeAsBytes(await doc.save());
-    return outPath;
+    final actualPath = await writeBytesResilient(outPath, await doc.save());
+    return actualPath;
   }
 
   Future<String> _imageToText() async {
@@ -149,8 +159,9 @@ class _ConvertDialogState extends State<ConvertDialog> {
     }
     final base = p.basenameWithoutExtension(widget.filePath);
     final outPath = p.join(p.dirname(widget.filePath), '$base.txt');
-    await File(outPath).writeAsString(text);
-    return outPath;
+    final actualPath = await writeBytesResilient(
+        outPath, utf8.encode(text));
+    return actualPath;
   }
 
   @override
@@ -252,7 +263,8 @@ class _ConvertDialogState extends State<ConvertDialog> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Saved to: ${_friendlyResultPath(_lastResultPath!)}',
+                        'Saved to: ${_friendlyResultPath(_lastResultPath!)}'
+                        ' (${_friendlyBytes(File(_lastResultPath!).lengthSync())})',
                         style: TextStyle(
                             color: OneDarkColors.green, fontSize: 11),
                         overflow: TextOverflow.ellipsis,

@@ -32,6 +32,7 @@ import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.*
@@ -65,7 +66,7 @@ import java.security.MessageDigest
  * └───────────────────────────────────────────────────────────────┘
  */
 
-class MainActivity : FlutterActivity(), MethodChannel.MethodCallHandler {
+class MainActivity : AudioServiceActivity(), MethodChannel.MethodCallHandler {
     companion object {
         private const val REQUEST_PICK_FILE = 1001
         private var lastResultPaths: List<String>? = null

@@ -9,6 +9,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'docx_reader.dart';
 import 'ocr_service.dart';
 import '../utils/constants.dart' show AppPaths;
+import '../utils/safe_file_writer.dart';
 
 /// Document conversion utilities for SwordFM Android.
 ///
@@ -357,11 +358,10 @@ class DocConverter {
 
   /// Writes bytes to [path], creating the parent directory if needed.
   static Future<void> _writeOutput(String path, List<int> bytes) async {
-    final dir = p.dirname(path);
-    try {
-      await Directory(dir).create(recursive: true);
-    } catch (_) {}
-    await File(path).writeAsBytes(bytes);
+    // writeBytesResilient falls back to the app documents directory when the
+    // target (e.g. Downloads on Android 11+ without "All files access")
+    // throws — and the real, verified path is surfaced to the caller.
+    await writeBytesResilient(path, bytes);
   }
 
   // ---------------------------------------------------------------------------

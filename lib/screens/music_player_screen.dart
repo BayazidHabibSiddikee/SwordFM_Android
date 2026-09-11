@@ -23,6 +23,12 @@ class MusicPlayerScreen extends StatefulWidget {
 class _MusicPlayerState extends State<MusicPlayerScreen> {
   AudioPlayer? _player;
   SwiftAudioHandler? _handler;
+
+  /// Reused across opens when the background handler is unavailable (e.g.
+  /// AudioService.init failed), so repeated opens can never stack several
+  /// native players on top of each other — the reported "audio acts crazy".
+  static AudioPlayer? _fallbackPlayer;
+
   bool _initialized = false;
   int _currentIndex = 0;
 
@@ -63,7 +69,9 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
         if (mounted) Navigator.of(context).pop();
         return;
       }
-      _player = AudioPlayer();
+      _fallbackPlayer?.dispose();
+      _fallbackPlayer = AudioPlayer();
+      _player = _fallbackPlayer;
       final pl = ConcatenatingAudioSource(
         children: [widget.filePath!].map((p) => AudioSource.file(p)).toList(),
       );

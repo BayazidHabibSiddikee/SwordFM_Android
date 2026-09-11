@@ -13,6 +13,7 @@ import 'package:open_file/open_file.dart';
 import '../services/ocr_service.dart';
 import '../theme/theme.dart';
 import '../utils/constants.dart' show AppPaths;
+import '../utils/safe_file_writer.dart';
 
 /// Document scanner — capture pages from camera or gallery, assemble into PDF.
 /// Includes offline OCR (Tesseract) to pull text out of scanned pages,
@@ -98,8 +99,7 @@ class _ScannerState extends State<DocumentScannerScreen> {
       // Remember this directory for next time
       await prefs.setString('scanner_last_dir', saveDir);
       final outPath = p.join(saveDir, fileName);
-      final file = File(outPath);
-      await file.writeAsBytes(await doc.save());
+      final actualPath = await writeBytesResilient(outPath, await doc.save());
       if (mounted) {
         setState(() => _building = false);
         showDialog(
@@ -121,8 +121,8 @@ class _ScannerState extends State<DocumentScannerScreen> {
                   style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
                 ),
                 const SizedBox(height: 4),
-                SelectableText(
-                  outPath,
+                                SelectableText(
+                  actualPath,
                   style: TextStyle(color: OneDarkColors.cyan, fontSize: 11),
                 ),
               ],
@@ -135,7 +135,7 @@ class _ScannerState extends State<DocumentScannerScreen> {
               FilledButton(
                 onPressed: () {
                   Navigator.pop(context);
-                  OpenFile.open(outPath);
+                  OpenFile.open(actualPath);
                 },
                 child: const Text('Open'),
               ),

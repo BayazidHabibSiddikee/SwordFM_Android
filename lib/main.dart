@@ -36,9 +36,18 @@ import 'services/bookmarks_service.dart';
 import 'services/audio_handler.dart';
 import 'package:audio_service/audio_service.dart';
 import 'utils/constants.dart' show AppPaths;
+import 'package:media_kit/media_kit.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // media_kit (video player) — MUST be initialised before any Player() is
+  // constructed, otherwise libmpv is never loaded and every video open
+  // throws "MediaKit.ensureInitialized must be called before using any API".
+  try {
+    MediaKit.ensureInitialized();
+  } catch (e) {
+    debugPrint('MediaKit init skipped: $e');
+  }
   try {
     await Firebase.initializeApp();
   } catch (e) {
