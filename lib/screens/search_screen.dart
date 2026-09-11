@@ -2,6 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import '../services/archive_service.dart';
+import '../services/file_open_router.dart';
+import '../screens/cbz_reader_screen.dart';
+import '../screens/epub_reader_screen.dart';
+import '../screens/spreadsheet_viewer_screen.dart';
 import '../services/search_service.dart';
 import '../services/open_with_service.dart';
 import '../theme/theme.dart';
@@ -139,11 +143,18 @@ class _SearchScreenState extends State<SearchScreen> {
       Navigator.pop(context, item.path);
       return;
     }
-    final ext = item.extension.toLowerCase();
+    final target = FileOpenRouter.resolve(
+      item.path,
+      source: FileOpenSource.search,
+    );
     // Video → built-in player (playlist = all video hits)
-    if (kVideoExtensions.contains(ext)) {
+    if (target.type == FileOpenTargetType.video) {
       final playlist = _results
-          .where((r) => kVideoExtensions.contains(r.extension.toLowerCase()))
+          .where((r) => FileOpenRouter.resolve(
+                r.path,
+                source: FileOpenSource.search,
+              ).type ==
+              FileOpenTargetType.video)
           .map((r) => r.path)
           .toList();
       final index = playlist.indexOf(item.path);
@@ -159,9 +170,13 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
     // Audio → built-in music player (playlist = all audio hits)
-    if (kAudioExtensions.contains(ext)) {
+    if (target.type == FileOpenTargetType.audio) {
       final playlist = _results
-          .where((r) => kAudioExtensions.contains(r.extension.toLowerCase()))
+          .where((r) => FileOpenRouter.resolve(
+                r.path,
+                source: FileOpenSource.search,
+              ).type ==
+              FileOpenTargetType.audio)
           .map((r) => r.path)
           .toList();
       final index = playlist.indexOf(item.path);
@@ -178,7 +193,7 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     // DOCX → built-in reader (was external before — the reader renders real
     // formatting, so there's no reason to leave the app).
-    if (ext == '.docx') {
+    if (target.type == FileOpenTargetType.docx) {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => DocxReaderScreen(filePath: item.path),
@@ -186,14 +201,30 @@ class _SearchScreenState extends State<SearchScreen> {
       );
       return;
     }
+    if (target.type == FileOpenTargetType.epub) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => EpubReaderScreen(filePath: item.path),
+      ));
+      return;
+    }
+    if (target.type == FileOpenTargetType.comicBook) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => CbzReaderScreen(filePath: item.path),
+      ));
+      return;
+    }
+    if (target.type == FileOpenTargetType.spreadsheet) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => SpreadsheetViewerScreen(filePath: item.path),
+      ));
+      return;
+    }
     // Images/PDFs/text open in the in-app preview panel (like the browser).
     // The panel's own fullscreen button routes PDF → PdfReaderScreen and
     // images → ImageViewerScreen, so every hit has an in-app fullscreen path.
-    if (item.isImage ||
-        item.isPdf ||
-        item.isMarkdown ||
-        item.isText ||
-        item.isCode) {
+    if (target.type == FileOpenTargetType.image ||
+        target.type == FileOpenTargetType.pdf ||
+        target.type == FileOpenTargetType.text) {
       setState(() => _previewItem = item);
       return;
     }

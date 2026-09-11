@@ -22,7 +22,12 @@ import '../services/archive_service.dart';
 import '../services/doc_converter.dart';
 import '../services/ocr_service.dart';
 import '../services/open_with_service.dart';
+import '../services/file_open_router.dart';
 import '../theme/theme.dart';
+import '../utils/media_kit_guard.dart';
+import '../screens/cbz_reader_screen.dart';
+import '../screens/epub_reader_screen.dart';
+import '../screens/music_player_screen.dart';
 import '../utils/file_utils.dart';
 import 'package:path/path.dart' as p;
 
@@ -84,6 +89,10 @@ class _PreviewPanelState extends State<PreviewPanel> {
   }
 
   void _openFullScreen(FileItem item) {
+    final target = FileOpenRouter.resolve(
+      item.path,
+      source: FileOpenSource.preview,
+    );
     // PDFs get the in-app PdfReaderScreen (pinch-to-zoom, page nav, go-to-page)
     // — much better UX than the system default. DOCX gets the in-app
     // DocxReaderScreen (real formatting: headings, bold, lists, tables,
@@ -91,7 +100,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
     // (markdown for .md, monospaced + line numbers for everything else).
     // Videos get the in-app player. Archives/images/audio fall back to
     // the system default handler.
-    if (item.isPdf) {
+    if (target.type == FileOpenTargetType.pdf) {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => PdfReaderScreen(filePath: item.path),
@@ -99,7 +108,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
       );
       return;
     }
-    if (item.isDocx) {
+    if (target.type == FileOpenTargetType.docx) {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => DocxReaderScreen(filePath: item.path),
@@ -107,7 +116,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
       );
       return;
     }
-    if (item.isSpreadsheet) {
+    if (target.type == FileOpenTargetType.spreadsheet) {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => SpreadsheetViewerScreen(filePath: item.path),
@@ -115,7 +124,23 @@ class _PreviewPanelState extends State<PreviewPanel> {
       );
       return;
     }
-    if (item.isMarkdown || item.isText || item.isCode) {
+    if (target.type == FileOpenTargetType.epub) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => EpubReaderScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
+    if (target.type == FileOpenTargetType.comicBook) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => CbzReaderScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
+    if (target.type == FileOpenTargetType.text) {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => TextReaderScreen(filePath: item.path),
@@ -123,7 +148,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
       );
       return;
     }
-    if (item.isVideo) {
+    if (target.type == FileOpenTargetType.video) {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => VideoPlayerScreen(filePath: item.path),
@@ -131,9 +156,17 @@ class _PreviewPanelState extends State<PreviewPanel> {
       );
       return;
     }
+    if (target.type == FileOpenTargetType.audio) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => MusicPlayerScreen(filePath: item.path),
+        ),
+      );
+      return;
+    }
     // Images get the in-app pinch-zoom viewer (double-tap zoom, rotate,
     // reset) instead of handing off to an external app.
-    if (item.isImage) {
+    if (target.type == FileOpenTargetType.image) {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => ImageViewerScreen(filePath: item.path),
@@ -141,7 +174,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
       );
       return;
     }
-    if (ArchiveService.isArchive(item.path)) {
+    if (target.type == FileOpenTargetType.archive) {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => ArchiveBrowserScreen(archivePath: item.path),
@@ -180,10 +213,14 @@ class _PreviewPanelState extends State<PreviewPanel> {
 
     try {
       final path = widget.item!.path;
-      if (widget.item!.isVideo) {
-        // No text content for videos; the panel renders a thumbnail + play
-        // overlay from the video file itself.
-      } else if (widget.item!.isPdf) {
+      final target = FileOpenRouter.resolve(
+        path,
+        source: FileOpenSource.preview,
+      );
+      if (target.type == FileOpenTargetType.video ||
+          target.type == FileOpenTargetType.audio) {
+        // Media files render a player/thumbnail rather than text content.
+      } else if (target.type == FileOpenTargetType.pdf) {
         // Build a PdfController and let PdfView render pages in-widget.
         // No PNG pre-rendering needed — pdfx handles it natively via pdfium.
         try {
@@ -196,17 +233,18 @@ class _PreviewPanelState extends State<PreviewPanel> {
           // pdfium failed — fall back to text extraction
           _content = DocConverter.extractPdfText(path) ?? '';
         }
-      } else if (widget.item!.isPptx) {
+      } else if (target.type == FileOpenTargetType.pptxOutline) {
         // PPTX is a ZIP of slide XML files. Extract a list of slide titles
         // (or the first non-empty text per slide) for a structured preview.
         _content = await compute(pptxOutlineFromPath, path);
-      } else if (widget.item!.isMarkdown) {
+      } else if (target.type == FileOpenTargetType.text &&
+          widget.item!.isMarkdown) {
         _content = await compute(readTextCapped, path);
-      } else if (widget.item!.extension.toLowerCase() == '.docx') {
+      } else if (target.type == FileOpenTargetType.docx) {
         // DOCX is a ZIP binary — pull the text out in a background isolate so
         // the (potentially large) ZIP decode + XML regex never blocks the UI.
         _content = await compute(docxTextFromPath, path);
-      } else if (widget.item!.isText || widget.item!.isCode) {
+      } else if (target.type == FileOpenTargetType.text) {
         _content = await compute(readTextCapped, path);
       }
     } catch (e) {
@@ -308,7 +346,11 @@ class _PreviewPanelState extends State<PreviewPanel> {
   Widget _buildPreview() {
     final item = widget.item!;
     final cs = Theme.of(context).colorScheme;
-    if (item.isPdf) {
+    final target = FileOpenRouter.resolve(
+      item.path,
+      source: FileOpenSource.preview,
+    );
+    if (target.type == FileOpenTargetType.pdf) {
       if (_pdfController != null) {
         // Inline PDF view using pdfx — renders actual pages via pdfium.
         // The PdfView widget handles lazy page loading and page navigation.
@@ -466,7 +508,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
       }
       return _buildMetadataCard();
     }
-    if (item.isPptx) {
+    if (target.type == FileOpenTargetType.pptxOutline) {
       return GestureDetector(
         onTap: () => _openFullScreen(item),
         child: Column(
@@ -497,14 +539,14 @@ class _PreviewPanelState extends State<PreviewPanel> {
         ),
       );
     }
-    if (item.isVideo) {
+    if (target.type == FileOpenTargetType.video) {
       return _VideoPreviewTile(
         path: item.path,
         name: item.name,
         onFullScreen: () => _openFullScreen(item),
       );
     }
-    if (item.isImage) {
+    if (target.type == FileOpenTargetType.image) {
       return _ImagePreviewTile(
         item: item,
         onFullScreen: () => _openFullScreen(item),
@@ -518,7 +560,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
         onFullScreen: () => _openFullScreen(item),
       );
     }
-    if (item.isMarkdown) {
+    if (target.type == FileOpenTargetType.text && item.isMarkdown) {
       return MarkdownBody(
         data: _content,
         styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
@@ -532,12 +574,13 @@ class _PreviewPanelState extends State<PreviewPanel> {
         ),
       );
     }
-    if (item.isText || item.extension.toLowerCase() == '.docx') {
+    if (target.type == FileOpenTargetType.text ||
+        target.type == FileOpenTargetType.docx) {
       // DOCX preview: show the stripped text plus a button to open the
       // in-app reader. The full-screen button in the header does the same
       // thing; this just makes the preview tile itself tappable so users
       // don't have to hunt for the icon.
-      if (item.extension.toLowerCase() == '.docx') {
+      if (target.type == FileOpenTargetType.docx) {
         return GestureDetector(
           onTap: () => _openFullScreen(item),
           child: Column(
@@ -1192,6 +1235,7 @@ class _VideoPreviewTileState extends State<_VideoPreviewTile> {
   Future<void> _ensureController() async {
     if (_player != null) return;
 
+    MediaKitGuard.ensure();
     _player = Player(
       configuration: const PlayerConfiguration(
         title: 'SwordFM',

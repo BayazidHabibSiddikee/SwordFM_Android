@@ -9,7 +9,8 @@ import 'theme/theme.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'utils/app_paths.dart' show StoragePermissions;
 import 'widgets/file_browser.dart';
-import 'utils/file_utils.dart' show FileItem, FileUtils, kAudioExtensions, kVideoExtensions;
+import 'utils/file_utils.dart' show FileItem, FileUtils;
+import 'services/file_open_router.dart';
 import 'widgets/preview_panel.dart';
 import 'widgets/now_playing_mini_bar.dart';
 import 'screens/search_screen.dart';
@@ -29,6 +30,9 @@ import 'screens/video_player_screen.dart';
 import 'screens/music_player_screen.dart';
 import 'screens/image_viewer_screen.dart';
 import 'screens/text_reader_screen.dart';
+import 'screens/epub_reader_screen.dart';
+import 'screens/cbz_reader_screen.dart';
+import 'screens/spreadsheet_viewer_screen.dart';
 import 'services/widget_service.dart';
 import 'services/entitlement_service.dart';
 import 'services/device_service.dart';
@@ -248,7 +252,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   /// Opens a file received from an external intent (e.g. "Open with" from
   /// another app). Routes to the correct reader screen based on extension.
   void _openFileFromIntent(String path) {
-    final ext = p.extension(path).toLowerCase();
+    final target = FileOpenRouter.resolve(
+      path,
+      source: FileOpenSource.externalIntent,
+    );
     final file = File(path);
     // Gate the swordfm:// QR deep link: only open paths the app can see.
     // Reject traversal, null bytes, and roots outside the shared storage.
@@ -262,37 +269,59 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       size: file.lengthSync(),
       lastModified: file.lastModifiedSync(),
     );
-    // PDF → built-in reader
-    if (ext == '.pdf') {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => PdfReaderScreen(filePath: path),
-      ));
-    // DOCX → built-in reader
-    } else if (ext == '.docx') {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => DocxReaderScreen(filePath: path),
-      ));
-    // Video → built-in player
-    } else if (kVideoExtensions.contains(ext)) {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => VideoPlayerScreen(filePath: path),
-      ));
-    // Audio → built-in music player
-    } else if (kAudioExtensions.contains(ext)) {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => MusicPlayerScreen(filePath: path),
-      ));
-    // Images → built-in viewer
-    } else if (FileItem.isImagePath(path)) {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ImageViewerScreen(filePath: path),
-      ));
-    // Text/code/markdown → text reader
-    } else if (item.isText || item.isCode || item.isMarkdown) {
-      Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => TextReaderScreen(filePath: path),
-      ));
-    } else {
+    switch (target.type) {
+      case FileOpenTargetType.pdf:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => PdfReaderScreen(filePath: path),
+        ));
+        return;
+      case FileOpenTargetType.docx:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => DocxReaderScreen(filePath: path),
+        ));
+        return;
+      case FileOpenTargetType.video:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => VideoPlayerScreen(filePath: path),
+        ));
+        return;
+      case FileOpenTargetType.audio:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => MusicPlayerScreen(filePath: path),
+        ));
+        return;
+      case FileOpenTargetType.image:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => ImageViewerScreen(filePath: path),
+        ));
+        return;
+      case FileOpenTargetType.text:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => TextReaderScreen(filePath: path),
+        ));
+        return;
+      case FileOpenTargetType.epub:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => EpubReaderScreen(filePath: path),
+        ));
+        return;
+      case FileOpenTargetType.comicBook:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => CbzReaderScreen(filePath: path),
+        ));
+        return;
+      case FileOpenTargetType.spreadsheet:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => SpreadsheetViewerScreen(filePath: path),
+        ));
+        return;
+      case FileOpenTargetType.pptxOutline:
+      case FileOpenTargetType.archive:
+      case FileOpenTargetType.external:
+      case FileOpenTargetType.unsupported:
+        break;
+    }
+    {
       // Unknown type — navigate to its directory and select for preview panel.
       setState(() {
         _currentPath = p.dirname(path);

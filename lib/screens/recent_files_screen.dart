@@ -3,8 +3,11 @@ import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
-import '../utils/file_utils.dart'
-    show FileItem, kAudioExtensions, kVideoExtensions;
+import '../utils/file_utils.dart' show FileItem;
+import '../services/file_open_router.dart';
+import '../screens/cbz_reader_screen.dart';
+import '../screens/epub_reader_screen.dart';
+import '../screens/spreadsheet_viewer_screen.dart';
 import '../utils/constants.dart' show AppPaths;
 import '../widgets/preview_panel.dart';
 import 'video_player_screen.dart';
@@ -269,11 +272,18 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
       );
       return;
     }
-    final ext = item.extension.toLowerCase();
-    if (kVideoExtensions.contains(ext)) {
+    final target = FileOpenRouter.resolve(
+      item.path,
+      source: FileOpenSource.recent,
+    );
+    if (target.type == FileOpenTargetType.video) {
       // Auto-next across all recent videos (sibling-fire-and-remember).
       final playlist = _entries
-          .where((r) => kVideoExtensions.contains(p.extension(r.path).toLowerCase()))
+          .where((r) => FileOpenRouter.resolve(
+                r.path,
+                source: FileOpenSource.recent,
+              ).type ==
+              FileOpenTargetType.video)
           .map((r) => r.path)
           .toList();
       final index = playlist.indexOf(item.path);
@@ -288,17 +298,30 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
       );
       return;
     }
-    if (kAudioExtensions.contains(ext)) {
+    if (target.type == FileOpenTargetType.audio) {
+      final playlist = _entries
+          .where((r) => FileOpenRouter.resolve(
+                r.path,
+                source: FileOpenSource.recent,
+              ).type ==
+              FileOpenTargetType.audio)
+          .map((r) => r.path)
+          .toList();
+      final index = playlist.indexOf(item.path);
       navigator.push(
         MaterialPageRoute(
-          builder: (_) => MusicPlayerScreen(filePath: item.path),
+          builder: (_) => MusicPlayerScreen(
+            filePath: item.path,
+            playlist: playlist,
+            initialIndex: index < 0 ? 0 : index,
+          ),
         ),
       );
       return;
     }
     // PDF → built-in fullscreen reader (pinch-zoom, page nav). The preview
     // panel alone buries a document behind an extra tap on phones.
-    if (ext == '.pdf') {
+    if (target.type == FileOpenTargetType.pdf) {
       navigator.push(
         MaterialPageRoute(
           builder: (_) => PdfReaderScreen(filePath: item.path),
@@ -307,7 +330,7 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
       return;
     }
     // DOCX → built-in fullscreen reader.
-    if (ext == '.docx') {
+    if (target.type == FileOpenTargetType.docx) {
       navigator.push(
         MaterialPageRoute(
           builder: (_) => DocxReaderScreen(filePath: item.path),
@@ -316,12 +339,30 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
       return;
     }
     // Images → built-in fullscreen pinch-zoom viewer.
-    if (item.isImage) {
+    if (target.type == FileOpenTargetType.image) {
       navigator.push(
         MaterialPageRoute(
           builder: (_) => ImageViewerScreen(filePath: item.path),
         ),
       );
+      return;
+    }
+    if (target.type == FileOpenTargetType.epub) {
+      navigator.push(MaterialPageRoute(
+        builder: (_) => EpubReaderScreen(filePath: item.path),
+      ));
+      return;
+    }
+    if (target.type == FileOpenTargetType.comicBook) {
+      navigator.push(MaterialPageRoute(
+        builder: (_) => CbzReaderScreen(filePath: item.path),
+      ));
+      return;
+    }
+    if (target.type == FileOpenTargetType.spreadsheet) {
+      navigator.push(MaterialPageRoute(
+        builder: (_) => SpreadsheetViewerScreen(filePath: item.path),
+      ));
       return;
     }
     if (mounted) setState(() => _previewItem = item);

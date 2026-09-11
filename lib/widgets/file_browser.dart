@@ -16,17 +16,12 @@ import 'package:video_thumbnail/video_thumbnail.dart';
 import 'dart:typed_data';
 import '../services/widget_service.dart';
 import '../utils/file_utils.dart'
-    show
-        FileItem,
-        FileUtils,
-        isBlockedPath,
-        isJunkName,
-        kAudioExtensions,
-        kVideoExtensions;
+    show FileItem, FileUtils, isBlockedPath, isJunkName;
 import '../services/archive_service.dart';
 import '../services/open_with_service.dart';
 import '../services/installer_service.dart';
 import '../services/share_service.dart';
+import '../services/file_open_router.dart';
 import '../screens/folder_graph_screen.dart';
 import '../screens/lan_screen.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -216,53 +211,6 @@ const Map<FileTypeFilter, Set<String>> _kTypeExtensions = {
     'toast',
   },
 };
-
-/// Extensions treated as plain text/code for the "Open With" menu.
-const Set<String> _kTextExtensions = {
-  '.txt',
-  '.md',
-  '.markdown',
-  '.json',
-  '.yaml',
-  '.yml',
-  '.xml',
-  '.log',
-  '.csv',
-  '.html',
-  '.css',
-  '.js',
-  '.ts',
-  '.tsx',
-  '.py',
-  '.dart',
-  '.sh',
-  '.bash',
-  '.zsh',
-  '.cpp',
-  '.c',
-  '.h',
-  '.hpp',
-  '.java',
-  '.kt',
-  '.rb',
-  '.go',
-  '.rs',
-  '.swift',
-  '.ini',
-  '.conf',
-  '.cfg',
-  '.toml',
-  '.sql',
-  '.env',
-  '.gitignore',
-  '.diff',
-};
-
-/// File extensions routed to the built-in players. Canonical source is
-/// file_utils.dart ([kVideoExtensions]/[kAudioExtensions]) — only formats the
-/// engines can decode, so unsupported containers fall to "Open with".
-Set<String> get _kVideoExtensions => kVideoExtensions;
-Set<String> get _kAudioExtensions => kAudioExtensions;
 
 /// Aggregate info about the current multi-selection, reported to the parent
 /// via [FileBrowser.onSelectionChanged].
@@ -627,76 +575,68 @@ class _FileBrowserState extends State<FileBrowser> {
     } else {
       widget.onItemSelected(item);
 
-      final ext = item.extension.toLowerCase();
-      // Video → built-in player
-      if (_kVideoExtensions.contains(ext)) {
-        await _openVideo(item);
-        return;
-      }
-      // Audio → built-in music player (with sibling playlist)
-      if (_kAudioExtensions.contains(ext)) {
-        await _openAudio(item);
-        return;
-      }
-      // Text/code → notepad
-      if (_kTextExtensions.contains(ext) && !item.isPdf) {
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => NotepadScreen(filePath: item.path)),
-        );
-        return;
-      }
-      // PDF → built-in reader
-      if (item.isPdf) {
-        _openPdf(item.path);
-        return;
-      }
-      // DOCX → built-in reader (headings, bold/italic, lists, tables, images)
-      if (item.isDocx) {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => DocxReaderScreen(filePath: item.path),
-          ),
-        );
-        WidgetService.addRecentFile(item.path);
-        return;
-      }
-      // Images → built-in pinch-zoom viewer
-      if (item.isImage) {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => ImageViewerScreen(filePath: item.path),
-          ),
-        );
-        WidgetService.addRecentFile(item.path);
-        return;
-      }
-      // EPUB → built-in e-book reader
-      if (item.isEpub) {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => EpubReaderScreen(filePath: item.path),
-          ),
-        );
-        WidgetService.addRecentFile(item.path);
-        return;
-      }
-      // CBZ (comic book ZIP) → built-in image pager
-      if (item.isCbz) {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => CbzReaderScreen(filePath: item.path),
-          ),
-        );
-        WidgetService.addRecentFile(item.path);
-        return;
-      }
-      // Spreadsheets (.xlsx, .xls, .ods, .csv, .numbers) → built-in viewer
-      if (item.isSpreadsheet) {
-        await Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => SpreadsheetViewerScreen(filePath: item.path),
-        ));
-        WidgetService.addRecentFile(item.path);
-        return;
+      final target = FileOpenRouter.resolve(
+        item.path,
+        source: FileOpenSource.browse,
+      );
+      switch (target.type) {
+        case FileOpenTargetType.video:
+          await _openVideo(item);
+          return;
+        case FileOpenTargetType.audio:
+          await _openAudio(item);
+          return;
+        case FileOpenTargetType.text:
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => NotepadScreen(filePath: item.path)),
+          );
+          return;
+        case FileOpenTargetType.pdf:
+          _openPdf(item.path);
+          return;
+        case FileOpenTargetType.docx:
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => DocxReaderScreen(filePath: item.path),
+            ),
+          );
+          WidgetService.addRecentFile(item.path);
+          return;
+        case FileOpenTargetType.image:
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ImageViewerScreen(filePath: item.path),
+            ),
+          );
+          WidgetService.addRecentFile(item.path);
+          return;
+        case FileOpenTargetType.epub:
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => EpubReaderScreen(filePath: item.path),
+            ),
+          );
+          WidgetService.addRecentFile(item.path);
+          return;
+        case FileOpenTargetType.comicBook:
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => CbzReaderScreen(filePath: item.path),
+            ),
+          );
+          WidgetService.addRecentFile(item.path);
+          return;
+        case FileOpenTargetType.spreadsheet:
+          await Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => SpreadsheetViewerScreen(filePath: item.path),
+          ));
+          WidgetService.addRecentFile(item.path);
+          return;
+        case FileOpenTargetType.pptxOutline:
+        case FileOpenTargetType.archive:
+        case FileOpenTargetType.external:
+        case FileOpenTargetType.unsupported:
+          break;
       }
       // Everything else → external app
       try {
@@ -714,32 +654,51 @@ class _FileBrowserState extends State<FileBrowser> {
   /// Only plain text/markdown/etc. use the preview bottom sheet.
   Future<void> _showFile(FileItem item) async {
     widget.onItemSelected(item);
-    final ext = item.extension.toLowerCase();
-    if (_kVideoExtensions.contains(ext)) {
+    final target = FileOpenRouter.resolve(
+      item.path,
+      source: FileOpenSource.browse,
+    );
+    if (target.type == FileOpenTargetType.video) {
       await _openVideo(item);
       return;
     }
-    if (_kAudioExtensions.contains(ext)) {
+    if (target.type == FileOpenTargetType.audio) {
       await _openAudio(item);
       return;
     }
     // On mobile: open documents directly in fullscreen readers
     if (MediaQuery.of(context).size.width < 600) {
-      if (ext == '.pdf') {
-        _openPdf(item.path);
-        return;
-      }
-      if (ext == '.docx') {
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => DocxReaderScreen(filePath: item.path)),
-        );
-        return;
-      }
-      if (item.isImage) {
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => ImageViewerScreen(filePath: item.path)),
-        );
-        return;
+      switch (target.type) {
+        case FileOpenTargetType.pdf:
+          _openPdf(item.path);
+          return;
+        case FileOpenTargetType.docx:
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => DocxReaderScreen(filePath: item.path)),
+          );
+          return;
+        case FileOpenTargetType.image:
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => ImageViewerScreen(filePath: item.path)),
+          );
+          return;
+        case FileOpenTargetType.epub:
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => EpubReaderScreen(filePath: item.path),
+          ));
+          return;
+        case FileOpenTargetType.comicBook:
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => CbzReaderScreen(filePath: item.path),
+          ));
+          return;
+        case FileOpenTargetType.spreadsheet:
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => SpreadsheetViewerScreen(filePath: item.path),
+          ));
+          return;
+        default:
+          break;
       }
       // Text/markdown/code: show in bottom sheet with preview
       await showModalBottomSheet<void>(
@@ -796,7 +755,11 @@ class _FileBrowserState extends State<FileBrowser> {
     try {
       final items = await FileUtils.listDirectory(_currentPath);
       for (final it in items) {
-        if (_kVideoExtensions.contains(it.extension.toLowerCase())) {
+        if (FileOpenRouter.resolve(
+              it.path,
+              source: FileOpenSource.browse,
+            ).type ==
+            FileOpenTargetType.video) {
           siblings.add(it.path);
         }
       }
@@ -829,7 +792,11 @@ class _FileBrowserState extends State<FileBrowser> {
     try {
       final items = await FileUtils.listDirectory(_currentPath);
       for (final it in items) {
-        if (_kAudioExtensions.contains(it.extension.toLowerCase())) {
+        if (FileOpenRouter.resolve(
+              it.path,
+              source: FileOpenSource.browse,
+            ).type ==
+            FileOpenTargetType.audio) {
           siblings.add(it.path);
         }
       }
