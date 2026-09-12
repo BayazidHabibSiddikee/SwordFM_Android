@@ -94,21 +94,54 @@ class MainActivity : AudioServiceActivity(), MethodChannel.MethodCallHandler {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_PICK_FILE && resultCode == RESULT_OK && data != null) {
-            val paths = mutableListOf<String>()
-            // Handle multi-select
+            // Collect all picked URIs (multi-select via clipData or single via data.data).
+            val uris = mutableListOf<Uri>()
             val clipData = data.clipData
             if (clipData != null) {
                 for (i in 0 until clipData.itemCount) {
-                    val uri = clipData.getItemAt(i).uri
-                    paths.add(uri.path ?: "")
+                    uris.add(clipData.getItemAt(i).uri)
                 }
             } else {
-                val uri = data.data
-                if (uri != null) paths.add(uri.path ?: "")
+                data.data?.let { uris.add(it) }
             }
-            if (paths.isNotEmpty()) {
-                lastResultPaths = paths
-                methodChannel?.invokeMethod("onFilePicked", mapOf("paths" to paths))
+            if (uris.isEmpty()) return
+
+            // content:// URIs (from ACTION_OPEN_DOCUMENT / SAF) are not file-system
+            // paths — uri.path returns the encoded document ID, not a readable path.
+            // We must copy each URI through ContentResolver to a private cache file
+            // before sending, so the native Bluetooth code can open it as a File.
+            thread {
+                val paths = mutableListOf<String>()
+                for (uri in uris) {
+                    try {
+                        val fileName = getFileName(uri) ?: uri.lastPathSegment ?: "bt_file"
+                        // Sanitise: strip any directory component a malicious URI might inject.
+                        val safeName = File(fileName).name.ifBlank { "bt_file" }
+                        val cacheFile = File(cacheDir, "bt_send/$safeName")
+                        cacheFile.parentFile?.mkdirs()
+                        contentResolver.openInputStream(uri)?.use { input ->
+                            cacheFile.outputStream().use { output -> input.copyTo(output) }
+                        }
+                        if (cacheFile.exists() && cacheFile.length() > 0) {
+                            paths.add(cacheFile.absolutePath)
+                        }
+                    } catch (e: Exception) {
+                        // Skip unreadable URIs; surface an error only if all fail.
+                    }
+                }
+                if (paths.isNotEmpty()) {
+                    lastResultPaths = paths
+                    runOnMain {
+                        methodChannel?.invokeMethod("onFilePicked", mapOf("paths" to paths))
+                    }
+                } else {
+                    runOnMain {
+                        methodChannel?.invokeMethod(
+                            "onTransferError",
+                            mapOf("message" to "Could not read any selected file")
+                        )
+                    }
+                }
             }
         }
     }
@@ -791,6 +824,23 @@ class MainActivity : AudioServiceActivity(), MethodChannel.MethodCallHandler {
         private val mmOutStream: OutputStream = socket.outputStream
         private var isCancelled = false
 
+        // ----------------------------------------------------------------
+        // Sequential send queue — files enqueued here are sent one after
+        // another by a single dedicated sender thread, preventing races
+        // when multiple files are picked at once.
+        // ----------------------------------------------------------------
+        private val sendQueue = java.util.concurrent.LinkedBlockingQueue<File>()
+        private val senderThread: Thread = Thread {
+            while (!isCancelled) {
+                val file = try {
+                    sendQueue.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS)
+                } catch (e: InterruptedException) {
+                    break
+                } ?: continue
+                sendFileNow(file)
+            }
+        }.also { it.isDaemon = true; it.start() }
+
         override fun run() {
             val buffer = ByteArray(65536)
             var bytes: Int
@@ -905,87 +955,93 @@ class MainActivity : AudioServiceActivity(), MethodChannel.MethodCallHandler {
             }
         }
 
+        /** Enqueue [file] for sequential sending. */
         fun sendFile(file: File) {
-            thread {
-                try {
-                    val fileLength = file.length()
+            sendQueue.add(file)
+        }
 
-                    isSending = true
-                    runOnMain {
-                        methodChannel?.invokeMethod("onTransferStarted", mapOf("filename" to file.name, "isSending" to true))
-                    }
+        /** Actually sends [file] over the socket; called serially from [senderThread]. */
+        private fun sendFileNow(file: File) {
+            try {
+                val fileLength = file.length()
 
-                    // SHA-256 of the file, computed by streaming once (pass 1).
-                    // We then rewind the same stream and send (pass 2), so there is
-                    // no TOCTOU window and no whole-file readBytes() in memory.
-                    val fileInputStream = FileInputStream(file)
-                    val fileChannel = fileInputStream.channel
-                    val buffer = ByteArray(65536)
-                    val digest = MessageDigest.getInstance("SHA-256")
-                    var bytesRead: Int
-                    while (fileInputStream.read(buffer).also { bytesRead = it } != -1) {
-                        digest.update(buffer, 0, bytesRead)
-                    }
-                    fileChannel.position(0)
-
-                    // Write the JSON metadata frame (see frame-format comment at top).
-                    val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
-                    val metadata = JSONObject()
-                        .put("filename", file.name)
-                        .put("size", fileLength)
-                        .put("checksum", sha256)
-                    val metadataBytes = metadata.toString().toByteArray(Charsets.UTF_8)
-
-                    // 4-byte big-endian metadata length
-                    val lenBos = ByteArrayOutputStream()
-                    DataOutputStream(lenBos).use { it.writeInt(metadataBytes.size) }
-                    mmOutStream.write(lenBos.toByteArray())
-                    mmOutStream.write(metadataBytes)
-                    mmOutStream.flush()
-
-                    var totalBytesSent = 0L
-                    var lastUpdate = System.currentTimeMillis()
-
-                    while (fileInputStream.read(buffer).also { bytesRead = it } != -1 && !isCancelled) {
-                        mmOutStream.write(buffer, 0, bytesRead)
-                        totalBytesSent += bytesRead
-
-                        val now = System.currentTimeMillis()
-                        if (now - lastUpdate > 100) {
-                            lastUpdate = now
-                            val progressArgs = mapOf(
-                                "filename" to file.name,
-                                "bytesTransferred" to totalBytesSent,
-                                "totalBytes" to fileLength,
-                                "isSending" to true
-                            )
-                            runOnMain { methodChannel?.invokeMethod("onTransferProgress", progressArgs) }
-                        }
-                    }
-                    fileInputStream.close()
-                    mmOutStream.flush()
-
-                    if (!isCancelled) {
-                        runOnMain {
-                            methodChannel?.invokeMethod("onTransferComplete", mapOf(
-                                "savedPath" to "",
-                                "sha256" to sha256,
-                                "verified" to true
-                            ))
-                        }
-                    }
-                } catch (e: Exception) {
-                    runOnMain {
-                        methodChannel?.invokeMethod("onTransferError", mapOf("message" to "Send failed: ${e.message}"))
-                    }
-                } finally {
-                    isSending = false
+                isSending = true
+                runOnMain {
+                    methodChannel?.invokeMethod("onTransferStarted", mapOf("filename" to file.name, "isSending" to true))
                 }
+
+                // SHA-256 of the file, computed by streaming once (pass 1).
+                // We then rewind the same stream and send (pass 2), so there is
+                // no TOCTOU window and no whole-file readBytes() in memory.
+                val fileInputStream = FileInputStream(file)
+                val fileChannel = fileInputStream.channel
+                val buffer = ByteArray(65536)
+                val digest = MessageDigest.getInstance("SHA-256")
+                var bytesRead: Int
+                while (fileInputStream.read(buffer).also { bytesRead = it } != -1) {
+                    digest.update(buffer, 0, bytesRead)
+                }
+                fileChannel.position(0)
+
+                // Write the JSON metadata frame (see frame-format comment at top).
+                val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
+                val metadata = JSONObject()
+                    .put("filename", file.name)
+                    .put("size", fileLength)
+                    .put("checksum", sha256)
+                val metadataBytes = metadata.toString().toByteArray(Charsets.UTF_8)
+
+                // 4-byte big-endian metadata length
+                val lenBos = ByteArrayOutputStream()
+                DataOutputStream(lenBos).use { it.writeInt(metadataBytes.size) }
+                mmOutStream.write(lenBos.toByteArray())
+                mmOutStream.write(metadataBytes)
+                mmOutStream.flush()
+
+                var totalBytesSent = 0L
+                var lastUpdate = System.currentTimeMillis()
+
+                while (fileInputStream.read(buffer).also { bytesRead = it } != -1 && !isCancelled) {
+                    mmOutStream.write(buffer, 0, bytesRead)
+                    totalBytesSent += bytesRead
+
+                    val now = System.currentTimeMillis()
+                    if (now - lastUpdate > 100) {
+                        lastUpdate = now
+                        val progressArgs = mapOf(
+                            "filename" to file.name,
+                            "bytesTransferred" to totalBytesSent,
+                            "totalBytes" to fileLength,
+                            "isSending" to true
+                        )
+                        runOnMain { methodChannel?.invokeMethod("onTransferProgress", progressArgs) }
+                    }
+                }
+                fileInputStream.close()
+                mmOutStream.flush()
+
+                if (!isCancelled) {
+                    runOnMain {
+                        methodChannel?.invokeMethod("onTransferComplete", mapOf(
+                            "savedPath" to "",
+                            "sha256" to sha256,
+                            "verified" to true
+                        ))
+                    }
+                }
+            } catch (e: Exception) {
+                runOnMain {
+                    methodChannel?.invokeMethod("onTransferError", mapOf("message" to "Send failed: ${e.message}"))
+                }
+            } finally {
+                isSending = false
             }
         }
 
         fun cancel() {
             isCancelled = true
+            sendQueue.clear()
+            senderThread.interrupt()
             try {
                 socket.close()
             } catch (e: IOException) {
