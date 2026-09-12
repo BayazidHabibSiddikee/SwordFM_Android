@@ -99,7 +99,35 @@ Future<Map<String, List<String>>> _findDuplicatesWorker(
   };
 }
 
+/// Thrown when an archive format is detected but not supported by the
+/// in-app pure-Dart implementation (e.g. 7z, RAR).
+class UnsupportedArchiveFormat implements Exception {
+  final String format;
+  final String message;
+  const UnsupportedArchiveFormat(this.format, this.message);
+
+  @override
+  String toString() => 'UnsupportedArchiveFormat($format): $message';
+}
+
+/// Thrown when an archive exceeds the configured safety limits (entry count
+/// or uncompressed size), preventing zip-bomb-style attacks.
+class ArchiveBombException implements Exception {
+  final String message;
+  const ArchiveBombException(this.message);
+
+  @override
+  String toString() => 'ArchiveBombException: $message';
+}
+
 class ArchiveService {
+  /// Maximum number of entries allowed in a single archive extraction.
+  /// Archives exceeding this are rejected with [ArchiveBombException].
+  static const int maxEntries = 10000;
+
+  /// Maximum total uncompressed size (in bytes) allowed during extraction.
+  /// 4 GB — consistent with common zip-bomb mitigations.
+  static const int maxUncompressedBytes = 4 * 1024 * 1024 * 1024;
   /// Compute SHA-256 hex digest of a file. Returns null on error.
   /// Streams in chunks so large files don't spike memory.
   static Future<String?> sha256OfFile(String path) async {
@@ -118,37 +146,55 @@ class ArchiveService {
     return Isolate.run(() => _findDuplicatesWorker(paths));
   }
 
-  /// Supported extensions mapped to their operation type.
-  /// Note: `p.extension('a.tar.gz')` returns `.gz`, so multi-part suffixes are
-  /// matched by their outermost compression extension (`.gz` / `.xz` / `.bz2`).
+  /// Extensions that the pure-Dart `archive` package can extract and create
+  /// in-app, without any native/FFI dependency.
   ///
-  /// Formats marked `(native)` are detected but require platform-specific
-  /// extraction (7z, rar, zst are not supported by the pure-Dart archive pkg).
+  /// 7z, RAR, and Zstandard are NOT listed here because they require native
+  /// bindings unavailable on all supported platforms. Attempting to open them
+  /// throws [UnsupportedArchiveFormat] so callers get a clear, actionable
+  /// message rather than a silent failure.
   static const Set<String> supportedExts = {
     '.zip',
     '.tar',
     '.gz',
     '.tgz',
-    '.tar.gz',
     '.xz',
     '.txz',
     '.bz2',
     '.tbz2',
-    '.7z', // (native) detected, extraction requires native binding
-    '.rar', // (native) detected, extraction requires native binding
-    '.zst', // (native) detected, extraction requires native binding
+  };
+
+  /// Extensions we can detect but explicitly do NOT support in-app. Used to
+  /// give a better error message than "unknown format".
+  static const Set<String> unsupportedExts = {
+    '.7z', // requires 7zip / p7zip native binary
+    '.rar', // requires unrar native binary
+    '.zst', // requires zstd native binary
     '.lz',
     '.lzma',
   };
 
-  /// Returns true if [path] looks like a supported archive file.
+  /// Returns true if [path] looks like any known archive file (supported or
+  /// recognised-but-unsupported). Use [isSupportedArchive] to test only
+  /// formats that can be opened in-app.
   static bool isArchive(String path) {
     final name = p.basename(path).toLowerCase();
-    // Check multi-part extensions first (e.g. .tar.gz, .tar.xz, .tar.bz2)
     if (name.endsWith('.tar.gz') ||
         name.endsWith('.tar.bz2') ||
         name.endsWith('.tar.xz') ||
         name.endsWith('.tar.zst')) {
+      return true;
+    }
+    final ext = p.extension(path).toLowerCase();
+    return supportedExts.contains(ext) || unsupportedExts.contains(ext);
+  }
+
+  /// Returns true only for formats the app can open without native tools.
+  static bool isSupportedArchive(String path) {
+    final name = p.basename(path).toLowerCase();
+    if (name.endsWith('.tar.gz') ||
+        name.endsWith('.tar.bz2') ||
+        name.endsWith('.tar.xz')) {
       return true;
     }
     final ext = p.extension(path).toLowerCase();
@@ -162,18 +208,51 @@ class ArchiveService {
   /// Extracts an archive at [archivePath] into [destDir].
   ///
   /// Supported formats (auto-detected by extension):
-  ///   - `.zip`       — ZIP archive
-  ///   - `.tar`       — uncompressed TAR
-  ///   - `.gz` / `.tgz` — GZip-wrapped TAR
-  ///   - `.tar.gz`    — same as above (canonical form)
+  ///   - `.zip`                   — ZIP archive
+  ///   - `.tar`                   — uncompressed TAR
+  ///   - `.gz` / `.tgz`           — GZip-wrapped single file or TAR
+  ///   - `.tar.gz`                — same as above (canonical form)
+  ///   - `.xz` / `.txz` / `.tar.xz` — XZ-wrapped single file or TAR
+  ///   - `.bz2` / `.tbz2` / `.tar.bz2` — BZip2-wrapped single file or TAR
   ///
-  /// Returns a list of extracted file paths. Throws [Exception] on failure
-  /// with a prefix: `unsupported:`, `invalid:`, or `io:`.
+  /// Throws [UnsupportedArchiveFormat] for 7z, RAR, and Zstandard — these
+  /// require native binaries not bundled with the app.
+  ///
+  /// Throws [ArchiveBombException] when the archive exceeds [maxEntries]
+  /// entries or [maxUncompressedBytes] total uncompressed size.
+  ///
+  /// Throws [Exception] on other failures with a prefix:
+  ///   `invalid:`, or `io:`.
   static Future<List<String>> extract(
     String archivePath,
     String destDir,
   ) async {
+    final name = p.basename(archivePath).toLowerCase();
     final ext = p.extension(archivePath).toLowerCase();
+
+    // ---- Loudly reject formats we cannot handle ----
+    if (ext == '.7z') {
+      throw UnsupportedArchiveFormat(
+        '7z',
+        '7z archives cannot be extracted in-app. '
+            'Open a terminal (Termux) and run: 7z x "$archivePath"',
+      );
+    }
+    if (ext == '.rar') {
+      throw UnsupportedArchiveFormat(
+        'rar',
+        'RAR archives cannot be extracted in-app. '
+            'Open a terminal (Termux) and run: unrar x "$archivePath"',
+      );
+    }
+    if (ext == '.zst' || name.endsWith('.tar.zst')) {
+      throw UnsupportedArchiveFormat(
+        'zst',
+        'Zstandard archives cannot be extracted in-app. '
+            'Open a terminal (Termux) and run: zstd -d "$archivePath"',
+      );
+    }
+
     final archiveFile = File(archivePath);
     if (!await archiveFile.exists()) {
       throw Exception('archive not found: $archivePath');
@@ -188,8 +267,6 @@ class ArchiveService {
     }
 
     List<ArchiveFile> files = <ArchiveFile>[];
-    // Non-tar single-file compressed archives (e.g. notes.txt.gz) — written
-    // as one decompressed file instead of failing with "invalid archive".
     List<int>? singleFileData;
     String? singleFileName;
     switch (ext) {
@@ -201,7 +278,6 @@ class ArchiveService {
         break;
       case '.gz':
       case '.tgz':
-      case '.tar.gz':
         final gzipDecoded = GZipDecoder().decodeBytes(data);
         final tarFiles = _tryDecodeTar(gzipDecoded);
         if (tarFiles != null) {
@@ -213,7 +289,6 @@ class ArchiveService {
         break;
       case '.xz':
       case '.txz':
-      case '.tar.xz':
         final xzDecoded = XZDecoder().decodeBytes(data);
         final tarFiles = _tryDecodeTar(xzDecoded);
         if (tarFiles != null) {
@@ -225,7 +300,6 @@ class ArchiveService {
         break;
       case '.bz2':
       case '.tbz2':
-      case '.tar.bz2':
         final bz2Decoded = BZip2Decoder().decodeBytes(data);
         final tarFiles = _tryDecodeTar(bz2Decoded);
         if (tarFiles != null) {
@@ -235,45 +309,51 @@ class ArchiveService {
           singleFileName = _stripExt(archivePath, '.bz2');
         }
         break;
-      case '.7z':
-        return _extractWithTool(
-          archivePath,
-          destDir,
-          tool: '7z',
-          toolArgs: ['x', '-y'],
-          hint: 'Install "7zip" / p7zip on your device to extract '
-              '7z archives.',
-        );
-      case '.rar':
-        return _extractWithTool(
-          archivePath,
-          destDir,
-          tool: 'unrar',
-          toolArgs: ['x', '-y'],
-          hint: 'Install "unrar" on your device to extract RAR archives.',
-        );
-      case '.zst':
-      case '.tar.zst':
-        return _extractWithTool(
-          archivePath,
-          destDir,
-          tool: 'zstd',
-          toolArgs: ['-d', '-o'],
-          hint: 'Install "zstd" on your device to extract Zstandard '
-              'archives.',
-        );
       default:
-        throw Exception('unsupported:unknown archive format $ext');
+        // Multi-part names handled here (.tar.gz etc.)
+        if (name.endsWith('.tar.gz')) {
+          files = TarDecoder()
+              .decodeBytes(GZipDecoder().decodeBytes(data))
+              .files;
+        } else if (name.endsWith('.tar.xz')) {
+          files =
+              TarDecoder().decodeBytes(XZDecoder().decodeBytes(data)).files;
+        } else if (name.endsWith('.tar.bz2')) {
+          files = TarDecoder()
+              .decodeBytes(BZip2Decoder().decodeBytes(data))
+              .files;
+        } else {
+          throw Exception('unsupported:unknown archive format $ext');
+        }
     }
 
     if (files.isEmpty && singleFileData == null) {
       throw Exception('invalid:archive contains no files');
     }
 
+    // ---- Archive bomb check ----
+    if (singleFileData == null) {
+      if (files.length > maxEntries) {
+        throw ArchiveBombException(
+          'Archive contains ${files.length} entries, exceeding the '
+          'safety limit of $maxEntries.',
+        );
+      }
+      var totalUncompressed = 0;
+      for (final af in files) {
+        if (!af.isDirectory) totalUncompressed += af.size;
+        if (totalUncompressed > maxUncompressedBytes) {
+          throw ArchiveBombException(
+            'Archive uncompressed size exceeds the safety limit of '
+            '${maxUncompressedBytes ~/ (1024 * 1024 * 1024)} GB.',
+          );
+        }
+      }
+    }
+
     final extractedPaths = <String>[];
 
     if (singleFileData != null) {
-      // Single decompressed file (non-tar .gz/.xz/.bz2).
       final outPath = p.join(destDir, singleFileName);
       await File(outPath).writeAsBytes(singleFileData);
       extractedPaths.add(outPath);
@@ -281,35 +361,43 @@ class ArchiveService {
     }
 
     for (final af in files) {
-      var name = af.name;
-      // Safety: reject path traversal in archive entries
-      if (name.contains('..') || name.contains(String.fromCharCode(0))) {
+      var entryName = af.name;
+
+      // ---- Path-traversal + symlink guard ----
+      // Skip symlinks — they can point outside the archive root.
+      if (af.isSymbolicLink) continue;
+      // Reject NUL bytes and any component that is or contains "..".
+      if (entryName.contains(String.fromCharCode(0))) continue;
+      // Normalise Windows separators then check each component.
+      entryName = entryName.replaceAll('\\', '/');
+      while (entryName.startsWith('/')) {
+        entryName = entryName.substring(1);
+      }
+      if (entryName.isEmpty) continue;
+      final parts = entryName.split('/');
+      if (parts.any((c) => c == '..' || c.isEmpty && parts.length > 1)) {
         continue;
       }
-      // Normalize Windows-style separators and strip leading slashes so
-      // entries can't escape the destination dir (or create weird filenames).
-      name = name.replaceAll('\\', '/');
-      while (name.startsWith('/')) {
-        name = name.substring(1);
-      }
-      if (name.isEmpty) continue;
-      // Skip symlinks — they can point outside the archive.
-      if (af.isSymbolicLink) continue;
 
-      final destPath = p.join(destDir, name);
+      final destPath = p.join(destDir, entryName);
+
+      // ---- Canonical path check: verify destPath is inside destDir ----
+      final canonDest = p.canonicalize(destPath);
+      final canonBase = p.canonicalize(destDir);
+      if (!canonDest.startsWith('$canonBase${p.separator}') &&
+          canonDest != canonBase) {
+        continue; // silently skip entries that would escape the dest dir
+      }
 
       if (af.isDirectory) {
         await Directory(destPath).create(recursive: true);
       } else {
         final parentDir = Directory(p.dirname(destPath));
         await parentDir.create(recursive: true);
-        // readBytes() returns null for some entries (e.g. zero-length or
-        // unsupported compression) — the `content` getter would silently
-        // write an EMPTY file. Fail loudly instead so the user knows.
         final content = af.readBytes();
         if (content == null) {
           throw Exception(
-            'io:could not read archive entry "$name" (corrupt or '
+            'io:could not read archive entry "$entryName" (corrupt or '
             'unsupported compression)',
           );
         }
@@ -320,7 +408,6 @@ class ArchiveService {
 
     return extractedPaths;
   }
-
   /// Attempts to decode [data] as a tar archive. Returns null when it isn't
   /// valid tar (e.g. a plain gzip'd text file), so callers can fall back to
   /// treating it as a single compressed file.
@@ -334,17 +421,14 @@ class ArchiveService {
     }
   }
 
-  /// Strips [archiveExt] and then [ext] from [archivePath], e.g.
+  /// Strips the compression extension from [archivePath], e.g.
   /// `notes.tar.gz` with ext `.gz` → `notes.tar`.
   static String _stripExt(String archivePath, String ext) {
     var base = p.basenameWithoutExtension(archivePath);
     final inner = p.extension(base);
-    // Only strip the inner extension when it matches the compression layer
-    // (e.g. notes.tar.gz → notes.tar, but readme.txt.gz → readme.txt).
     if (ext == '.gz' || ext == '.xz' || ext == '.bz2') {
       if (inner == '.tar' ||
-          (base.toLowerCase().endsWith(ext) &&
-              inner.isNotEmpty &&
+          (inner.isNotEmpty &&
               inner != ext &&
               base.length > inner.length &&
               base.toLowerCase().endsWith('$inner$ext'))) {
@@ -354,57 +438,43 @@ class ArchiveService {
     return base;
   }
 
-  /// Extracts a format that the pure-Dart decoders can't handle (7z/rar/zst)
-  /// by shelling out to the matching binary installed in Termux. Throws an
-  /// actionable message when the tool is missing.
-  static Future<List<String>> _extractWithTool(
+  // -------------------------------------------------------------------------
+  // Integrity check
+  // -------------------------------------------------------------------------
+
+  /// Verifies the integrity of an archive by attempting to decode all entries
+  /// and computing their SHA-256 checksums.
+  ///
+  /// Returns an [ArchiveIntegrityResult] with:
+  ///   - [ArchiveIntegrityResult.ok] — true if no errors were found.
+  ///   - [ArchiveIntegrityResult.errors] — list of (entryName, errorMessage)
+  ///     pairs for any entries that failed to decode.
+  ///
+  /// Throws [UnsupportedArchiveFormat] for formats the app cannot read.
+  static Future<ArchiveIntegrityResult> verifyIntegrity(
     String archivePath,
-    String destDir, {
-    required String tool,
-    required List<String> toolArgs,
-    required String hint,
-  }) async {
-    const termuxBin = '/data/data/com.termux/files/usr/bin';
-    final binary = '$termuxBin/$tool';
-    if (!File(binary).existsSync()) {
-      throw Exception('unsupported:$hint');
+  ) async {
+    final errors = <MapEntry<String, String>>[];
+    List<ArchiveFile> files;
+    try {
+      files = await _decodeArchive(archivePath);
+    } catch (e) {
+      return ArchiveIntegrityResult(ok: false, errors: [
+        MapEntry('<archive>', 'Failed to decode archive: $e'),
+      ]);
     }
-    await Directory(destDir).create(recursive: true);
-    if (tool == 'zstd') {
-      // zstd -d file.tar.zst → file.tar in the working dir; then TAR-decode.
-      final result = await Process.run(binary, [
-        '-d',
-        archivePath,
-      ], workingDirectory: destDir);
-      if (result.exitCode != 0) {
-        throw Exception('io:zstd failed: ${result.stderr}');
-      }
-      final name = p.basename(archivePath);
-      final tarName = name.endsWith('.zst')
-          ? name.substring(0, name.length - 4)
-          : name;
-      final tarPath = p.join(destDir, tarName);
-      if (File(tarPath).existsSync()) {
-        final inner = TarDecoder().decodeBytes(File(tarPath).readAsBytesSync());
-        for (final af in inner.files) {
-          if (af.isDirectory) continue;
-          final outPath = p.join(destDir, af.name);
-          await Directory(p.dirname(outPath)).create(recursive: true);
-          await File(outPath).writeAsBytes(af.content as List<int>);
+    for (final af in files) {
+      if (af.isDirectory || af.isSymbolicLink) continue;
+      try {
+        final content = af.readBytes();
+        if (content == null) {
+          errors.add(MapEntry(af.name, 'readBytes() returned null'));
         }
+      } catch (e) {
+        errors.add(MapEntry(af.name, '$e'));
       }
-      return [destDir];
     }
-    final outFlag = tool == '7z' ? '-o$destDir' : '$destDir${p.separator}';
-    final result = await Process.run(binary, [
-      ...toolArgs,
-      archivePath,
-      outFlag,
-    ]);
-    if (result.exitCode != 0) {
-      throw Exception('io:${tool} failed: ${result.stderr}');
-    }
-    return [destDir];
+    return ArchiveIntegrityResult(ok: errors.isEmpty, errors: errors);
   }
 
   /// Decodes the archive and returns its entries (name / size / isDirectory),
@@ -463,12 +533,30 @@ class ArchiveService {
   }
 
   static Future<List<ArchiveFile>> _decodeArchive(String archivePath) async {
+    final name = p.basename(archivePath).toLowerCase();
     final ext = p.extension(archivePath).toLowerCase();
     final archiveFile = File(archivePath);
     if (!await archiveFile.exists()) {
       throw Exception('archive not found: $archivePath');
     }
     final data = await archiveFile.readAsBytes();
+    // Multi-part extensions checked first.
+    if (name.endsWith('.tar.gz')) {
+      return TarDecoder().decodeBytes(GZipDecoder().decodeBytes(data)).files;
+    }
+    if (name.endsWith('.tar.xz')) {
+      return TarDecoder().decodeBytes(XZDecoder().decodeBytes(data)).files;
+    }
+    if (name.endsWith('.tar.bz2')) {
+      return TarDecoder().decodeBytes(BZip2Decoder().decodeBytes(data)).files;
+    }
+    if (name.endsWith('.tar.zst')) {
+      throw UnsupportedArchiveFormat(
+        'zst',
+        'Zstandard archives cannot be read in-app. '
+            'Open a terminal (Termux) and run: zstd -d "$archivePath"',
+      );
+    }
     switch (ext) {
       case '.zip':
         return ZipDecoder().decodeBytes(data).files;
@@ -476,18 +564,35 @@ class ArchiveService {
         return TarDecoder().decodeBytes(data).files;
       case '.gz':
       case '.tgz':
-      case '.tar.gz':
         return TarDecoder().decodeBytes(GZipDecoder().decodeBytes(data)).files;
       case '.xz':
       case '.txz':
-      case '.tar.xz':
         return TarDecoder().decodeBytes(XZDecoder().decodeBytes(data)).files;
       case '.bz2':
       case '.tbz2':
-      case '.tar.bz2':
-        return TarDecoder().decodeBytes(BZip2Decoder().decodeBytes(data)).files;
+        return TarDecoder()
+            .decodeBytes(BZip2Decoder().decodeBytes(data))
+            .files;
+      case '.7z':
+        throw UnsupportedArchiveFormat(
+          '7z',
+          '7z archives cannot be read in-app. '
+              'Open a terminal (Termux) and run: 7z x "$archivePath"',
+        );
+      case '.rar':
+        throw UnsupportedArchiveFormat(
+          'rar',
+          'RAR archives cannot be read in-app. '
+              'Open a terminal (Termux) and run: unrar x "$archivePath"',
+        );
+      case '.zst':
+        throw UnsupportedArchiveFormat(
+          'zst',
+          'Zstandard archives cannot be read in-app. '
+              'Open a terminal (Termux) and run: zstd -d "$archivePath"',
+        );
       default:
-        throw Exception('unsupported:${ext} — 7z/rar/zst need native tools');
+        throw Exception('unsupported:unknown archive format $ext');
     }
   }
 
@@ -613,4 +718,14 @@ class ArchiveEntryInfo {
     required this.size,
     required this.isDirectory,
   });
+}
+
+/// Result of [ArchiveService.verifyIntegrity].
+///
+/// [ok] is true when every file entry was decoded without error.
+/// [errors] lists (entryName, errorMessage) pairs for failed entries.
+class ArchiveIntegrityResult {
+  final bool ok;
+  final List<MapEntry<String, String>> errors;
+  const ArchiveIntegrityResult({required this.ok, required this.errors});
 }
