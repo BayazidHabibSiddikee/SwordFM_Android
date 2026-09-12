@@ -650,6 +650,16 @@ class WebShareServer {
 
   String _buildJsLoadFiles() {
     return '''
+    // HTML-escape all user-controlled strings before inserting into innerHTML.
+    // Prevents stored XSS from filenames, icons, sizes, or directory parts.
+    function esc(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
+    }
     async function loadFiles() {
       try {
         const r = await fetch('/api/list', { headers: authHeaders(), credentials: 'include' });
@@ -660,8 +670,8 @@ class WebShareServer {
         if (!files.length) { el.innerHTML = '<div class="empty">No files shared yet</div>'; return; }
         el.innerHTML = files.map(function(f) {
           return '<div class="file-item">' +
-            '<a href="/download/' + encodeURIComponent(f.name) + '">' + f.icon + ' ' + f.name + '</a>' +
-            '<span class="file-size">' + f.size + '</span>' +
+            '<a href="/download/' + encodeURIComponent(f.name) + '">' + esc(f.icon) + ' ' + esc(f.name) + '</a>' +
+            '<span class="file-size">' + esc(f.size) + '</span>' +
             '</div>';
         }).join('');
         updateNav(data.currentDir || '');
@@ -671,11 +681,12 @@ class WebShareServer {
     }
     function updateNav(dir) {
       var parts = dir.split('/').filter(Boolean);
-      var html = '<a onclick="navigateTo(\'\')">↑ Root</a>';
+      var html = '<a onclick="navigateTo(\\'\\')">&#x2191; Root</a>';
       var buildPath = '';
       for (var i = 0; i < parts.length; i++) {
         buildPath += '/' + parts[i];
-        html += ' <span style="color:#5C6370;">/</span> <a onclick="navigateTo(\\'' + buildPath + '\\')">' + parts[i] + '</a>';
+        var safePath = encodeURIComponent(buildPath);
+        html += ' <span style="color:#5C6370;">/</span> <a onclick="navigateTo(decodeURIComponent(' + JSON.stringify(buildPath) + '))">' + esc(parts[i]) + '</a>';
       }
       document.getElementById('navBar').innerHTML = html;
     }
@@ -689,8 +700,8 @@ class WebShareServer {
         if (!d.files || !d.files.length) { el.innerHTML = '<div class="empty">No files shared yet</div>'; return; }
         el.innerHTML = d.files.map(function(f) {
           return '<div class="file-item">' +
-            '<a href="/download/' + encodeURIComponent(f.name) + '?subdir=' + encodeURIComponent(dir) + '">' + f.icon + ' ' + f.name + '</a>' +
-            '<span class="file-size">' + f.size + '</span>' +
+            '<a href="/download/' + encodeURIComponent(f.name) + '?subdir=' + encodeURIComponent(dir) + '">' + esc(f.icon) + ' ' + esc(f.name) + '</a>' +
+            '<span class="file-size">' + esc(f.size) + '</span>' +
             '</div>';
         }).join('');
         updateNav(dir);

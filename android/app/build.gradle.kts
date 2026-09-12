@@ -29,11 +29,52 @@ android {
         versionName = flutter.versionName
     }
 
+    // ---------------------------------------------------------------------------
+    // Release signing — driven by environment variables so no secrets land in VCS.
+    // Set these in CI or your local ~/.gradle/gradle.properties (never commit them):
+    //
+    //   SWORDFM_STORE_FILE    absolute path to the release .jks / .keystore
+    //   SWORDFM_STORE_PASS    keystore password
+    //   SWORDFM_KEY_ALIAS     key alias inside the keystore
+    //   SWORDFM_KEY_PASS      key password
+    //
+    // TODO: create a release keystore, set the four env-vars in CI, and remove
+    //       the signingConfig fallback to "debug" in the release buildType below.
+    // ---------------------------------------------------------------------------
+    val storeFile   = System.getenv("SWORDFM_STORE_FILE")
+    val storePass   = System.getenv("SWORDFM_STORE_PASS")
+    val keyAlias    = System.getenv("SWORDFM_KEY_ALIAS")
+    val keyPass     = System.getenv("SWORDFM_KEY_PASS")
+    val hasReleaseSigning = listOf(storeFile, storePass, keyAlias, keyPass).all { !it.isNullOrEmpty() }
+
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
+                this.storeFile     = file(storeFile!!)
+                this.storePassword = storePass
+                this.keyAlias      = keyAlias
+                this.keyPassword   = keyPass
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // R8 full-mode + resource shrinking — reduces APK size significantly.
+            // Add any necessary keep-rules to android/app/proguard-rules.pro.
+            isMinifyEnabled   = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                // TODO: replace with the release signingConfig above before publishing.
+                // Falling back to debug keys — NOT suitable for Play Store submission.
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

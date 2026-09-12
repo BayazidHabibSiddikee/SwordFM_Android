@@ -8,8 +8,9 @@ import '../theme/theme.dart';
 /// In-app spreadsheet viewer for XLSX / XLS / ODS / CSV files.
 ///
 /// XLSX/XLS/ODS: reads raw bytes, passes base64 to embedded SheetJS
-/// (CDN fetch on first open) which renders an HTML table.
-/// CSV: reads as text and formats directly without SheetJS.
+/// (bundled locally at assets/js/xlsx.full.min.js — works fully offline)
+/// which renders an HTML table. CSV: reads as text and formats directly
+/// without SheetJS.
 class SpreadsheetViewerScreen extends StatefulWidget {
   final String filePath;
   const SpreadsheetViewerScreen({super.key, required this.filePath});
@@ -94,7 +95,12 @@ class _SpreadsheetViewerScreenState extends State<SpreadsheetViewerScreen> {
     final bytes = await File(widget.filePath).readAsBytes();
     final b64 = base64Encode(bytes);
 
-    // SheetJS XLSX loaded from CDN; if offline it gracefully shows a message.
+    // Load SheetJS from the bundled asset (assets/js/xlsx.full.min.js) so the
+    // viewer works fully offline. The JS is inlined into the HTML string to
+    // avoid cross-origin/file:// restrictions in the WebView.
+    final sheetJsBytes =
+        await DefaultAssetBundle.of(context).loadString('assets/js/xlsx.full.min.js');
+
     final html = '''<!DOCTYPE html>
 <html>
 <head>
@@ -117,15 +123,14 @@ class _SpreadsheetViewerScreenState extends State<SpreadsheetViewerScreen> {
 </style>
 </head>
 <body>
-<div id="msg">Loading spreadsheet…</div>
+<div id="msg">Loading spreadsheet\u2026</div>
+<script>
+$sheetJsBytes
+</script>
 <script>
 var B64 = "$b64";
 function b64ToUint8(b){ var bin=atob(b),buf=new Uint8Array(bin.length);
   for(var i=0;i<bin.length;i++) buf[i]=bin.charCodeAt(i); return buf; }
-
-function esc(s){ return String(s==null?"":s)
-  .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-  .replace(/>/g,"&gt;"); }
 
 function renderSheet(wb, name){
   var ws = wb.Sheets[name];
@@ -160,29 +165,17 @@ function buildTabs(wb, active){
   });
 }
 
-function load(){
-  try {
-    var data = b64ToUint8(B64);
-    var wb = XLSX.read(data, {type:"array"});
-    document.getElementById("msg").style.display="none";
-    document.getElementById("tabs").style.display="flex";
-    document.getElementById("tbl-wrap").style.display="block";
-    buildTabs(wb, wb.SheetNames[0]);
-    renderSheet(wb, wb.SheetNames[0]);
-  } catch(e){
-    document.getElementById("msg").textContent = "Error: "+e;
-  }
+try {
+  var data = b64ToUint8(B64);
+  var wb = XLSX.read(data, {type:"array"});
+  document.getElementById("msg").style.display="none";
+  document.getElementById("tabs").style.display="flex";
+  document.getElementById("tbl-wrap").style.display="block";
+  buildTabs(wb, wb.SheetNames[0]);
+  renderSheet(wb, wb.SheetNames[0]);
+} catch(e){
+  document.getElementById("msg").textContent = "Error: "+e;
 }
-
-// Load SheetJS from CDN
-var s=document.createElement("script");
-s.src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
-s.onload=load;
-s.onerror=function(){
-  document.getElementById("msg").textContent=
-    "SheetJS unavailable (offline). Connect to internet to view this file, or use a spreadsheet app.";
-};
-document.head.appendChild(s);
 </script>
 <div class="sheet-tabs" id="tabs" style="display:none"></div>
 <div id="tbl-wrap" class="tbl-wrap" style="display:none"></div>

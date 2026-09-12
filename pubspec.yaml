@@ -80,4 +80,5 @@ flutter:
     - lib/l10n/arb/
     - assets/tessdata_config.json
     - assets/tessdata/
+    - assets/js/
   uses-material-design: true

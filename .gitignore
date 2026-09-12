@@ -52,6 +52,7 @@ Thumbs.db
 .env.*.local
 .flutter-plugins-dependencies
 google-services.json
+android/app/google-services.json
 firebase_local.properties
 
 # Transient build artifacts / media_kit native libs (regenerated on build)

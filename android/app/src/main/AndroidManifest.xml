@@ -45,8 +45,6 @@
             <action android:name="android.intent.action.PICK" />
         </intent>
     </queries>
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-
     <!-- Auto-start background audio / scheduled tasks after device reboot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -55,13 +53,6 @@
 
     <!-- Camera — document scanner uses the camera to capture pages -->
     <uses-permission android:name="android.permission.CAMERA" />
-
-    <!-- Microphone — voice input for search; declared only while the
-         voice-search feature ships. Remove if the feature is dropped. -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-
-    <!-- NFC — declared only while proximity-share ships. Remove if dropped. -->
-    <uses-permission android:name="android.permission.NFC" />
 
     <!-- Biometric / fingerprint lock for the app -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />

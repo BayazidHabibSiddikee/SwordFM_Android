@@ -54,9 +54,11 @@ class FtpServerService {
 
   Future<void> _serve(Socket control) async {
     final session = _FtpSession(control, this);
-    // Fresh control connection: require (re-)authentication unless the
-    // server was started with no PIN (legacy open mode).
-    _authenticated = sharePin.isEmpty;
+    // Always start unauthenticated — the client must send USER/PASS even when
+    // sharePin is empty. An empty PIN means the server should not be running
+    // (the UI enforces this), but a direct connection must still go through
+    // the auth handshake to prevent unintended open access.
+    _authenticated = false;
     var buffer = '';
     control.timeout(const Duration(minutes: 10));
     try {
