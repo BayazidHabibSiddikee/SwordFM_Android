@@ -217,7 +217,9 @@ class FileItem {
         final mode = stat.mode as int;
         if (mode > 0) return _permissionString(mode);
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('FileUtils: $e');
+    }
     // Fallback: check basic read/write/execute.
     final buf = StringBuffer('r');
     buf.write(_canWrite ? 'w' : '-');
@@ -236,7 +238,8 @@ class FileItem {
       // Attempt a tiny write to check writability; catch and return false.
       // This is an approximation — Android sandbox restricts most writes.
       return true; // Assume writable in app sandbox.
-    } catch (_) {
+    } catch (e) {
+      debugPrint('FileUtils: $e');
       return false;
     }
   }
@@ -489,30 +492,42 @@ class FileItem {
   ].contains(extension);
   bool get isPdf => extension == '.pdf';
   bool get isVideo => kVideoExtensions.contains(extension);
+
   /// True for PowerPoint files. We support .pptx (the modern ZIP format);
   /// the legacy .ppt binary format is not supported.
   bool get isPptx => extension == '.pptx';
   bool get isDocx => extension == '.docx';
+
   /// True for all spreadsheet formats (.xls, .xlsx, .ods, .csv).
-  bool get isSpreadsheet => const {
-    '.xls', '.xlsx', '.ods', '.csv', '.numbers',
-  }.contains(extension);
+  bool get isSpreadsheet =>
+      const {'.xls', '.xlsx', '.ods', '.csv', '.numbers'}.contains(extension);
+
   /// True for legacy .doc (Word 97-2003) files.
   bool get isDoc => extension == '.doc';
+
   /// True for all Office/LibreOffice document types we can open via system.
-  bool get isOfficeDoc => const {
-    '.doc', '.docx', '.odt', '.rtf', '.wps',
-  }.contains(extension);
+  bool get isOfficeDoc =>
+      const {'.doc', '.docx', '.odt', '.rtf', '.wps'}.contains(extension);
+
   /// True for Office presentation formats.
-  bool get isPresentation => const {
-    '.pptx', '.ppt', '.odp', '.key',
-  }.contains(extension);
+  bool get isPresentation =>
+      const {'.pptx', '.ppt', '.odp', '.key'}.contains(extension);
   bool get isEpub => extension == '.epub';
   bool get isCbz => const {'.cbz', '.cbr'}.contains(extension);
+
   /// True when we render this natively in-app (as opposed to needing a system app).
   bool get hasNativeViewer =>
-      isPdf || isDocx || isImage || isVideo || isText || isCode ||
-      isMarkdown || isPptx || isEpub || isCbz || isSpreadsheet;
+      isPdf ||
+      isDocx ||
+      isImage ||
+      isVideo ||
+      isText ||
+      isCode ||
+      isMarkdown ||
+      isPptx ||
+      isEpub ||
+      isCbz ||
+      isSpreadsheet;
 }
 
 /// Sort options for the file browser.
@@ -581,7 +596,8 @@ bool isJunkName(String name) {
 /// so stat() calls don't block the UI event loop on large directories.
 /// Returns a list of plain Maps so it crosses the isolate boundary safely.
 Future<List<Map<String, dynamic>>> _listDirectoryWorker(
-    (String, bool) args) async {
+  (String, bool) args,
+) async {
   final (directoryPath, includeHidden) = args;
   final dir = Directory(directoryPath);
   if (!await dir.exists()) return [];
@@ -599,7 +615,8 @@ Future<List<Map<String, dynamic>>> _listDirectoryWorker(
         'size': stat.size,
         'lastModified': stat.modified.millisecondsSinceEpoch,
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('FileUtils: $e');
       // Unreadable entry — skip silently
     }
   }
@@ -616,7 +633,8 @@ class FileUtils {
     bool includeHidden = false,
   }) async {
     final maps = await Isolate.run(
-        () => _listDirectoryWorker((directoryPath, includeHidden)));
+      () => _listDirectoryWorker((directoryPath, includeHidden)),
+    );
     final items = maps.map((m) {
       final path = m['path'] as String;
       final isDir = m['isDirectory'] as bool;
@@ -628,7 +646,8 @@ class FileUtils {
         isDirectory: isDir,
         size: m['size'] as int,
         lastModified: DateTime.fromMillisecondsSinceEpoch(
-            m['lastModified'] as int),
+          m['lastModified'] as int,
+        ),
       );
     }).toList();
 
@@ -661,7 +680,8 @@ class FileUtils {
       final List<FileSystemEntity> entities;
       try {
         entities = await dir.list().toList();
-      } catch (_) {
+      } catch (e) {
+        debugPrint('FileUtils: $e');
         continue; // unreadable directory — skip
       }
       for (final entity in entities) {
@@ -754,7 +774,8 @@ class FileUtils {
     List<FileSystemEntity> entities;
     try {
       entities = await srcDir.list().toList();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('FileUtils: $e');
       return;
     }
     for (final entity in entities) {
@@ -765,7 +786,8 @@ class FileUtils {
       } else {
         try {
           await (entity as File).copy(newPath);
-        } catch (_) {
+        } catch (e) {
+          debugPrint('FileUtils: $e');
           // Individual unreadable file — skip, keep the rest.
         }
       }
@@ -824,7 +846,8 @@ class FileUtils {
       final octal = mode.toRadixString(8);
       final result = await Process.run('chmod', [octal, path]);
       return result.exitCode == 0;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('FileUtils: $e');
       return false;
     }
   }
@@ -912,7 +935,8 @@ class FileUtils {
         'path': path,
       });
       return result ?? false;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('FileUtils: $e');
       return false;
     }
   }
@@ -1013,10 +1037,14 @@ class FileUtils {
         if (ts != null && ts < cutoffMs) {
           try {
             await entity.delete(recursive: true);
-          } catch (_) {}
+          } catch (e) {
+            debugPrint('FileUtils: $e');
+          }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('FileUtils: $e');
+    }
   }
 
   // --- Clipboard History ---
@@ -1037,7 +1065,8 @@ class FileUtils {
           jsonDecode(raw) as List,
         );
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('FileUtils: $e');
       _clipboardHistory = [];
     }
     _historyLoaded = true;
@@ -1047,8 +1076,13 @@ class FileUtils {
   static Future<void> _saveClipboardHistory() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_kClipboardHistoryKey, jsonEncode(_clipboardHistory));
-    } catch (_) {}
+      await prefs.setString(
+        _kClipboardHistoryKey,
+        jsonEncode(_clipboardHistory),
+      );
+    } catch (e) {
+      debugPrint('FileUtils: $e');
+    }
   }
 
   /// Adds a clipboard operation to history.
@@ -1112,7 +1146,8 @@ class FileUtils {
           final chunkLen = min(buffer.length, length - offset);
           for (var i = 0; i < chunkLen; i++) {
             buffer[i] = pass == 1
-                ? 255 - rng.nextInt(256) // complement pass
+                ? 255 -
+                      rng.nextInt(256) // complement pass
                 : rng.nextInt(256); // random passes
           }
           await raf.setPosition(offset);

@@ -15,7 +15,9 @@ Future<String> writeBytesResilient(String path, List<int> bytes) async {
     final dir = p.dirname(path);
     try {
       await Directory(dir).create(recursive: true);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SafeFileWriter: could not create "$dir" ($e)');
+    }
     await File(path).writeAsBytes(bytes, flush: true);
     return path;
   } catch (e) {

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:isolate';
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 /// Pure-Dart archive operations built on the `archive` package.
@@ -33,7 +34,7 @@ Future<String?> _hashFileChunked(String path) async {
     digest.close();
     final d = cap.value;
     return d == null || d.bytes.isEmpty ? null : d.toString();
-  } catch (_) {
+  } catch (e) {
     return null;
   }
 }
@@ -55,13 +56,16 @@ class _DigestCapture implements Sink<Digest> {
 /// Top-level worker for [ArchiveService.findDuplicates] — runs inside a
 /// background isolate so SHA-256 hashing doesn't block the UI thread.
 Future<Map<String, List<String>>> _findDuplicatesWorker(
-    List<String> paths) async {
+  List<String> paths,
+) async {
   // Pass 1: group by size (cheap stat).
   final bySize = <int, List<String>>{};
   for (final path in paths) {
     try {
       bySize.putIfAbsent(await File(path).length(), () => []).add(path);
-    } catch (_) {}
+    } catch (_) {
+      // Unreadable path — skip it; a permission error must not abort dedup.
+    }
   }
 
   // Pass 2: head-hash (first 64 KB) on size-collision groups.
@@ -75,7 +79,9 @@ Future<Map<String, List<String>>> _findDuplicatesWorker(
         await raf.close();
         final key = '${entry.key}|${sha256.convert(head)}';
         headGroups.putIfAbsent(key, () => []).add(path);
-      } catch (_) {}
+      } catch (_) {
+        // Unreadable file — skip; it simply won't participate in dedup.
+      }
     }
   }
 
@@ -91,7 +97,9 @@ Future<Map<String, List<String>>> _findDuplicatesWorker(
     try {
       final h = await _hashFileChunked(path);
       if (h != null) fullGroups.putIfAbsent(h, () => []).add(path);
-    } catch (_) {}
+    } catch (_) {
+      // Hashing failed — exclude rather than crash the whole scan.
+    }
   }
   return {
     for (final e in fullGroups.entries)
@@ -128,6 +136,7 @@ class ArchiveService {
   /// Maximum total uncompressed size (in bytes) allowed during extraction.
   /// 4 GB — consistent with common zip-bomb mitigations.
   static const int maxUncompressedBytes = 4 * 1024 * 1024 * 1024;
+
   /// Compute SHA-256 hex digest of a file. Returns null on error.
   /// Streams in chunks so large files don't spike memory.
   static Future<String?> sha256OfFile(String path) async {
@@ -263,6 +272,7 @@ class ArchiveService {
     try {
       data = await archiveFile.readAsBytes();
     } catch (e) {
+      debugPrint('ArchiveService: $e');
       throw Exception('io:failed to read archive: $e');
     }
 
@@ -316,8 +326,7 @@ class ArchiveService {
               .decodeBytes(GZipDecoder().decodeBytes(data))
               .files;
         } else if (name.endsWith('.tar.xz')) {
-          files =
-              TarDecoder().decodeBytes(XZDecoder().decodeBytes(data)).files;
+          files = TarDecoder().decodeBytes(XZDecoder().decodeBytes(data)).files;
         } else if (name.endsWith('.tar.bz2')) {
           files = TarDecoder()
               .decodeBytes(BZip2Decoder().decodeBytes(data))
@@ -408,6 +417,7 @@ class ArchiveService {
 
     return extractedPaths;
   }
+
   /// Attempts to decode [data] as a tar archive. Returns null when it isn't
   /// valid tar (e.g. a plain gzip'd text file), so callers can fall back to
   /// treating it as a single compressed file.
@@ -416,7 +426,7 @@ class ArchiveService {
       final archive = TarDecoder().decodeBytes(data);
       if (archive.files.isEmpty) return null;
       return archive.files;
-    } catch (_) {
+    } catch (e) {
       return null;
     }
   }
@@ -459,9 +469,10 @@ class ArchiveService {
     try {
       files = await _decodeArchive(archivePath);
     } catch (e) {
-      return ArchiveIntegrityResult(ok: false, errors: [
-        MapEntry('<archive>', 'Failed to decode archive: $e'),
-      ]);
+      return ArchiveIntegrityResult(
+        ok: false,
+        errors: [MapEntry('<archive>', 'Failed to decode archive: $e')],
+      );
     }
     for (final af in files) {
       if (af.isDirectory || af.isSymbolicLink) continue;
@@ -471,6 +482,7 @@ class ArchiveService {
           errors.add(MapEntry(af.name, 'readBytes() returned null'));
         }
       } catch (e) {
+        debugPrint('ArchiveService: $e');
         errors.add(MapEntry(af.name, '$e'));
       }
     }
@@ -570,9 +582,7 @@ class ArchiveService {
         return TarDecoder().decodeBytes(XZDecoder().decodeBytes(data)).files;
       case '.bz2':
       case '.tbz2':
-        return TarDecoder()
-            .decodeBytes(BZip2Decoder().decodeBytes(data))
-            .files;
+        return TarDecoder().decodeBytes(BZip2Decoder().decodeBytes(data)).files;
       case '.7z':
         throw UnsupportedArchiveFormat(
           '7z',
