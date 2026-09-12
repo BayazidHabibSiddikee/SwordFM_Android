@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/playback_resume_policy.dart';
 import '../services/playback_resume_store.dart';
 import '../theme/theme.dart';
@@ -14,8 +15,9 @@ import '../utils/media_kit_guard.dart';
 /// Supports: MKV, MP4, AVI, MOV, WebM, TS, 3GP …
 /// Codecs: H.264/H.265/VP8/VP9/AV1, AC3, DTS, EAC3, TrueHD, MP3, AAC, FLAC
 /// Features: subtitles (.srt/.ass/embedded sidecars + embedded tracks),
-///           speed control, audio-track selection, auto-next playlist.
-/// Roadmap (not yet shipped): aspect-ratio switch, hardware-decode toggle, PiP.
+///           speed control, audio-track selection, auto-next playlist,
+///           hardware-decode toggle (persisted, default OFF).
+/// Roadmap (not yet shipped): aspect-ratio switch, PiP.
 class VideoPlayerScreen extends StatefulWidget {
   final String filePath;
 
@@ -44,6 +46,8 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
   Timer? _resumeTimer;
   double _speed = 1.0;
   bool _showSubtitles = true;
+  bool _hwDecode =
+      false; // persisted via shared_preferences key 'video_hw_decode'
   String? _error;
   PlaybackResumeStore? _resumeStore;
   PlaybackMediaIdentity? _currentIdentity;
@@ -59,7 +63,39 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
     WidgetsBinding.instance.addObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _currentIndex = widget.initialIndex.clamp(0, _playlist.length - 1);
-    _initPlayer();
+    _loadHwDecodePref().then((_) => _initPlayer());
+  }
+
+  static const _kHwDecodeKey = 'video_hw_decode';
+
+  Future<void> _loadHwDecodePref() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() => _hwDecode = prefs.getBool(_kHwDecodeKey) ?? false);
+    }
+  }
+
+  /// Toggles hardware decode and restarts the player with the new setting.
+  /// The preference is persisted so it survives app restarts.
+  Future<void> _toggleHwDecode() async {
+    final next = !_hwDecode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kHwDecodeKey, next);
+    // Save resume position before tearing down the player.
+    _saveResume();
+    // Dispose existing player, then re-init with the new hw-decode setting.
+    final oldPlayer = _player;
+    final oldController = _controller;
+    setState(() {
+      _hwDecode = next;
+      _player = null;
+      _controller = null;
+      _error = null;
+    });
+    await oldPlayer?.dispose();
+    // ignore: unused_local_variable
+    final _ = oldController; // VideoController is disposed with the player.
+    await _initPlayer();
   }
 
   Future<void> _initPlayer() async {
@@ -76,8 +112,8 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
       );
       _controller = VideoController(
         _player!,
-        configuration: const VideoControllerConfiguration(
-          enableHardwareAcceleration: false,
+        configuration: VideoControllerConfiguration(
+          enableHardwareAcceleration: _hwDecode,
         ),
       );
 
@@ -477,6 +513,20 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
                         ),
                         onPressed: _showSubtitleTracks,
                         tooltip: 'Subtitles',
+                      ),
+                      // Hardware decode toggle
+                      IconButton(
+                        icon: Icon(
+                          Icons.memory,
+                          color: _hwDecode
+                              ? OneDarkColors.cyan
+                              : Colors.white54,
+                          size: 20,
+                        ),
+                        onPressed: _toggleHwDecode,
+                        tooltip: _hwDecode
+                            ? 'HW decode ON (tap to disable)'
+                            : 'HW decode OFF (tap to enable)',
                       ),
                     ],
                   ),

@@ -137,11 +137,7 @@ class _MdnsBeacon {
     if (_mdnsSocket == null) return;
     try {
       final packet = _buildMdnsPacket();
-      _mdnsSocket!.send(
-        packet,
-        InternetAddress(_mdnsAddress),
-        _mdnsPort,
-      );
+      _mdnsSocket!.send(packet, InternetAddress(_mdnsAddress), _mdnsPort);
     } catch (e) {
       debugPrint('[MdnsBeacon] mDNS send error (non-fatal): $e');
     }
@@ -455,8 +451,9 @@ class WebShareServer {
     final now = DateTime.now();
     final blockedUntil = _authBlockedUntil[ip];
     if (blockedUntil != null && now.isBefore(blockedUntil)) {
-      _sendJsonResponse(request, {'error': 'Too many attempts, try later'},
-          statusCode: 429);
+      _sendJsonResponse(request, {
+        'error': 'Too many attempts, try later',
+      }, statusCode: 429);
       return;
     }
     final bodyStr = await _readBody(request);
@@ -750,10 +747,7 @@ class WebShareServer {
           return (a['name'] as String).compareTo(b['name'] as String);
         });
       }
-      _sendJsonResponse(request, {
-        'files': files,
-        'currentDir': subDir,
-      });
+      _sendJsonResponse(request, {'files': files, 'currentDir': subDir});
     } catch (e) {
       _sendJsonResponse(request, {'files': <dynamic>[], 'currentDir': ''});
     }
@@ -796,11 +790,52 @@ class WebShareServer {
 
     final mimeType = lookupMimeType(filePath) ?? 'application/octet-stream';
     final fileLength = await file.length();
+
+    // ---- HTTP Range support (RFC 9110 §14.2) for resume/partial downloads ----
+    final rangeHeader = request.headers.value('range');
+    if (rangeHeader != null) {
+      final match = RegExp(r'^bytes=(\d*)-(\d*)$').firstMatch(rangeHeader);
+      if (match == null) {
+        // Malformed Range — respond 416 Range Not Satisfiable.
+        request.response
+          ..statusCode = HttpStatus.requestedRangeNotSatisfiable
+          ..headers.set('Content-Range', 'bytes */$fileLength');
+        await request.response.close();
+        return;
+      }
+      final startStr = match.group(1)!;
+      final endStr = match.group(2)!;
+      final start = startStr.isEmpty ? 0 : int.parse(startStr);
+      // Inclusive end per RFC; default to last byte.
+      final end = endStr.isEmpty ? fileLength - 1 : int.parse(endStr);
+      if (start < 0 || end >= fileLength || start > end) {
+        request.response
+          ..statusCode = HttpStatus.requestedRangeNotSatisfiable
+          ..headers.set('Content-Range', 'bytes */$fileLength');
+        await request.response.close();
+        return;
+      }
+      final length = end - start + 1;
+      request.response
+        ..statusCode = HttpStatus
+            .partialContent // 206
+        ..headers.contentType = ContentType.parse(mimeType)
+        ..headers.set('Content-Disposition', 'attachment; filename="$fileName"')
+        ..headers.set('Content-Range', 'bytes $start-$end/$fileLength')
+        ..headers.set('Content-Length', length.toString())
+        ..headers.set('Accept-Ranges', 'bytes');
+      await file.openRead(start, end + 1).pipe(request.response);
+      await request.response.done;
+      return;
+    }
+
+    // Full file download (200 OK).
     request.response
       ..statusCode = HttpStatus.ok
       ..headers.contentType = ContentType.parse(mimeType)
       ..headers.set('Content-Disposition', 'attachment; filename="$fileName"')
-      ..headers.set('Content-Length', fileLength.toString());
+      ..headers.set('Content-Length', fileLength.toString())
+      ..headers.set('Accept-Ranges', 'bytes'); // advertise Range support
 
     // Stream file to response — avoids loading entire file into memory.
     final fileStream = file.openRead();
@@ -874,9 +909,7 @@ class WebShareServer {
       // Clean up partial file on error.
       if (await outFile.exists()) await outFile.delete();
       debugPrint('WebShareServer upload failed: $e');
-      _sendJsonResponse(request, {
-        'error': 'Upload failed',
-      }, statusCode: 500);
+      _sendJsonResponse(request, {'error': 'Upload failed'}, statusCode: 500);
     }
   }
 
@@ -885,12 +918,7 @@ class WebShareServer {
   void _logAccess(HttpRequest request, String path, String query) {
     final ip = request.connectionInfo?.remoteAddress.address ?? 'unknown';
     // Never log the query string: it can carry PINs/tokens. Keep path only.
-    _accessLog.add({
-      'ip': ip,
-      'path': path,
-      'query': '',
-      'ts': DateTime.now(),
-    });
+    _accessLog.add({'ip': ip, 'path': path, 'query': '', 'ts': DateTime.now()});
     if (_accessLog.length > _kMaxAccessLog) {
       _accessLog.removeAt(0);
     }

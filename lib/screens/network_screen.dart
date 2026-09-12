@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../services/network_service.dart';
 import '../theme/theme.dart';
 
-
 /// Network connections screen — manage WebDAV/SFTP profiles and browse remote files.
 class NetworkScreen extends StatefulWidget {
   const NetworkScreen({super.key});
@@ -89,6 +88,62 @@ class _NetworkScreenState extends State<NetworkScreen> {
           _loading = false;
         });
       }
+    } on SftpHostKeyMismatchException catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      // Show a blocking warning dialog — this is a potential MITM indicator.
+      final trusted = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF21252B),
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.orange),
+              SizedBox(width: 8),
+              Text(
+                'Host Key Changed',
+                style: TextStyle(color: Colors.orange, fontSize: 16),
+              ),
+            ],
+          ),
+          content: SelectableText(
+            'The SSH host key for ${e.host}:${e.port} has changed.\n\n'
+            'This may indicate a man-in-the-middle attack. '
+            'Verify the new key with your server administrator before connecting.\n\n'
+            'Stored fingerprint:\n${e.storedFingerprint}\n\n'
+            'Server fingerprint:\n${e.newFingerprint}',
+            style: const TextStyle(color: Color(0xFFABB2BF), fontSize: 12),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abort', style: TextStyle(color: Colors.red)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text(
+                'Trust new key',
+                style: TextStyle(color: Colors.orange),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (trusted == true) {
+        final profile = _service.profiles[profileId];
+        if (profile != null) {
+          await SftpHostKeyPolicy.trust(
+            profile.host,
+            profile.port,
+            e.newFingerprint,
+          );
+          // Retry the connection with the newly trusted key.
+          await _connect(profileId);
+        }
+      } else {
+        setState(() => _error = 'Connection aborted: host key mismatch.');
+      }
     } catch (e) {
       if (mounted)
         setState(() {
@@ -168,8 +223,8 @@ class _NetworkScreenState extends State<NetworkScreen> {
                     profile.profile.type == 'webdav'
                         ? Icons.cloud
                         : profile.profile.type == 'smb'
-                            ? Icons.dns
-                            : Icons.storage,
+                        ? Icons.dns
+                        : Icons.storage,
                     color: isActive ? OneDarkColors.cyan : OneDarkColors.fgDim,
                   ),
                   title: Text(
@@ -379,7 +434,10 @@ class _AddProfileDialogState extends State<_AddProfileDialog> {
                 items: const [
                   DropdownMenuItem(value: 'webdav', child: Text('WebDAV')),
                   DropdownMenuItem(value: 'sftp', child: Text('SFTP')),
-                  DropdownMenuItem(value: 'smb', child: Text('SMB / NAS (beta)')),
+                  DropdownMenuItem(
+                    value: 'smb',
+                    child: Text('SMB / NAS (beta)'),
+                  ),
                 ],
                 onChanged: (v) {
                   setState(() {

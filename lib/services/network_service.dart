@@ -129,8 +129,11 @@ class _CryptoHelper {
     final encryptedBytes = cipher.process(plainBytes);
     final out = Uint8List(nonce.length + encryptedBytes.length)
       ..setRange(0, nonce.length, nonce)
-      ..setRange(nonce.length, nonce.length + encryptedBytes.length,
-          encryptedBytes);
+      ..setRange(
+        nonce.length,
+        nonce.length + encryptedBytes.length,
+        encryptedBytes,
+      );
     return base64Encode(out);
   }
 
@@ -159,12 +162,7 @@ class _CryptoHelper {
     final cipher = GCMBlockCipher(AESEngine())
       ..init(
         false,
-        AEADParameters(
-          KeyParameter(keyBytes),
-          128,
-          ivBytes,
-          Uint8List(0),
-        ),
+        AEADParameters(KeyParameter(keyBytes), 128, ivBytes, Uint8List(0)),
       );
     final decryptedBytes = cipher.process(encBytes);
     return utf8.decode(decryptedBytes);
@@ -197,6 +195,90 @@ class TransferJob {
     this.error,
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
+}
+
+// ---------------------------------------------------------------------------
+// SFTP host-key verification — Trust On First Use (TOFU) with change detection
+// ---------------------------------------------------------------------------
+
+/// Thrown when an SFTP server's host key does not match the stored fingerprint.
+/// The caller (UI layer) should catch this, show a warning dialog, and either
+/// abort the connection or explicitly call [SftpHostKeyPolicy.trust] to update.
+class SftpHostKeyMismatchException implements Exception {
+  final String host;
+  final int port;
+  final String keyType;
+
+  /// SHA-256 fingerprint of the key presented by the server (hex string).
+  final String newFingerprint;
+
+  /// SHA-256 fingerprint that was previously trusted (hex string).
+  final String storedFingerprint;
+
+  const SftpHostKeyMismatchException({
+    required this.host,
+    required this.port,
+    required this.keyType,
+    required this.newFingerprint,
+    required this.storedFingerprint,
+  });
+
+  @override
+  String toString() =>
+      'SftpHostKeyMismatchException: host key for $host:$port changed!\n'
+      '  Stored : $storedFingerprint\n'
+      '  Received: $newFingerprint\n'
+      'This may indicate a man-in-the-middle attack. Verify with the server admin.';
+}
+
+/// TOFU host-key policy backed by [FlutterSecureStorage].
+///
+/// - First connection to a host: stores the fingerprint and returns `true`.
+/// - Subsequent connections: compares fingerprints and returns `true` if they
+///   match, or throws [SftpHostKeyMismatchException] if they differ.
+class SftpHostKeyPolicy {
+  static const _storage = FlutterSecureStorage();
+  static const _keyPrefix = 'sftp_hk_';
+
+  static String _storageKey(String host, int port) =>
+      '$_keyPrefix${host}_$port';
+
+  static String _hex(Uint8List bytes) =>
+      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(':');
+
+  /// Returns the [SSHHostkeyVerifyHandler] to pass to [SSHClient].
+  static SSHHostkeyVerifyHandler handlerFor(String host, int port) {
+    return (String type, Uint8List fingerprint) async {
+      final hexFp = _hex(fingerprint);
+      final key = _storageKey(host, port);
+      final stored = await _storage.read(key: key);
+      if (stored == null) {
+        // First-time connection: store and trust (TOFU).
+        await _storage.write(key: key, value: hexFp);
+        debugPrint('SFTP TOFU: trusted $type key for $host:$port — $hexFp');
+        return true;
+      }
+      if (stored == hexFp) {
+        return true; // Key unchanged — trusted.
+      }
+      // Key changed — throw so the caller can surface a warning.
+      throw SftpHostKeyMismatchException(
+        host: host,
+        port: port,
+        keyType: type,
+        newFingerprint: hexFp,
+        storedFingerprint: stored,
+      );
+    };
+  }
+
+  /// Explicitly trust a new fingerprint (call after the user confirms).
+  static Future<void> trust(String host, int port, String hexFingerprint) =>
+      _storage.write(key: _storageKey(host, port), value: hexFingerprint);
+
+  /// Forget the stored fingerprint for a host (e.g. when removing a profile).
+  static Future<void> forget(String host, int port) =>
+      _storage.delete(key: _storageKey(host, port));
 }
 
 class NetworkService {
@@ -441,6 +523,7 @@ class NetworkService {
       socket,
       username: profile.username,
       onPasswordRequest: () => profile.password,
+      onVerifyHostKey: SftpHostKeyPolicy.handlerFor(profile.host, profile.port),
     );
     await client.authenticated;
     final sftp = await client.sftp();
@@ -468,6 +551,7 @@ class NetworkService {
       socket,
       username: profile.username,
       onPasswordRequest: () => profile.password,
+      onVerifyHostKey: SftpHostKeyPolicy.handlerFor(profile.host, profile.port),
     );
     await client.authenticated;
     final sftp = await client.sftp();
@@ -494,6 +578,7 @@ class NetworkService {
       socket,
       username: profile.username,
       onPasswordRequest: () => profile.password,
+      onVerifyHostKey: SftpHostKeyPolicy.handlerFor(profile.host, profile.port),
     );
     await client.authenticated;
     final sftp = await client.sftp();
