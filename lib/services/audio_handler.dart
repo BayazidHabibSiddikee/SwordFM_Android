@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:audio_metadata_reader/audio_metadata_reader.dart'
+    show readMetadata;
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
@@ -8,6 +10,39 @@ import 'package:just_audio/just_audio.dart';
 
 import 'playback_resume_policy.dart';
 import 'playback_resume_store.dart';
+
+/// Embedded-tag metadata for one queued file, read once at queue-load time.
+///
+/// Null fields mean "no tag" — callers fall back to the filename. Tags are
+/// read with images disabled (fast header-only parse); cover art stays out
+/// of scope until a dedicated artwork cache ships.
+class TrackTags {
+  final String? title;
+  final String? artist;
+  final String? album;
+  const TrackTags({this.title, this.artist, this.album});
+
+  /// Reads tags for [path] off the calling thread. Never throws — any
+  /// failure (missing file, unsupported container, corrupt header) yields
+  /// empty tags so playback never depends on metadata.
+  static Future<TrackTags> read(String path) async {
+    try {
+      final meta = await Future(() => readMetadata(File(path)));
+      return TrackTags(
+        title: _clean(meta.title),
+        artist: _clean(meta.artist ?? meta.albumArtist),
+        album: _clean(meta.album),
+      );
+    } catch (_) {
+      return const TrackTags();
+    }
+  }
+
+  static String? _clean(String? v) {
+    final t = v?.trim();
+    return (t == null || t.isEmpty) ? null : t;
+  }
+}
 
 /// The single instance of the background audio handler, set once in main().
 /// The UI reads this to drive playback (the music player never creates its own
@@ -31,6 +66,7 @@ class SwiftAudioHandler extends BaseAudioHandler
   final List<String> _queuePaths = <String>[];
   final List<PlaybackMediaIdentity?> _queueIdentities =
       <PlaybackMediaIdentity?>[];
+  final List<TrackTags> _queueTags = <TrackTags>[];
   final PlaybackResumePolicy _resumePolicy = const PlaybackResumePolicy();
   late final StreamSubscription<PlayerState> _playerStateSubscription;
   late final StreamSubscription<int?> _currentIndexSubscription;
@@ -44,6 +80,16 @@ class SwiftAudioHandler extends BaseAudioHandler
   /// familiar player API while playback runs through this handler (and thus
   /// survives backgrounding / lock screen).
   AudioPlayer get player => _player;
+
+  /// Embedded tags for the currently playing track (empty when untagged).
+  /// The player screen reads this to show artist/album under the title.
+  TrackTags get currentTags {
+    final index = _player.currentIndex;
+    if (index == null || index < 0 || index >= _queueTags.length) {
+      return const TrackTags();
+    }
+    return _queueTags[index];
+  }
 
   SwiftAudioHandler() {
     _configureSession();
@@ -89,11 +135,17 @@ class SwiftAudioHandler extends BaseAudioHandler
           index < _player.sequence!.length) {
         final source = _player.sequence![index];
         final tag = (source as dynamic).tag as Map<String, dynamic>?;
+        final tags = index >= 0 && index < _queueTags.length
+            ? _queueTags[index]
+            : const TrackTags();
         mediaItem.add(
           MediaItem(
             id: (tag?['path'] as String?) ?? '$index',
-            title: (tag?['title'] as String?) ?? 'Track ${index + 1}',
-            artist: 'SwordFM',
+            title: tags.title ??
+                (tag?['title'] as String?) ??
+                'Track ${index + 1}',
+            artist: tags.artist,
+            album: tags.album,
           ),
         );
       }
@@ -132,14 +184,24 @@ class SwiftAudioHandler extends BaseAudioHandler
   }
 
   /// Loads [paths] as the new queue and starts playing at [initialIndex].
+  ///
+  /// Playback starts on the filename fallback immediately; embedded tags
+  /// (title/artist/album) are then read in a background isolate and pushed
+  /// into the media item when they land. A slow or corrupt file simply keeps
+  /// its filename — the player screen never waits on metadata (the earlier
+  /// "controller renders very late" bug was tag reads gating setAudioSource).
   Future<void> loadQueue(List<String> paths, {int initialIndex = 0}) async {
     _writeCurrentResume();
+    final generation = ++_queueGeneration;
     _queuePaths
       ..clear()
       ..addAll(paths);
     _queueIdentities
       ..clear()
       ..addAll(await Future.wait(paths.map(_identityFor)));
+    _queueTags
+      ..clear()
+      ..addAll(List.filled(paths.length, const TrackTags()));
     final sources = paths
         .map(
           (p) =>
@@ -156,6 +218,48 @@ class SwiftAudioHandler extends BaseAudioHandler
     );
     await _restoreCurrentResume();
     await play();
+    unawaited(_loadTagsInBackground(paths, generation));
+  }
+
+  int _queueGeneration = 0;
+
+  /// Reads all queue tags off-isolate, then refreshes the media item.
+  /// A newer loadQueue supersedes this run via the generation check.
+  Future<void> _loadTagsInBackground(
+    List<String> paths,
+    int generation,
+  ) async {
+    try {
+      final tags = await Isolate.run(() => _readAllTags(paths));
+      if (_disposed || generation != _queueGeneration) return;
+      for (var i = 0; i < tags.length && i < _queueTags.length; i++) {
+        _queueTags[i] = tags[i];
+      }
+      final index = _player.currentIndex;
+      if (index != null) _emitMediaItem(index);
+    } catch (e) {
+      debugPrint('SwiftAudioHandler: tag preload failed: $e');
+    }
+  }
+
+  /// Publishes the MediaItem (notification + UI) for queue position [index].
+  void _emitMediaItem(int index) {
+    final sequence = _player.sequence;
+    if (sequence == null || index < 0 || index >= sequence.length) return;
+    final source = sequence[index];
+    final tag = (source as dynamic).tag as Map<String, dynamic>?;
+    final tags = index >= 0 && index < _queueTags.length
+        ? _queueTags[index]
+        : const TrackTags();
+    mediaItem.add(
+      MediaItem(
+        id: (tag?['path'] as String?) ?? '$index',
+        title:
+            tags.title ?? (tag?['title'] as String?) ?? 'Track ${index + 1}',
+        artist: tags.artist,
+        album: tags.album,
+      ),
+    );
   }
 
   Future<PlaybackMediaIdentity?> _identityFor(String path) async {

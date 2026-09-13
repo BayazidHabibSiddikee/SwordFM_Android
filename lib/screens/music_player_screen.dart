@@ -100,11 +100,24 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
   }
 
   String _currentTitle() {
+    final tags = _handler?.currentTags;
+    if (tags?.title != null) return tags!.title!;
     if (widget.playlist.isNotEmpty && _currentIndex < widget.playlist.length) {
       return widget.playlist[_currentIndex].split('/').last;
     }
     if (widget.filePath != null) return widget.filePath!.split('/').last;
     return swiftAudioHandler?.mediaItem.value?.title ?? 'Unknown';
+  }
+
+  /// "Artist — Album" when tags exist, else the track counter. Null means
+  /// untagged: the caller falls back to the counter.
+  String? _currentArtistLine() {
+    final tags = _handler?.currentTags;
+    final artist = tags?.artist;
+    final album = tags?.album;
+    if (artist == null && album == null) return null;
+    if (artist != null && album != null) return '$artist — $album';
+    return artist ?? album;
   }
 
   // ── Speed ──────────────────────────────────────────────────────────────────
@@ -291,6 +304,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                           Icons.arrow_downward,
                           color: OneDarkColors.fg,
                         ),
+                        tooltip: 'Close player',
                         onPressed: () => Navigator.pop(context),
                       ),
                       Expanded(
@@ -363,7 +377,8 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Track ${_currentIndex + 1} of ${widget.playlist.isNotEmpty ? widget.playlist.length : 1}',
+                    _currentArtistLine() ??
+                        'Track ${_currentIndex + 1} of ${widget.playlist.isNotEmpty ? widget.playlist.length : 1}',
                     style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
                   ),
                   const SizedBox(height: 24),
@@ -433,6 +448,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                           color: OneDarkColors.fg,
                           size: 32,
                         ),
+                        tooltip: 'Previous track',
                         onPressed: p.hasPrevious ? p.seekToPrevious : null,
                       ),
                       const SizedBox(width: 16),
@@ -448,6 +464,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                               size: 56,
                               color: OneDarkColors.cyan,
                             ),
+                            tooltip: playing ? 'Pause' : 'Play',
                             onPressed: () => playing ? p.pause() : p.play(),
                           );
                         },
@@ -459,6 +476,7 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
                           color: OneDarkColors.fg,
                           size: 32,
                         ),
+                        tooltip: 'Next track',
                         onPressed: p.hasNext ? p.seekToNext : null,
                       ),
                     ],

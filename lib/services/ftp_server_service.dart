@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:path/path.dart' as p;
 
+import 'web_share_server.dart' show WebShareServer;
+
 /// Minimal FTP server for transferring files between the phone and a PC over
 /// the local network. Chrooted to a share root; mutating commands require
 /// the LAN share PIN (see [FtpServerService.sharePin]).
@@ -22,9 +24,18 @@ class FtpServerService {
   /// FTP command open — the LAN UI must always set this from the web PIN.
   String sharePin = '';
 
-  /// True once the client passed USER/PASS with the current [sharePin].
-  /// Reset per control connection; empty-PIN servers stay authenticated.
-  bool _authenticated = false;
+  /// Per-IP consecutive failed PASS attempts, used for brute-force lockout.
+  /// Keyed by remote address so one attacker cannot lock out other clients.
+  final Map<String, int> _failedAttempts = <String, int>{};
+
+  /// Remote addresses currently locked out, with the instant the lock expires.
+  final Map<String, DateTime> _lockouts = <String, DateTime>{};
+
+  /// Failed attempts tolerated before a temporary lockout.
+  static const int maxFailedAttempts = 5;
+
+  /// How long a locked-out address must wait before retrying.
+  static const Duration lockoutDuration = Duration(seconds: 30);
 
   /// The actually-bound port (differs from [port] when 0 = ephemeral).
   int get boundPort => _server?.port ?? port;
@@ -34,10 +45,19 @@ class FtpServerService {
   /// Starts listening. [shareRootOverride] sets the browsable root.
   /// Pass [pin] (or set [sharePin]) so FTP enforces the same PIN as the
   /// LAN web share — otherwise any LAN client can read/write/delete.
+  ///
+  /// Throws [StateError] when no PIN is configured: an empty PIN would expose
+  /// every mutating FTP command to the whole LAN with no credential at all.
   Future<void> start({String? shareRootOverride, String? pin}) async {
     if (pin != null) sharePin = pin;
     if (shareRootOverride != null) shareRoot = shareRootOverride;
     if (_server != null) return;
+    if (sharePin.isEmpty) {
+      throw StateError(
+        'Refusing to start the FTP server without a PIN. '
+        'Set a non-empty sharePin so LAN clients must authenticate.',
+      );
+    }
     currentIp = await _networkInfo.getWifiIP();
     _server = await ServerSocket.bind(InternetAddress.anyIPv4, port);
     _server!.listen(_handleConnection);
@@ -54,11 +74,6 @@ class FtpServerService {
 
   Future<void> _serve(Socket control) async {
     final session = _FtpSession(control, this);
-    // Always start unauthenticated — the client must send USER/PASS even when
-    // sharePin is empty. An empty PIN means the server should not be running
-    // (the UI enforces this), but a direct connection must still go through
-    // the auth handshake to prevent unintended open access.
-    _authenticated = false;
     var buffer = '';
     control.timeout(const Duration(minutes: 10));
     try {
@@ -96,6 +111,16 @@ class _FtpSession {
 
   _FtpSession(this.control, this.service);
 
+  /// Remote peer address, used as the lockout key so one attacker cannot lock
+  /// out other LAN clients. Falls back to a constant when unavailable.
+  String get _remoteAddress {
+    try {
+      return control.remoteAddress.address;
+    } catch (_) {
+      return 'unknown';
+    }
+  }
+
   Future<void> dispose() async {
     await passive?.close();
   }
@@ -131,26 +156,68 @@ class _FtpSession {
     }
   }
 
+  /// True once THIS control connection passed USER/PASS with the current
+  /// [FtpServerService.sharePin].
+  ///
+  /// Deliberately per-session, not per-service: a service-wide flag would let
+  /// a second client's successful PASS unlock an unrelated connection that
+  /// never authenticated. Cleared automatically when the PIN changes.
+  bool _authenticated = false;
+
+  /// The key this session authenticated against, so a PIN rotation on the
+  /// service immediately invalidates previously-authenticated sessions.
+  String _authedAgainstPin = '';
+
   Future<String?> handle(String line) async {
     final space = line.indexOf(' ');
     final cmd = (space < 0 ? line : line.substring(0, space)).toUpperCase();
     final arg = space < 0 ? '' : line.substring(space + 1).trim();
+
+    // A PIN change (or stop/start) invalidates existing session auth.
+    if (_authenticated && _authedAgainstPin != service.sharePin) {
+      _authenticated = false;
+      _authedAgainstPin = '';
+    }
+
+    final remote = _remoteAddress;
+    final lockedUntil = service._lockouts[remote];
+    if (lockedUntil != null) {
+      if (DateTime.now().isBefore(lockedUntil)) {
+        return '421 Too many failed attempts. Try again later.\r\n';
+      }
+      service._lockouts.remove(remote);
+      service._failedAttempts.remove(remote);
+    }
+
     // Gate every filesystem/data command on auth. Always allowed: greeting
     // handshake (USER/PASS/SYST/FEAT/OPTS/TYPE), NOOP, QUIT, ABOR.
     const openCmds = {
       'USER', 'PASS', 'SYST', 'FEAT', 'OPTS', 'TYPE', 'NOOP', 'QUIT', 'ABOR',
     };
-    if (!service._authenticated && !openCmds.contains(cmd)) {
+    if (!_authenticated && !openCmds.contains(cmd)) {
       return '530 Not logged in.\r\n';
     }
     switch (cmd) {
       case 'USER':
         return '331 Password required.\r\n';
       case 'PASS':
-        if (service.sharePin.isNotEmpty && arg != service.sharePin) {
+        // An empty PIN is never valid here: start() refuses to bind without
+        // one, but guard regardless so a mis-set pin cannot open the server.
+        if (service.sharePin.isEmpty ||
+            !WebShareServer.constantTimeCompare(arg, service.sharePin)) {
+          final attempts = (service._failedAttempts[remote] ?? 0) + 1;
+          service._failedAttempts[remote] = attempts;
+          if (attempts >= FtpServerService.maxFailedAttempts) {
+            service._lockouts[remote] = DateTime.now()
+                .add(FtpServerService.lockoutDuration);
+            return '421 Too many failed attempts. Try again later.\r\n';
+          }
           return '530 Login incorrect.\r\n';
         }
-        service._authenticated = true;
+        service._failedAttempts.remove(remote);
+        service._lockouts.remove(remote);
+        _authenticated = true;
+        _authedAgainstPin = service.sharePin;
         return '230 Logged in.\r\n';
       case 'SYST':
         return '215 UNIX Type: L8\r\n';

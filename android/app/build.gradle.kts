@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -30,21 +32,29 @@ android {
     }
 
     // ---------------------------------------------------------------------------
-    // Release signing — driven by environment variables so no secrets land in VCS.
-    // Set these in CI or your local ~/.gradle/gradle.properties (never commit them):
+    // Release signing — resolved from (in priority order):
+    //   1. Environment variables SWORDFM_STORE_FILE / _STORE_PASS / _KEY_ALIAS / _KEY_PASS
+    //      (used in CI; no secrets on disk)
+    //   2. android/key.properties  (local builds; git-ignored, never committed)
     //
-    //   SWORDFM_STORE_FILE    absolute path to the release .jks / .keystore
-    //   SWORDFM_STORE_PASS    keystore password
-    //   SWORDFM_KEY_ALIAS     key alias inside the keystore
-    //   SWORDFM_KEY_PASS      key password
-    //
-    // TODO: create a release keystore, set the four env-vars in CI, and remove
-    //       the signingConfig fallback to "debug" in the release buildType below.
+    // A release build WITHOUT release signing configured is a hard error: we must
+    // never ship an APK signed with debug keys (Play rejects it, and the debug
+    // keystore is public so anyone could forge an update).
     // ---------------------------------------------------------------------------
-    val storeFile   = System.getenv("SWORDFM_STORE_FILE")
-    val storePass   = System.getenv("SWORDFM_STORE_PASS")
-    val keyAlias    = System.getenv("SWORDFM_KEY_ALIAS")
-    val keyPass     = System.getenv("SWORDFM_KEY_PASS")
+    val keyPropsFile = rootProject.file("key.properties")
+    val keyProps = Properties()
+    if (keyPropsFile.exists()) {
+        keyPropsFile.inputStream().use { stream -> keyProps.load(stream) }
+    }
+
+    fun secret(envName: String, propName: String): String? =
+        System.getenv(envName)?.takeIf { it.isNotBlank() }
+            ?: keyProps.getProperty(propName)?.takeIf { it.isNotBlank() }
+
+    val storeFile = secret("SWORDFM_STORE_FILE", "storeFile")
+    val storePass = secret("SWORDFM_STORE_PASS", "storePassword")
+    val keyAlias  = secret("SWORDFM_KEY_ALIAS", "keyAlias")
+    val keyPass   = secret("SWORDFM_KEY_PASS", "keyPassword")
     val hasReleaseSigning = listOf(storeFile, storePass, keyAlias, keyPass).all { !it.isNullOrEmpty() }
 
     if (hasReleaseSigning) {
@@ -68,13 +78,32 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = if (hasReleaseSigning) {
-                signingConfigs.getByName("release")
-            } else {
-                // TODO: replace with the release signingConfig above before publishing.
-                // Falling back to debug keys — NOT suitable for Play Store submission.
-                signingConfigs.getByName("debug")
+
+            if (!hasReleaseSigning) {
+                // Fail the release build loudly rather than silently signing with
+                // debug keys. Run:  tool/setup_release_signing.sh
+                throw GradleException(
+                    "Release signing is not configured.\n" +
+                    "  Set SWORDFM_STORE_FILE / SWORDFM_STORE_PASS / SWORDFM_KEY_ALIAS / SWORDFM_KEY_PASS, " +
+                    "or create android/key.properties (see android/key.properties.example).\n" +
+                    "  Refusing to sign a release build with the debug keystore."
+                )
             }
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // ABI splits — ship per-architecture APKs instead of one universal APK that
+    // bundles every native lib (media_kit/libmpv, tesseract, pdf plugins...).
+    // Flutter still produces a universal APK via `flutter build apk --split-per-abi`.
+    // ---------------------------------------------------------------------------
+    splits {
+        abi {
+            isEnable = project.hasProperty("splitPerAbi")
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86_64")
+            isUniversalApk = true
         }
     }
 }

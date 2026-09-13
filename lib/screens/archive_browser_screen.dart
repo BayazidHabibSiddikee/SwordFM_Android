@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import '../services/archive_service.dart';
 import '../services/open_with_service.dart';
 import '../theme/theme.dart';
+import '../widgets/archive_password_prompt.dart';
 
 /// Browses a ZIP / TAR archive's contents in place, without extracting the
 /// whole archive. Tapping a file extracts just that entry to a temp folder
@@ -35,6 +36,7 @@ class _ArchiveBrowserScreenState extends State<ArchiveBrowserScreen> {
     try {
       final entries = await ArchiveService.listArchiveContents(
         widget.archivePath,
+        password: _password,
       );
       // Folders first, then alphabetical.
       entries.sort((a, b) {
@@ -48,6 +50,15 @@ class _ArchiveBrowserScreenState extends State<ArchiveBrowserScreen> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
+      // Encrypted archives fail at listing time (the password probe in
+      // _decodeZip throws before any entries exist) — prompt instead of
+      // parking a raw exception string on screen.
+      if (e is ArchivePasswordRequiredException) {
+        setState(() => _loading = false);
+        await _promptForPasswordThen(e.passwordWasSupplied, _load);
+        return;
+      }
       if (mounted) {
         setState(() {
           _error = '$e';
@@ -70,11 +81,13 @@ class _ArchiveBrowserScreenState extends State<ArchiveBrowserScreen> {
         widget.archivePath,
         entry.name,
         dir.path,
+        password: _password,
       );
       if (!mounted) return;
       try {
         await OpenWithService.openDefault(outPath);
       } catch (e) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Cannot open: $e'),
@@ -83,15 +96,42 @@ class _ArchiveBrowserScreenState extends State<ArchiveBrowserScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Extract failed: $e'),
-            backgroundColor: OneDarkColors.red,
-          ),
+      if (!mounted) return;
+      if (e is ArchivePasswordRequiredException) {
+        await _promptForPasswordThen(
+          e.passwordWasSupplied,
+          () => _extractEntry(entry),
         );
+        return;
       }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Extract failed: $e'),
+          backgroundColor: OneDarkColors.red,
+        ),
+      );
     }
+  }
+
+  /// Cached password for the current archive, so the user is asked once per
+  /// session rather than on every entry they open.
+  String? _password;
+
+  /// Prompts for the archive password, stores it, and retries [retry].
+  ///
+  /// [retryHint] distinguishes "we never had a password" from "the one we had
+  /// was wrong", so the dialog can explain itself accurately.
+  Future<void> _promptForPasswordThen(
+    bool retryHint,
+    Future<void> Function() retry,
+  ) async {
+    final entered = await promptForArchivePassword(
+      context,
+      wasRejected: retryHint,
+    );
+    if (entered == null) return;
+    _password = entered;
+    await retry();
   }
 
   Future<void> _extractEntryTo(ArchiveEntryInfo entry) async {
@@ -104,6 +144,7 @@ class _ArchiveBrowserScreenState extends State<ArchiveBrowserScreen> {
         widget.archivePath,
         entry.name,
         destDir,
+        password: _password,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -114,14 +155,20 @@ class _ArchiveBrowserScreenState extends State<ArchiveBrowserScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Extract failed: $e'),
-            backgroundColor: OneDarkColors.red,
-          ),
+      if (!mounted) return;
+      if (e is ArchivePasswordRequiredException) {
+        await _promptForPasswordThen(
+          e.passwordWasSupplied,
+          () => _extractEntryTo(entry),
         );
+        return;
       }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Extract failed: $e'),
+          backgroundColor: OneDarkColors.red,
+        ),
+      );
     }
   }
 
@@ -131,7 +178,11 @@ class _ArchiveBrowserScreenState extends State<ArchiveBrowserScreen> {
       p.basenameWithoutExtension(widget.archivePath),
     );
     try {
-      await ArchiveService.extract(widget.archivePath, destDir);
+      await ArchiveService.extract(
+        widget.archivePath,
+        destDir,
+        password: _password,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -141,14 +192,17 @@ class _ArchiveBrowserScreenState extends State<ArchiveBrowserScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Extract failed: $e'),
-            backgroundColor: OneDarkColors.red,
-          ),
-        );
+      if (!mounted) return;
+      if (e is ArchivePasswordRequiredException) {
+        await _promptForPasswordThen(e.passwordWasSupplied, _extractAll);
+        return;
       }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Extract failed: $e'),
+          backgroundColor: OneDarkColors.red,
+        ),
+      );
     }
   }
 
@@ -195,7 +249,7 @@ class _ArchiveBrowserScreenState extends State<ArchiveBrowserScreen> {
             )
           : ListView.separated(
               itemCount: _entries.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final entry = _entries[index];
                 final depth = '  ' * entry.name.split('/').length;

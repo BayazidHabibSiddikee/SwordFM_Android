@@ -6,6 +6,21 @@ on:
   pull_request:
     branches: [master, main]
 
+env:
+  # Minimum line coverage enforced by the coverage job (percent).
+  #
+  # This is a *ratchet*, not the 80% target. The measured baseline after the
+  # session-2 test-hardening pass is 25.8% raw line coverage (3720/14418).
+  # The gate sits just below that so it blocks regressions without going red
+  # on the current tree. Raise it as real coverage lands; the long-term target
+  # remains 80%.
+  MIN_COVERAGE: "24"
+  # Fail if the universal release APK exceeds this size (bytes).
+  # Current universal release APK is ~171 MB (bundles libmpv for every ABI).
+  # Set with ~10% headroom so regressions are caught but normal growth is not
+  # blocked. Reduce to ~45 MB once per-ABI APKs become the shipping artifact.
+  MAX_APK_BYTES: "190000000"
+
 jobs:
   analyze:
     name: Analyze
@@ -16,10 +31,18 @@ jobs:
         with:
           channel: stable
       - run: flutter pub get
-      - run: flutter analyze
+      # Info-level lints are currently non-zero across the repo, so they are not
+      # fatal yet. Errors and warnings must never pass.
+      - name: Static analysis (fail on error/warning)
+        run: |
+          flutter analyze --no-fatal-infos --no-fatal-warnings | tee /tmp/analyze.log
+          if grep -qE '^\s*(error|warning) •' /tmp/analyze.log; then
+            echo "::error::flutter analyze reported errors or warnings"
+            exit 1
+          fi
 
-  test:
-    name: Test
+  format:
+    name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,4 +50,89 @@ jobs:
         with:
           channel: stable
       - run: flutter pub get
-      - run: flutter test
+      # Scoped to the paths we keep formatted; the wider repo still has legacy
+      # unformatted files. Expand lib/ once the backlog is cleared.
+      - name: dart format (changed files)
+        run: |
+          FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref || 'master' }}...HEAD 2>/dev/null \
+            | grep -E '\.dart$' || true)
+          if [ -z "$FILES" ]; then echo "No Dart changes."; exit 0; fi
+          echo "$FILES" | xargs dart format --output=none --set-exit-if-changed
+
+  test:
+    name: Test + coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - name: Run tests with coverage
+        run: flutter test --coverage
+      - name: Enforce minimum coverage
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lcov
+          lcov --remove coverage/lcov.info \
+            '*/**.g.dart' '*/**.freezed.dart' 'lib/l10n/*' 'test/*' \
+            -o coverage/lcov.clean.info --ignore-errors unused
+          PCT=$(lcov --summary coverage/lcov.clean.info 2>&1 \
+            | grep -oP 'lines\.*: \K[0-9.]+' | head -1)
+          echo "Line coverage: ${PCT}% (minimum ${MIN_COVERAGE}%)"
+          awk -v p="$PCT" -v m="$MIN_COVERAGE" 'BEGIN { exit (p+0 >= m+0) ? 0 : 1 }' \
+            || { echo "::error::Coverage ${PCT}% is below the ${MIN_COVERAGE}% minimum"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/lcov.clean.info
+
+  release-build:
+    name: Release APK (size gate)
+    runs-on: ubuntu-latest
+    # Needs the signing secrets to be set, otherwise the release build fails by
+    # design (build.gradle.kts refuses to sign with debug keys).
+    needs: [analyze, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - name: Decode keystore
+        run: |
+          if [ -z "${{ secrets.SWORDFM_KEYSTORE_BASE64 }}" ]; then
+            echo "::error::SWORDFM_KEYSTORE_BASE64 secret is not set"; exit 1
+          fi
+          echo "${{ secrets.SWORDFM_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.p12"
+      - name: Build signed release APK
+        env:
+          SWORDFM_STORE_FILE: ${{ runner.temp }}/release.p12
+          SWORDFM_STORE_PASS: ${{ secrets.SWORDFM_STORE_PASS }}
+          SWORDFM_KEY_ALIAS: ${{ secrets.SWORDFM_KEY_ALIAS }}
+          SWORDFM_KEY_PASS: ${{ secrets.SWORDFM_KEY_PASS }}
+        run: flutter build apk --release
+      - name: Verify APK is signed with the release key (not debug)
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort | tail -1)
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/certs.log
+          if grep -qi 'androiddebugkey\|CN=Android Debug' /tmp/certs.log; then
+            echo "::error::APK is signed with the debug key"; exit 1
+          fi
+      - name: Enforce APK size gate
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          SIZE=$(stat -c%s "$APK")
+          printf 'Release APK size: %s bytes (%.1f MB), limit %s bytes\n' \
+            "$SIZE" "$(echo "$SIZE/1048576" | bc -l)" "$MAX_APK_BYTES"
+          if [ "$SIZE" -gt "$MAX_APK_BYTES" ]; then
+            echo "::error::Release APK exceeds size budget"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk

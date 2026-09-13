@@ -18,6 +18,86 @@ import '../utils/safe_file_writer.dart';
 /// PDF export uses the `pdf` package; DOCX export is built as a real OOXML
 /// (ZIP) document via the `archive` package.
 class DocConverter {
+  /// Output formats offered by the convert dialogs (single + batch).
+  static const List<String> outputFormats = [
+    'PDF',
+    'DOCX',
+    'HTML',
+    'TXT',
+    'Markdown',
+  ];
+
+  /// Converts one file to [format] (one of [outputFormats]).
+  ///
+  /// Routes through the markdown round-trip for DOCX/PDF sources exactly like
+  /// the Convert dialog does, so batch and single-file conversion agree.
+  /// Returns the output path, or null when the source is not convertible or
+  /// the conversion produced nothing. Never throws.
+  static Future<String?> convertOne(String sourcePath, String format) async {
+    try {
+      if (!canConvert(sourcePath)) return null;
+      final lower = sourcePath.toLowerCase();
+      final isDocx = lower.endsWith('.docx');
+      final isPdf = lower.endsWith('.pdf');
+      switch (format) {
+        case 'PDF':
+          if (isDocx) {
+            final md = await toMarkdown(sourcePath);
+            return md != null ? await toPdf(md) : null;
+          }
+          return await toPdf(sourcePath);
+        case 'DOCX':
+          if (isPdf || isDocx) {
+            final md = await toMarkdown(sourcePath);
+            return md != null ? await toDocx(md) : null;
+          }
+          return await toDocx(sourcePath);
+        case 'HTML':
+          if (isPdf || isDocx) {
+            final md = await toMarkdown(sourcePath);
+            return md != null ? await markdownFileToHtml(md) : null;
+          }
+          return await markdownFileToHtml(sourcePath);
+        case 'Markdown':
+        case 'MD':
+          return await toMarkdown(sourcePath);
+        default: // TXT
+          if (isDocx) return await fromDocx(sourcePath);
+          return await toText(sourcePath);
+      }
+    } catch (e) {
+      debugPrint('convertOne failed for $sourcePath → $format: $e');
+      return null;
+    }
+  }
+
+  /// Converts [sources] to [format] one after another, reporting progress.
+  ///
+  /// Sequential (not parallel): conversions are CPU-bound isolates + disk
+  /// writes, and parallel runs spike memory on large PDFs. [onProgress]
+  /// receives (done, total) after each file. Returns per-source results in
+  /// input order.
+  static Future<List<BatchConvertResult>> convertBatch(
+    List<String> sources,
+    String format, {
+    void Function(int done, int total)? onProgress,
+  }) async {
+    final results = <BatchConvertResult>[];
+    for (var i = 0; i < sources.length; i++) {
+      final src = sources[i];
+      final out = await convertOne(src, format);
+      results.add(
+        BatchConvertResult(
+          sourcePath: src,
+          outputPath: out,
+          error: out == null ? 'Conversion produced no output.' : null,
+        ),
+      );
+      onProgress?.call(i + 1, sources.length);
+    }
+    return results;
+  }
+
   /// Converts a Markdown/text file to a real PDF, writing `<base>.pdf` next to
   /// the source. Returns the output path, or null if the source is not
   /// convertible or missing.
@@ -69,12 +149,17 @@ class DocConverter {
 
   /// Converts a file to plain text (Markdown stripped). PDF sources are
   /// handled by [fromPdf] (crude text extraction from content streams).
+  /// XLSX sources emit tab-separated rows per sheet (cleaner than piping a
+  /// markdown table through the stripper).
   static Future<String?> toText(String sourcePath) async {
     if (sourcePath.toLowerCase().endsWith('.pdf')) return fromPdf(sourcePath);
     if (!canConvert(sourcePath)) return null;
     final file = File(sourcePath);
     if (!await file.exists()) return null;
     try {
+      if (sourcePath.toLowerCase().endsWith('.xlsx')) {
+        return _xlsxToText(sourcePath);
+      }
       final content = await _readSourceText(sourcePath);
       final text = markdownToText(_preprocessForMarkdown(sourcePath, content));
       final outPath = _resolveOutputPath(sourcePath, '.txt');
@@ -82,6 +167,32 @@ class DocConverter {
       return outPath;
     } catch (e) {
       debugPrint('toText failed for $sourcePath: $e');
+      return null;
+    }
+  }
+
+  static Future<String?> _xlsxToText(String sourcePath) async {
+    try {
+      final bytes = await File(sourcePath).readAsBytes();
+      final sheets = parseXlsxSheets(bytes);
+      final buf = StringBuffer();
+      for (final entry in sheets.entries) {
+        final rows =
+            entry.value.where((r) => r.any((c) => c.isNotEmpty)).toList();
+        if (rows.isEmpty) continue;
+        buf.writeln('## ${entry.key}');
+        for (final row in rows) {
+          buf.writeln(row.join('\t'));
+        }
+        buf.writeln();
+      }
+      final text = buf.toString().trim();
+      if (text.isEmpty) return null;
+      final outPath = _resolveOutputPath(sourcePath, '.txt');
+      await _writeOutput(outPath, utf8.encode(text));
+      return outPath;
+    } catch (e) {
+      debugPrint('_xlsxToText failed for $sourcePath: $e');
       return null;
     }
   }
@@ -125,9 +236,225 @@ class DocConverter {
     if (ext == '.pdf') {
       return _extractPdfTextSync(sourcePath) ?? '';
     }
+    if (ext == '.xlsx') {
+      // Binary OOXML ZIP — parse sheets to a markdown table so every
+      // downstream builder (PDF/DOCX/HTML/MD) renders real tables.
+      try {
+        final bytes = await File(sourcePath).readAsBytes();
+        return _xlsxToMarkdown(bytes);
+      } catch (_) {
+        return '';
+      }
+    }
     final bytes = await File(sourcePath).readAsBytes();
     return utf8.decode(bytes, allowMalformed: true);
   }
+
+  // ---------------------------------------------------------------------------
+  // XLSX sheet pipeline (pure Dart, no SheetJS — conversions run headless)
+  //
+  // An .xlsx is a ZIP: xl/sharedStrings.xml holds dedup'd strings referenced
+  // by index, xl/worksheets/sheetN.xml holds rows of cells, xl/workbook.xml
+  // maps sheet names. Cell `t` kinds: s = shared-string index, str = formula
+  // result string, inlineStr = inline rich text, b = boolean, e = error,
+  // n (or absent) = number. Dates are serial numbers — emitted raw with the
+  // limitation documented (matching the viewer's SheetJS raw-value display).
+  // ---------------------------------------------------------------------------
+
+  /// Parses XLSX [bytes] into per-sheet row grids. Returns
+  /// `{sheetName: [[cell, …], …]}` with ragged rows padded to equal width.
+  /// Never throws — corrupt input yields an empty map.
+  static Map<String, List<List<String>>> parseXlsxSheets(List<int> bytes) {
+    try {
+      return _parseXlsxSheets(bytes);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Map<String, List<List<String>>> _parseXlsxSheets(List<int> bytes) {
+    final archive = ZipDecoder().decodeBytes(bytes);
+
+    List<int>? findBytes(String name) {
+      final f = archive.files.where((e) => e.name == name).firstOrNull;
+      final b = f?.readBytes();
+      return b == null ? null : b;
+    }
+
+    // --- Shared strings -----------------------------------------------------
+    final sharedStrings = <String>[];
+    final ssBytes = findBytes('xl/sharedStrings.xml');
+    if (ssBytes != null) {
+      final ssXml = utf8.decode(ssBytes, allowMalformed: true);
+      // Each <si> is one shared string; concatenate its <t> runs (rich-text
+      // runs split a single string across several <t> elements).
+      for (final si in RegExp(r'<si>([\s\S]*?)</si>').allMatches(ssXml)) {
+        final runs = RegExp(r'<t[^>]*>([^<]*)</t>')
+            .allMatches(si.group(1)!)
+            .map((m) => _xmlUnescape(m.group(1) ?? ''))
+            .join();
+        sharedStrings.add(runs);
+      }
+    }
+
+    // --- Sheet names ----------------------------------------------------------
+    final sheetNames = <String, String>{}; // sheetId-ish key → display name
+    final wbBytes = findBytes('xl/workbook.xml');
+    if (wbBytes != null) {
+      final wbXml = utf8.decode(wbBytes, allowMalformed: true);
+      var n = 0;
+      for (final m in RegExp(r'<sheet[^>]*>').allMatches(wbXml)) {
+        n++;
+        final tag = m.group(0)!;
+        final name = RegExp(r'name="([^"]*)"').firstMatch(tag)?.group(1);
+        final sheetId = RegExp(r'sheetId="(\d+)"').firstMatch(tag)?.group(1);
+        sheetNames[sheetId ?? '$n'] =
+            _xmlUnescape(name ?? 'Sheet$n');
+      }
+    }
+
+    // --- Worksheets -----------------------------------------------------------
+    final sheets = <String, List<List<String>>>{};
+    final sheetFiles = archive.files
+        .where(
+          (f) =>
+              f.name.startsWith('xl/worksheets/sheet') &&
+              f.name.endsWith('.xml'),
+        )
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+    var fallbackN = 0;
+    for (final sheetFile in sheetFiles) {
+      fallbackN++;
+      final sheetBytes = sheetFile.readBytes();
+      if (sheetBytes == null) continue;
+      final xml = utf8.decode(sheetBytes, allowMalformed: true);
+      final rows = _parseSheetRows(xml, sharedStrings);
+      if (rows.isEmpty) continue;
+      // Map sheetN.xml → workbook order name when available.
+      final m = RegExp(r'sheet(\d+)\.xml$').firstMatch(sheetFile.name);
+      final key = m?.group(1) ?? '$fallbackN';
+      sheets[sheetNames[key] ?? 'Sheet$fallbackN'] = rows;
+    }
+    return sheets;
+  }
+
+  /// Parses one worksheet XML into a padded row grid.
+  static List<List<String>> _parseSheetRows(
+    String xml,
+    List<String> sharedStrings,
+  ) {
+    // Sparse grid keyed by (row, col) — XLSX omits empty trailing cells, so
+    // column index comes from the cell reference (e.g. C5 → col 2), not from
+    // child order.
+    final cells = <int, Map<int, String>>{};
+    var maxCol = -1;
+    for (final rowM in RegExp(r'<row[^>]*>([\s\S]*?)</row>').allMatches(xml)) {
+      final rowTag = rowM.group(0)!;
+      final rowNum =
+          int.tryParse(RegExp(r'r="(\d+)"').firstMatch(rowTag)?.group(1) ?? '');
+      if (rowNum == null) continue;
+      final rowIdx = rowNum - 1;
+      for (final cM in RegExp(r'<c(\s[^>]*)?>([\s\S]*?)</c>').allMatches(
+        rowM.group(1)!,
+      )) {
+        final attrs = cM.group(1) ?? '';
+        final body = cM.group(2) ?? '';
+        final ref = RegExp(r'r="([A-Z]+)\d+"').firstMatch(attrs)?.group(1);
+        if (ref == null) continue;
+        final colIdx = _colLettersToIndex(ref);
+        final kind = RegExp(r't="([a-zA-Z]+)"').firstMatch(attrs)?.group(1);
+        final value = _xlsxCellValue(kind, body, sharedStrings);
+        (cells[rowIdx] ??= {})[colIdx] = value;
+        if (colIdx > maxCol) maxCol = colIdx;
+      }
+      // Self-closing <c …/> (empty cells) carry no value — skipped; padding
+      // below fills them with ''.
+    }
+    if (cells.isEmpty || maxCol < 0) return [];
+    final maxRow = cells.keys.reduce((a, b) => a > b ? a : b);
+    return List.generate(maxRow + 1, (r) {
+      final row = cells[r] ?? {};
+      return List.generate(maxCol + 1, (c) => row[c] ?? '');
+    });
+  }
+
+  static String _xlsxCellValue(
+    String? kind,
+    String body,
+    List<String> sharedStrings,
+  ) {
+    switch (kind) {
+      case 's':
+        final idx = int.tryParse(
+          RegExp(r'<v>([^<]*)</v>').firstMatch(body)?.group(1) ?? '',
+        );
+        if (idx != null && idx >= 0 && idx < sharedStrings.length) {
+          return sharedStrings[idx];
+        }
+        return '';
+      case 'inlineStr':
+        return RegExp(r'<t[^>]*>([^<]*)</t>')
+            .allMatches(body)
+            .map((m) => _xmlUnescape(m.group(1) ?? ''))
+            .join();
+      case 'str':
+        // Formula-string result: <v> holds the cached text.
+        return _xmlUnescape(
+          RegExp(r'<v>([^<]*)</v>').firstMatch(body)?.group(1) ?? '',
+        );
+      case 'b':
+        return (RegExp(r'<v>([^<]*)</v>').firstMatch(body)?.group(1) ?? '') ==
+                '1'
+            ? 'TRUE'
+            : 'FALSE';
+      case 'e':
+        return '';
+      default:
+        // n or absent: numeric (or date serial — emitted raw).
+        return _xmlUnescape(
+          RegExp(r'<v>([^<]*)</v>').firstMatch(body)?.group(1) ?? '',
+        );
+    }
+  }
+
+  static int _colLettersToIndex(String letters) {
+    var idx = 0;
+    for (var i = 0; i < letters.length; i++) {
+      idx = idx * 26 + (letters.codeUnitAt(i) - 0x40); // A=1 …
+    }
+    return idx - 1;
+  }
+
+  static String _xmlUnescape(String s) => s
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&apos;', "'");
+
+  /// Renders parsed [sheets] as markdown (one `## name` + table per sheet).
+  /// Empty grids yield '' so callers can distinguish "no data".
+  static String xlsxSheetsToMarkdown(Map<String, List<List<String>>> sheets) {
+    final buf = StringBuffer();
+    for (final entry in sheets.entries) {
+      final rows = entry.value.where((r) => r.any((c) => c.isNotEmpty)).toList();
+      if (rows.isEmpty) continue;
+      buf.writeln('## ${entry.key}');
+      buf.writeln();
+      final cell = (String s) => s.trim().replaceAll('|', '\\|');
+      buf.writeln('| ${rows.first.map(cell).join(' | ')} |');
+      buf.writeln('|${rows.first.map((_) => '---').join('|')}|');
+      for (final row in rows.skip(1)) {
+        buf.writeln('| ${row.map(cell).join(' | ')} |');
+      }
+      buf.writeln();
+    }
+    return buf.toString().trim();
+  }
+
+  static String _xlsxToMarkdown(List<int> bytes) =>
+      xlsxSheetsToMarkdown(parseXlsxSheets(bytes));
 
   /// Extracts the plain text of a `.pdf` file, writing `<base>.txt` next to
   /// the source. Text is recovered by decompressing the FlateDecode content
@@ -676,6 +1003,10 @@ class DocConverter {
     if (ext == '.csv') {
       return _csvToMarkdown(content);
     }
+    if (ext == '.xlsx') {
+      // Already a markdown table from _readSourceText — pass through.
+      return content;
+    }
     if (ext == '.docx') {
       // DOCX content is raw XML from word/document.xml — extract text
       return content
@@ -1021,6 +1352,10 @@ class DocConverter {
   /// markdown, code and data files all flow through the same text pipeline.
   /// PDF and DOCX are also accepted as source inputs (DOCX→text, PDF→cover
   /// page thumbnail only; full PDF→other is handled externally).
+  /// XLSX/CSV flow through the sheet pipeline (parsed to rows, then rendered
+  /// as a markdown table into the shared builders). Legacy `.xls` (OLE2
+  /// binary) and `.ods` are not convertible in-app — they need the
+  /// SpreadsheetViewer (SheetJS) instead.
   static bool canConvert(String path) {
     final ext = p.extension(path).toLowerCase();
     const textExts = {
@@ -1028,7 +1363,7 @@ class DocConverter {
       '.json', '.xml', '.yaml', '.yml', '.toml', '.ini', '.conf', '.cfg',
       '.log', '.css', '.js', '.ts', '.jsx', '.tsx', '.py', '.dart',
       '.java', '.kt', '.c', '.cpp', '.h', '.rs', '.go', '.sh', '.bat',
-      '.sql', '.env', '.gitignore', '.diff', '.docx', '.pdf',
+      '.sql', '.env', '.gitignore', '.diff', '.docx', '.pdf', '.xlsx',
     };
     return textExts.contains(ext);
   }
@@ -1447,4 +1782,19 @@ class _PdfLine {
   final double y;
   final List<_PdfRun> runs;
   _PdfLine({required this.y, required this.runs});
+}
+
+/// Outcome of converting one file inside [DocConverter.convertBatch].
+class BatchConvertResult {
+  final String sourcePath;
+  final String? outputPath;
+  final String? error;
+
+  bool get ok => outputPath != null;
+
+  const BatchConvertResult({
+    required this.sourcePath,
+    required this.outputPath,
+    required this.error,
+  });
 }

@@ -11,6 +11,7 @@ package com.swordfm.swordfm
 // ============================================================================
 
 import android.app.PendingIntent
+import android.app.PictureInPictureParams
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothServerSocket
@@ -18,6 +19,7 @@ import android.bluetooth.BluetoothSocket
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.PackageInstaller
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -28,6 +30,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.storage.StorageManager
+import android.util.Rational
 import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.core.content.FileProvider
@@ -90,9 +93,16 @@ class MainActivity : AudioServiceActivity(), MethodChannel.MethodCallHandler {
 
     private var pendingInstallResult: MethodChannel.Result? = null
     private var fileIntentsChannel: MethodChannel? = null
+    private var safBridge: SafBridge? = null
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        // SAF tree picker (Storage Access Framework fallback when All-files
+        // access is denied) owns its request code — forward first.
+        if (requestCode == SafBridge.REQUEST_OPEN_TREE) {
+            safBridge?.handleActivityResult(requestCode, resultCode, data)
+            return
+        }
         if (requestCode == REQUEST_PICK_FILE && resultCode == RESULT_OK && data != null) {
             // Collect all picked URIs (multi-select via clipData or single via data.data).
             val uris = mutableListOf<Uri>()
@@ -163,6 +173,7 @@ class MainActivity : AudioServiceActivity(), MethodChannel.MethodCallHandler {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        safBridge = SafBridge(this)
         flutterEngine?.let {
             methodChannel = MethodChannel(it.dartExecutor.binaryMessenger, CHANNEL)
             methodChannel?.setMethodCallHandler(this)
@@ -188,14 +199,23 @@ class MainActivity : AudioServiceActivity(), MethodChannel.MethodCallHandler {
                 }
             // File-open intents from external apps (PDF viewer, file manager, etc.)
             fileIntentsChannel = MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/file_intents")
-            // Cast stub — returns empty list until Cast SDK is integrated.
-            MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/cast")
+            // Storage Access Framework fallback — folder browsing without
+            // MANAGE_EXTERNAL_STORAGE. Own channel so the picker result path
+            // stays independent of the bluetooth/devices channels.
+            safBridge?.let { bridge ->
+                MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/saf")
+                    .setMethodCallHandler(bridge)
+            }
+            // Picture-in-Picture for the video player (Android 8+).
+            MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/video")
                 .setMethodCallHandler { call, result ->
                     when (call.method) {
-                        "discoverDevices" -> result.success(emptyList<Map<String, Any>>())
-                        "connect" -> result.success(false)
-                        "disconnect" -> result.success(true)
-                        "castUrl" -> result.success(false)
+                        "pipAvailable" -> result.success(pipAvailable())
+                        "enterPip" -> {
+                            val w = (call.argument<Int>("width") ?: 16).coerceAtLeast(1)
+                            val h = (call.argument<Int>("height") ?: 9).coerceAtLeast(1)
+                            result.success(enterPip(w, h))
+                        }
                         else -> result.notImplemented()
                     }
                     true
@@ -656,8 +676,29 @@ class MainActivity : AudioServiceActivity(), MethodChannel.MethodCallHandler {
         return true
     }
 
-    /** True when the app has "All files access" (MANAGE_EXTERNAL_STORAGE). */
-    private fun allFilesAccessGranted(): Boolean {
+    /** True when Picture-in-Picture is usable: Android 8+ with the PiP
+     *  feature and the activity not already in PiP. */
+    private fun pipAvailable(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+        return !isInPictureInPictureMode
+    }
+
+    /** Enters PiP with the given video aspect ratio. Returns false when
+     *  unsupported or the system rejects the request. */
+    private fun enterPip(width: Int, height: Int): Boolean {
+        if (!pipAvailable()) return false
+        return try {
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(width, height))
+                .build()
+            enterPictureInPictureMode(params)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** True when the app has "All files access" (MANAGE_EXTERNAL_STORAGE). */    private fun allFilesAccessGranted(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
         } else {

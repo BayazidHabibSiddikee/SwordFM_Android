@@ -12,12 +12,14 @@ import '../screens/notepad_screen.dart';
 import '../screens/epub_reader_screen.dart';
 import '../screens/cbz_reader_screen.dart';
 import '../screens/spreadsheet_viewer_screen.dart';
+import '../screens/pptx_viewer_screen.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'dart:typed_data';
 import '../services/widget_service.dart';
 import '../utils/file_utils.dart'
     show FileItem, FileUtils, isBlockedPath, isJunkName;
 import '../services/archive_service.dart';
+import '../services/doc_converter.dart';
 import '../services/open_with_service.dart';
 import '../services/installer_service.dart';
 import '../services/share_service.dart';
@@ -26,8 +28,10 @@ import '../screens/folder_graph_screen.dart';
 import '../screens/lan_screen.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../screens/archive_browser_screen.dart';
+import 'archive_password_prompt.dart';
 import 'preview_panel.dart';
 import 'convert_dialog.dart';
+import 'batch_convert_dialog.dart';
 import 'package:path/path.dart' as p;
 
 enum ViewMode { details, grid }
@@ -633,6 +637,11 @@ class _FileBrowserState extends State<FileBrowser> {
           WidgetService.addRecentFile(item.path);
           return;
         case FileOpenTargetType.pptxOutline:
+          await Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => PptxViewerScreen(filePath: item.path),
+          ));
+          WidgetService.addRecentFile(item.path);
+          return;
         case FileOpenTargetType.archive:
         case FileOpenTargetType.external:
         case FileOpenTargetType.unsupported:
@@ -695,6 +704,11 @@ class _FileBrowserState extends State<FileBrowser> {
         case FileOpenTargetType.spreadsheet:
           Navigator.of(context).push(MaterialPageRoute(
             builder: (_) => SpreadsheetViewerScreen(filePath: item.path),
+          ));
+          return;
+        case FileOpenTargetType.pptxOutline:
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => PptxViewerScreen(filePath: item.path),
           ));
           return;
         default:
@@ -1354,8 +1368,7 @@ class _FileBrowserState extends State<FileBrowser> {
 
   /// Shares [paths] (files only) through the Android share sheet.
   /// Directories are filtered out -- the share sheet cannot share a folder.
-  Future<void> _sharePaths(List<String> paths) async {
-    final files = <String>[];
+  Future<void> _sharePaths(List<String> paths) async {    final files = <String>[];
     for (final path in paths) {
       try {
         if (await FileSystemEntity.type(path) == FileSystemEntityType.file) {
@@ -1386,10 +1399,32 @@ class _FileBrowserState extends State<FileBrowser> {
     );
   }
 
+  /// Opens the batch-convert dialog for [paths]. Non-convertible files
+  /// are filtered inside the dialog and reported as skipped; when nothing
+  /// is convertible a snackbar says so instead of opening an empty dialog.
+  Future<void> _batchConvert(List<String> paths) async {
+    final files = paths.where(DocConverter.canConvert).toList();
+    if (files.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('No convertible files selected'),
+            backgroundColor: OneDarkColors.amber,
+          ),
+        );
+      }
+      return;
+    }
+    await showDialog(
+      context: context,
+      builder: (_) => BatchConvertDialog(filePaths: files),
+    );
+    if (mounted) _loadDirectory();
+  }
+
   /// Shows a QR code dialog encoding a swordfm:// deep link for the file.
   /// Scanning this on another SwordFM device opens the file directly.
-  void _showFileQrCode(FileItem item) {
-    final data = 'swordfm://open?path=${Uri.encodeComponent(item.path)}';
+  void _showFileQrCode(FileItem item) {    final data = 'swordfm://open?path=${Uri.encodeComponent(item.path)}';
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1544,7 +1579,11 @@ class _FileBrowserState extends State<FileBrowser> {
 
   /// Extracts [path] either into the current directory (Linux "Extract Here"
   /// semantics) or into a subfolder named after the archive.
-  Future<void> _extractArchive(String path, {bool toSubfolder = true}) async {
+  Future<void> _extractArchive(
+    String path, {
+    bool toSubfolder = true,
+    String? password,
+  }) async {
     final destDir = toSubfolder
         ? p.join(p.dirname(path), p.basenameWithoutExtension(path))
         : p.dirname(path);
@@ -1572,7 +1611,7 @@ class _FileBrowserState extends State<FileBrowser> {
       );
     }
     try {
-      await ArchiveService.extract(path, destDir);
+      await ArchiveService.extract(path, destDir, password: password);
       if (mounted) {
         Navigator.of(context).pop(); // dismiss loading dialog
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1588,8 +1627,25 @@ class _FileBrowserState extends State<FileBrowser> {
         _loadDirectory();
       }
     } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop(); // dismiss loading dialog
+      // Encrypted archives surface a typed error — prompt for the password
+      // and retry instead of parking "Extract failed: …password…" on screen.
+      if (e is ArchivePasswordRequiredException) {
+        final entered = await promptForArchivePassword(
+          context,
+          wasRejected: e.passwordWasSupplied,
+        );
+        if (entered != null && mounted) {
+          await _extractArchive(
+            path,
+            toSubfolder: toSubfolder,
+            password: entered,
+          );
+        }
+        return;
+      }
       if (mounted) {
-        Navigator.of(context).pop(); // dismiss loading dialog
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Extract failed: $e'),
@@ -2194,7 +2250,7 @@ class _FileBrowserState extends State<FileBrowser> {
             () => _installPackage(item),
           ),
         const PopupMenuDivider(),
-        if (item.isText || item.isPdf || item.extension == '.docx')
+        if (DocConverter.canConvert(item.path))
           _menuItem('Convert…', Icons.transform, () {
             showDialog(
               context: context,
@@ -2706,6 +2762,12 @@ class _FileBrowserState extends State<FileBrowser> {
                 icon: Icon(Icons.archive, color: OneDarkColors.green),
                 onPressed: () => _compressSelection(_actionPaths),
                 tooltip: 'Compress…',
+              ),
+            if (inSelectMode)
+              IconButton(
+                icon: Icon(Icons.transform, color: OneDarkColors.cyan),
+                onPressed: () => _batchConvert(_actionPaths),
+                tooltip: 'Convert…',
               ),
             if (inSelectMode)
               IconButton(

@@ -1,8 +1,16 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:swordfm/services/network_service.dart';
 
+/// Tests for the [NetworkProfile] data model and its transfer helpers.
+///
+/// Note: this file deliberately does NOT cover credential encryption. The
+/// AES-256-GCM logic lives in the private `_CryptoHelper` in
+/// `lib/services/network_service.dart` and is not reachable from a test; it is
+/// exercised indirectly through `NetworkService` profile persistence, which
+/// requires secure-storage platform channels. Do not rename this file to
+/// suggest encryption coverage that these tests do not provide.
 void main() {
-  group('AES-256-GCM Encryption', () {
+  group('NetworkProfile model', () {
     test('NetworkProfile JSON round-trip preserves all fields', () {
       final p = NetworkProfile(
         id: 'n1',
@@ -15,7 +23,10 @@ void main() {
         remotePath: '/shared',
       );
       final json = p.toJson();
-      // Simulate what _saveProfiles does: add encryptedPassword, include password for fromJson
+      // `toJson` intentionally omits `password`; _saveProfiles adds
+      // `encryptedPassword` and re-adds a plaintext `password` ONLY as a
+      // read-compat path for pre-encryption profiles. fromJson tolerates the
+      // key being absent by defaulting to ''.
       json['encryptedPassword'] = 'placeholder';
       json['password'] = p.password;
       final restored = NetworkProfile.fromJson(json);

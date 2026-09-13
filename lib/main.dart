@@ -33,6 +33,8 @@ import 'screens/text_reader_screen.dart';
 import 'screens/epub_reader_screen.dart';
 import 'screens/cbz_reader_screen.dart';
 import 'screens/spreadsheet_viewer_screen.dart';
+import 'screens/pptx_viewer_screen.dart';
+import 'screens/saf_browser_screen.dart';
 import 'services/widget_service.dart';
 import 'services/entitlement_service.dart';
 import 'services/device_service.dart';
@@ -141,12 +143,15 @@ class SwordFM extends StatelessWidget {
   }
 }
 
+/// What the user chose in the storage-access prompt: grant broad
+/// "All files access", grant individual folders via SAF, or defer.
+enum _StorageChoice { fullAccess, pickFolders, notNow }
+
 /// Main app screen with responsive layout matching Linux SwordFM.
 /// - Left sidebar: places, bookmarks, devices
 /// - Center: file browser
 /// - Right (collapsible): preview panel
-class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+class MainScreen extends StatefulWidget {  const MainScreen({super.key});
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -173,6 +178,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   // "All files access" grant prompt is shown at most once per session.
   bool _storagePromptShown = false;
+
+  /// True once MANAGE_EXTERNAL_STORAGE is confirmed granted. Gates the
+  /// "Shared folders" (SAF fallback) sidebar entry — with full access the
+  /// browser already sees everything, so the fallback route would be noise.
+  bool _hasFullAccess = false;
 
   // ignore: prefer_final_fields — mutated via setState
   List<String> _bookmarks =
@@ -235,17 +245,31 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   /// On Android, "All files access" unlocks the phone's real storage
   /// (120GB in the user's case) instead of the ~1.5GB scoped sandbox.
   /// Fire-and-forget: surface the system grant screen only once per launch.
+  ///
+  /// When the user declines, the Storage Access Framework fallback still lets
+  /// them grant individual folders — so declining no longer means an empty
+  /// file manager. The dialog now says so explicitly.
   Future<void> _ensureStorageAccess() async {
     if (kIsWeb) return;
     try {
       final granted = await allFilesAccessGranted();
-      if (granted) return;
+      if (granted) {
+        if (mounted) setState(() => _hasFullAccess = true);
+        return;
+      }
+      if (mounted) setState(() => _hasFullAccess = false);
       if (_storagePromptShown) return; // don't nag on every resume
       _storagePromptShown = true;
       // Ask the user (non-blocking) so they can grant full storage access
       // once, which also fixes paste / duplicate-scan permission errors.
-      final go = await _promptAllFilesAccess();
-      if (go) await requestAllFilesAccess();
+      final choice = await _promptStorageAccess();
+      if (choice == _StorageChoice.fullAccess) {
+        await requestAllFilesAccess();
+      } else if (choice == _StorageChoice.pickFolders && mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const SafBrowserScreen()),
+        );
+      }
     } catch (_) {}
   }
 
@@ -316,6 +340,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         ));
         return;
       case FileOpenTargetType.pptxOutline:
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => PptxViewerScreen(filePath: path),
+        ));
+        return;
       case FileOpenTargetType.archive:
       case FileOpenTargetType.external:
       case FileOpenTargetType.unsupported:
@@ -348,9 +376,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
-  Future<bool> _promptAllFilesAccess() async {
+  /// What the user chose in the storage-access prompt.
+  Future<_StorageChoice> _promptStorageAccess() async {
     final messenger = ScaffoldMessenger.of(context);
-    final ok = await showDialog<bool>(
+    final ok = await showDialog<_StorageChoice>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: OneDarkColors.bg,
@@ -361,23 +390,37 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         content: Text(
           'To browse all folders, view your real storage capacity, paste files '
           'and scan duplicates, SwordFM needs "Files & media → All files access". '
-          'You can grant it in the next screen.',
+          'You can grant it in the next screen — or pick individual folders '
+          'instead, without full access.',
           style: TextStyle(color: OneDarkColors.fg, fontSize: 13),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              _StorageChoice.notNow,
+            ),
             child: const Text('Not now'),
           ),
+          TextButton(
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              _StorageChoice.pickFolders,
+            ),
+            child: const Text('Pick folders'),
+          ),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              _StorageChoice.fullAccess,
+            ),
             child: const Text('Allow'),
           ),
         ],
       ),
     );
     if (messenger.mounted) messenger.hideCurrentSnackBar();
-    return ok ?? false;
+    return ok ?? _StorageChoice.notNow;
   }
 
   Future<void> _loadBookmarks() async {
@@ -570,6 +613,22 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                           ),
                                         ),
                                       ),
+                                      // SAF fallback — only when "All files access"
+                                      // is denied; with full access the
+                                      // browser already sees everything.
+                                      if (!_hasFullAccess)
+                                        _SidebarTile(
+                                          icon: Icons.folder_shared,
+                                          label: 'Shared folders',
+                                          iconColor: OneDarkColors.cyan,
+                                          onTap: () => Navigator.of(context)
+                                              .push(
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const SafBrowserScreen(),
+                                            ),
+                                          ),
+                                        ),
                                       ], // places
                                       const Divider(),
                                       // ── Tools section ──────────────────────

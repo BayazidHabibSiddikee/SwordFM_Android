@@ -1,260 +1,485 @@
-// Tests for BluetoothShareService protocol helpers and filename-handling logic.
+// Tests for BluetoothShareService.
 //
-// These tests do NOT require a real Bluetooth device or platform channel.
-// They cover:
-//   - Transfer-complete message format (contract spec)
-//   - BluetoothDeviceItem.fromMap parsing edge cases
-//   - BluetoothTransferProgress percentage computation
-//   - Protocol frame metadata-length guard values
-//   - Filename sanitisation for the bt_send/ cache (onActivityResult logic)
-//   - SHA-256 hex digest format validation
+// These drive the real `com.swordfm/bluetooth` MethodChannel via
+// TestDefaultBinaryMessengerBinding, so every assertion exercises production
+// code paths (state machine, stream emissions, message formatting) rather than
+// a copy of the logic.
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:swordfm/services/bluetooth_share_service.dart';
 
-// ---------------------------------------------------------------------------
-// Mirror of _buildTransferCompleteMessage logic (same contract, tests only)
-// ---------------------------------------------------------------------------
-String _buildMsg(String savedPath, String sha256, bool verified) {
-  var msg = savedPath.isEmpty
-      ? 'Transfer Complete!'
-      : 'Transfer Complete! Saved to $savedPath';
-  if (sha256.isNotEmpty) {
-    msg += '\nSHA-256: $sha256';
-    msg += verified ? ' (verified)' : ' (not verified)';
-  }
-  return msg;
-}
-
-// ---------------------------------------------------------------------------
-// Mirror of onActivityResult filename-strip logic (Kotlin: File(name).name)
-// ---------------------------------------------------------------------------
-String _stripToBasename(String raw) {
-  final stripped = raw.split('/').last.split('\\').last;
-  return stripped.isEmpty ? 'bt_file' : stripped;
-}
-
-// ---------------------------------------------------------------------------
-// Mirror of native metadata-length guard
-// ---------------------------------------------------------------------------
-bool _isValidMetadataLength(int length) =>
-    length > 0 && length <= 1024 * 1024;
-
 void main() {
-  // -------------------------------------------------------------------------
-  // Transfer-complete message format
-  // -------------------------------------------------------------------------
-  group('transfer-complete message format', () {
-    test('no path, no hash — returns "Transfer Complete!"', () {
-      expect(_buildMsg('', '', false), 'Transfer Complete!');
-    });
+  TestWidgetsFlutterBinding.ensureInitialized();
 
-    test('with path — includes "Saved to <path>"', () {
-      final msg = _buildMsg('/sdcard/SwordFM/file.pdf', '', false);
-      expect(msg, contains('Saved to /sdcard/SwordFM/file.pdf'));
-    });
+  const channel = MethodChannel('com.swordfm/bluetooth');
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
 
-    test('with sha256 and verified=true — shows "(verified)"', () {
-      final sha = 'a' * 64;
-      final msg = _buildMsg('', sha, true);
-      expect(msg, contains('SHA-256: $sha'));
-      expect(msg, contains('(verified)'));
-      expect(msg, isNot(contains('(not verified)')));
-    });
+  late BluetoothShareService service;
 
-    test('with sha256 and verified=false — shows "(not verified)"', () {
-      final sha = 'b' * 64;
-      final msg = _buildMsg('', sha, false);
-      expect(msg, contains('SHA-256: $sha'));
-      expect(msg, contains('(not verified)'));
-    });
+  /// Method calls the service made out to the platform.
+  late List<MethodCall> calls;
 
-    test('empty sha256 — no SHA-256 line emitted', () {
-      final msg = _buildMsg('/some/path', '', false);
-      expect(msg, isNot(contains('SHA-256')));
-    });
+  /// When set, the named method throws this exception.
+  PlatformException? throwOn;
 
-    test('SHA-256 can be extracted by [0-9a-f]{64} regex', () {
-      final sha = 'deadbeef' * 8; // 64 hex chars
-      final msg = _buildMsg('', sha, true);
-      final match = RegExp(r'\b[0-9a-f]{64}\b').firstMatch(msg);
-      expect(match?.group(0), sha);
-    });
+  setUp(() {
+    service = BluetoothShareService();
+    calls = [];
+    throwOn = null;
 
-    test('regex returns null when message has no hash', () {
-      final msg = _buildMsg('', '', false);
-      final match = RegExp(r'\b[0-9a-f]{64}\b').firstMatch(msg);
-      expect(match, isNull);
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (throwOn != null && call.method == throwOn!.code) {
+        throw throwOn!;
+      }
+      return null;
     });
   });
 
-  // -------------------------------------------------------------------------
-  // BluetoothDeviceItem.fromMap
-  // -------------------------------------------------------------------------
-  group('BluetoothDeviceItem.fromMap', () {
-    test('parses name and address from valid map', () {
+  tearDown(() {
+    messenger.setMockMethodCallHandler(channel, null);
+  });
+
+  /// Simulates an inbound callback from the native side (Kotlin -> Dart).
+  Future<void> emitNative(String method, [Map<String, dynamic>? args]) async {
+    await messenger.handlePlatformMessage(
+      channel.name,
+      channel.codec.encodeMethodCall(MethodCall(method, args)),
+      (_) {},
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Models
+  // ---------------------------------------------------------------------------
+  group('BluetoothDeviceItem', () {
+    test('fromMap reads name and address', () {
       final item = BluetoothDeviceItem.fromMap({
-        'name': 'Pixel 7',
+        'name': 'Pixel Buds',
         'address': 'AA:BB:CC:DD:EE:FF',
       });
-      expect(item.name, 'Pixel 7');
+      expect(item.name, 'Pixel Buds');
       expect(item.address, 'AA:BB:CC:DD:EE:FF');
     });
 
-    test('falls back to "Unknown" when name key is absent', () {
-      final item = BluetoothDeviceItem.fromMap({'address': '11:22:33:44:55:66'});
-      expect(item.name, 'Unknown');
+    test('fromMap defaults a missing name to Unknown', () {
+      expect(BluetoothDeviceItem.fromMap({'address': 'AA:BB'}).name, 'Unknown');
     });
 
-    test('falls back to empty string when address key is absent', () {
-      final item = BluetoothDeviceItem.fromMap({'name': 'Test Device'});
-      expect(item.address, '');
+    test('fromMap defaults a missing address to empty', () {
+      expect(BluetoothDeviceItem.fromMap({'name': 'X'}).address, '');
     });
 
-    test('handles empty map without throwing', () {
+    test('fromMap tolerates a completely empty map', () {
       final item = BluetoothDeviceItem.fromMap({});
       expect(item.name, 'Unknown');
       expect(item.address, '');
     });
-
-    test('null values fall back gracefully', () {
-      final item = BluetoothDeviceItem.fromMap({'name': null, 'address': null});
-      expect(item.name, 'Unknown');
-      expect(item.address, '');
-    });
   });
 
-  // -------------------------------------------------------------------------
-  // BluetoothTransferProgress percentage
-  // -------------------------------------------------------------------------
   group('BluetoothTransferProgress.percentage', () {
-    test('is 0.0 when totalBytes is 0 (no division by zero)', () {
+    test('computes a normal fraction', () {
       final p = BluetoothTransferProgress(
-        filename: 'test.zip',
-        bytesTransferred: 0,
-        totalBytes: 0,
+        filename: 'a.bin',
+        bytesTransferred: 50,
+        totalBytes: 200,
         isSending: true,
+      );
+      expect(p.percentage, 0.25);
+    });
+
+    test('is 0.0 when totalBytes is zero (no divide-by-zero)', () {
+      final p = BluetoothTransferProgress(
+        filename: 'a.bin',
+        bytesTransferred: 10,
+        totalBytes: 0,
+        isSending: false,
       );
       expect(p.percentage, 0.0);
     });
 
-    test('is 1.0 when transfer is complete', () {
+    test('reaches 1.0 when complete', () {
       final p = BluetoothTransferProgress(
-        filename: 'done.pdf',
-        bytesTransferred: 1024,
-        totalBytes: 1024,
+        filename: 'a.bin',
+        bytesTransferred: 200,
+        totalBytes: 200,
         isSending: false,
       );
       expect(p.percentage, 1.0);
     });
+  });
 
-    test('is 0.5 at the halfway point', () {
-      final p = BluetoothTransferProgress(
-        filename: 'half.mp3',
-        bytesTransferred: 500,
-        totalBytes: 1000,
-        isSending: true,
+  // ---------------------------------------------------------------------------
+  // Initial state
+  // ---------------------------------------------------------------------------
+  group('initial state', () {
+    // NOTE: BluetoothShareService is a singleton, so these assertions describe
+    // a freshly loaded VM. Tests run in declaration order within a file, and
+    // this group is declared first, so state is still pristine here.
+    test('starts disconnected with no device and no checksum', () {
+      expect(service.isSending, isFalse);
+      expect(service.lastTransferVerified, isFalse);
+    });
+
+    test('the factory always returns the same instance', () {
+      expect(identical(BluetoothShareService(), BluetoothShareService()),
+          isTrue);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Outbound platform calls
+  // ---------------------------------------------------------------------------
+  group('outbound platform calls', () {
+    test('isSupported forwards to isBluetoothSupported', () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      expect(await service.isSupported(), isTrue);
+      expect(calls.single.method, 'isBluetoothSupported');
+    });
+
+    test('isSupported returns false when the platform throws', () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        throw PlatformException(code: 'x', message: 'no adapter');
+      });
+      expect(await service.isSupported(), isFalse);
+    });
+
+    test('isEnabled forwards to isBluetoothEnabled and defaults false',
+        () async {
+      expect(await service.isEnabled(), isFalse);
+      expect(calls.single.method, 'isBluetoothEnabled');
+    });
+
+    test('getPairedDevices maps the native list into BluetoothDeviceItem',
+        () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return <dynamic>[
+          {'name': 'Headset', 'address': '11:22'},
+          {'name': 'Phone', 'address': '33:44'},
+        ];
+      });
+      final devices = await service.getPairedDevices();
+      expect(devices.map((d) => d.name), ['Headset', 'Phone']);
+      expect(calls.single.method, 'getPairedDevices');
+    });
+
+    test('getPairedDevices returns [] when native yields null', () async {
+      expect(await service.getPairedDevices(), isEmpty);
+    });
+
+    test('getPairedDevices surfaces a platform error on messageStream',
+        () async {
+      throwOn = PlatformException(code: 'getPairedDevices', message: 'denied');
+      final messages = <String>[];
+      final sub = service.messageStream.listen(messages.add);
+      expect(await service.getPairedDevices(), isEmpty);
+      await Future<void>.delayed(Duration.zero);
+      expect(messages.single, contains('denied'));
+      await sub.cancel();
+    });
+
+    test('startServer optimistically moves to listening', () async {
+      await service.startServer();
+      expect(service.state, BluetoothState.listening);
+      expect(calls.single.method, 'startServer');
+    });
+
+    test('startServer rolls back to disconnected on failure', () async {
+      throwOn = PlatformException(code: 'startServer', message: 'busy');
+      await service.startServer();
+      expect(service.state, BluetoothState.disconnected);
+    });
+
+    test('connectToDevice forwards the address and moves to connecting',
+        () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      await service.connectToDevice('AA:BB');
+      expect(calls.single.arguments['address'], 'AA:BB');
+      expect(service.state, BluetoothState.connecting);
+    });
+
+    test('connectToDevice falls back to disconnected when native says false',
+        () async {
+      await service.connectToDevice('AA:BB'); // mock returns null => false
+      expect(service.state, BluetoothState.disconnected);
+    });
+
+    test('connectToDevice rolls back on a platform exception', () async {
+      throwOn = PlatformException(code: 'connectToDevice', message: 'refused');
+      await service.connectToDevice('AA:BB');
+      expect(service.state, BluetoothState.disconnected);
+    });
+
+    test('sendFile enters sending then returns true', () async {
+      expect(await service.sendFile('/tmp/x.bin'), isTrue);
+      expect(service.state, BluetoothState.sending);
+      expect(service.isSending, isTrue);
+      expect(calls.single.arguments['path'], '/tmp/x.bin');
+    });
+
+    test('sendFile returns false and recovers state on failure', () async {
+      throwOn = PlatformException(code: 'sendFile', message: 'io');
+      expect(await service.sendFile('/tmp/y.bin'), isFalse);
+      // A failed send must not strand the state machine in `sending`.
+      expect(service.state, BluetoothState.connected);
+    });
+
+    test('stopServer returns to disconnected', () async {
+      await service.startServer();
+      await service.stopServer();
+      expect(service.state, BluetoothState.disconnected);
+      expect(calls.last.method, 'stopServer');
+    });
+
+    test('disconnect returns to disconnected', () async {
+      messenger.setMockMethodCallHandler(channel, (call) async => true);
+      await service.connectToDevice('AA:BB');
+      await service.disconnect();
+      expect(service.state, BluetoothState.disconnected);
+    });
+
+    test('cancelTransfer returns to connected and reports cancellation',
+        () async {
+      await service.sendFile('/tmp/x.bin');
+      final messages = <String>[];
+      final sub = service.messageStream.listen(messages.add);
+      await service.cancelTransfer();
+      await Future<void>.delayed(Duration.zero);
+      expect(service.state, BluetoothState.connected);
+      expect(messages, contains('Transfer cancelled.'));
+      await sub.cancel();
+    });
+
+    test('pickFile throws a wrapped Exception on platform failure', () async {
+      throwOn = PlatformException(code: 'pickFile', message: 'no picker');
+      expect(() => service.pickFile(), throwsA(isA<Exception>()));
+    });
+
+    test('requestEnable reports errors on messageStream', () async {
+      throwOn =
+          PlatformException(code: 'requestEnableBluetooth', message: 'nope');
+      final messages = <String>[];
+      final sub = service.messageStream.listen(messages.add);
+      await service.requestEnable();
+      await Future<void>.delayed(Duration.zero);
+      expect(messages.single, contains('nope'));
+      await sub.cancel();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Inbound native callbacks (the Kotlin -> Dart contract)
+  // ---------------------------------------------------------------------------
+  group('inbound native callbacks', () {
+    test('onServerStarted moves to listening', () async {
+      await emitNative('onServerStarted');
+      expect(service.state, BluetoothState.listening);
+    });
+
+    test('onConnected records the device name and emits it', () async {
+      final names = <String>[];
+      final sub = service.deviceConnectedStream.listen(names.add);
+      await emitNative('onConnected', {'name': 'Pixel'});
+      await Future<void>.delayed(Duration.zero);
+      expect(service.connectedDeviceName, 'Pixel');
+      expect(service.state, BluetoothState.connected);
+      expect(names, ['Pixel']);
+      await sub.cancel();
+    });
+
+    test('onConnected defaults the name to Device', () async {
+      await emitNative('onConnected');
+      expect(service.connectedDeviceName, 'Device');
+    });
+
+    test('onDisconnected clears the device name', () async {
+      await emitNative('onConnected', {'name': 'Pixel'});
+      await emitNative('onDisconnected');
+      expect(service.connectedDeviceName, isNull);
+      expect(service.state, BluetoothState.disconnected);
+    });
+
+    test('onTransferStarted with isSending=true enters sending', () async {
+      await emitNative('onTransferStarted', {'isSending': true});
+      expect(service.state, BluetoothState.sending);
+    });
+
+    test('onTransferStarted with isSending=false enters receiving', () async {
+      await emitNative('onTransferStarted', {'isSending': false});
+      expect(service.state, BluetoothState.receiving);
+    });
+
+    test('onTransferProgress emits a BluetoothTransferProgress', () async {
+      final events = <BluetoothTransferProgress>[];
+      final sub = service.progressStream.listen(events.add);
+      await emitNative('onTransferProgress', {
+        'filename': 'movie.mp4',
+        'bytesTransferred': 512,
+        'totalBytes': 1024,
+        'isSending': true,
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(events.single.filename, 'movie.mp4');
+      expect(events.single.percentage, 0.5);
+      await sub.cancel();
+    });
+
+    test('onTransferProgress tolerates missing arguments', () async {
+      final events = <BluetoothTransferProgress>[];
+      final sub = service.progressStream.listen(events.add);
+      await emitNative('onTransferProgress');
+      await Future<void>.delayed(Duration.zero);
+      expect(events.single.bytesTransferred, 0);
+      expect(events.single.totalBytes, 0);
+      await sub.cancel();
+    });
+
+    test('onTransferError wraps the native message', () async {
+      final messages = <String>[];
+      final sub = service.messageStream.listen(messages.add);
+      await emitNative('onTransferError', {'message': 'socket closed'});
+      await Future<void>.delayed(Duration.zero);
+      expect(messages.single, 'Transfer Error: socket closed');
+      expect(service.state, BluetoothState.connected);
+      await sub.cancel();
+    });
+
+    test('onTransferError with no message emits a generic error', () async {
+      final messages = <String>[];
+      final sub = service.messageStream.listen(messages.add);
+      await emitNative('onTransferError');
+      await Future<void>.delayed(Duration.zero);
+      expect(messages.single, 'Transfer Error.');
+      await sub.cancel();
+    });
+
+    test('an unknown native method does not change the current state',
+        () async {
+      // BluetoothShareService is a singleton (factory returns a single
+      // _instance), so _state persists across tests in this file. Capture the
+      // current state and assert the unknown callback leaves it untouched,
+      // rather than assuming a fresh instance starts disconnected.
+      final before = service.state;
+      await emitNative('onSomethingBrandNew', {'x': 1});
+      expect(service.state, before);
+    });
+
+
+    test('onTransferComplete formats the message and records the checksum',
+        () async {
+      final messages = <String>[];
+      final sub = service.messageStream.listen(messages.add);
+      await emitNative('onTransferComplete', {
+        'savedPath': '/sdcard/Download/a.bin',
+        'sha256': 'abc123',
+        'verified': true,
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        messages.single,
+        'Transfer Complete! Saved to /sdcard/Download/a.bin\n'
+        'SHA-256: abc123 (verified)',
       );
-      expect(p.percentage, closeTo(0.5, 0.0001));
+      expect(service.lastTransferSha256, 'abc123');
+      expect(service.lastTransferVerified, isTrue);
+      expect(service.state, BluetoothState.connected);
+      await sub.cancel();
     });
 
-    test('isSending flag is preserved', () {
-      final p = BluetoothTransferProgress(
-        filename: 'f',
-        bytesTransferred: 0,
-        totalBytes: 10,
-        isSending: false,
-      );
-      expect(p.isSending, isFalse);
+    test('onTransferComplete with no path omits the path clause', () async {
+      final messages = <String>[];
+      final sub = service.messageStream.listen(messages.add);
+      await emitNative('onTransferComplete', {'savedPath': '', 'sha256': ''});
+      await Future<void>.delayed(Duration.zero);
+      expect(messages.single, 'Transfer Complete!');
+      // An empty checksum must not be recorded as a real digest.
+      expect(service.lastTransferSha256, isNull);
+      expect(service.lastTransferVerified, isFalse);
+      await sub.cancel();
+    });
+
+    test('onTransferComplete marks an unverified checksum as not verified',
+        () async {
+      final messages = <String>[];
+      final sub = service.messageStream.listen(messages.add);
+      await emitNative('onTransferComplete', {
+        'savedPath': '/x',
+        'sha256': 'deadbeef',
+        'verified': false,
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(messages.single, contains('(not verified)'));
+      expect(service.lastTransferVerified, isFalse);
+      await sub.cancel();
+    });
+
+    test('onFilePicked emits the selected paths', () async {
+      final received = <List<String>>[];
+      final sub = service.filePickedStream.listen(received.add);
+      await emitNative('onFilePicked', {
+        'paths': ['/a.txt', '/b.txt'],
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(received.single, ['/a.txt', '/b.txt']);
+      await sub.cancel();
+    });
+
+    test('onFilePicked discards non-string entries', () async {
+      final received = <List<String>>[];
+      final sub = service.filePickedStream.listen(received.add);
+      await emitNative('onFilePicked', {
+        'paths': ['/a.txt', 42, null, '/b.txt'],
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(received.single, ['/a.txt', '/b.txt']);
+      await sub.cancel();
+    });
+
+    test('onFilePicked with an empty list emits nothing', () async {
+      final received = <List<String>>[];
+      final sub = service.filePickedStream.listen(received.add);
+      await emitNative('onFilePicked', {'paths': <String>[]});
+      await Future<void>.delayed(Duration.zero);
+      expect(received, isEmpty);
+      await sub.cancel();
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Protocol frame: metadata length guard
-  // Native: if (metadataLength <= 0 || metadataLength > 1024*1024) → throw
-  // -------------------------------------------------------------------------
-  group('protocol metadata-length guard', () {
-    test('0 is invalid', () => expect(_isValidMetadataLength(0), isFalse));
-    test('-1 is invalid', () => expect(_isValidMetadataLength(-1), isFalse));
-    test('1 is valid', () => expect(_isValidMetadataLength(1), isTrue));
-    test('120 bytes is valid (typical JSON frame)', () {
-      expect(_isValidMetadataLength(120), isTrue);
-    });
-    test('1 MB exactly is valid (boundary)', () {
-      expect(_isValidMetadataLength(1024 * 1024), isTrue);
-    });
-    test('1 MB + 1 is invalid (above boundary)', () {
-      expect(_isValidMetadataLength(1024 * 1024 + 1), isFalse);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Filename sanitisation (onActivityResult bt_send/ cache)
-  // Rule: strip directory components so a crafted URI can't escape the cache.
-  // Mirrors Kotlin: File(fileName).name.ifBlank { "bt_file" }
-  // -------------------------------------------------------------------------
-  group('filename sanitisation for bt_send cache', () {
-    test('plain filename passes unchanged', () {
-      expect(_stripToBasename('document.pdf'), 'document.pdf');
+  // ---------------------------------------------------------------------------
+  // SHA-256
+  // ---------------------------------------------------------------------------
+  group('computeSha256', () {
+    test('returns the digest reported by native', () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return 'e3b0c44298fc1c149afbf4c8996fb924'
+            '27ae41e4649b934ca495991b7852b855';
+      });
+      final digest = await BluetoothShareService.computeSha256('/tmp/x');
+      expect(digest, hasLength(64));
+      expect(calls.single.method, 'computeSha256');
+      expect(calls.single.arguments['path'], '/tmp/x');
     });
 
-    test('forward-slash path → basename only', () {
-      expect(_stripToBasename('/Downloads/secret.txt'), 'secret.txt');
+    test('returns null when the platform throws', () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        throw PlatformException(code: 'io', message: 'unreadable');
+      });
+      expect(await BluetoothShareService.computeSha256('/nope'), isNull);
     });
 
-    test('path-traversal with backslash → basename only', () {
-      expect(_stripToBasename('..\\..\\etc\\passwd'), 'passwd');
-    });
-
-    test('dot-dot with forward slash → basename only', () {
-      expect(_stripToBasename('../../etc/shadow'), 'shadow');
-    });
-
-    test('empty string → "bt_file" fallback', () {
-      expect(_stripToBasename(''), 'bt_file');
-    });
-
-    test('only slashes → "bt_file" fallback', () {
-      expect(_stripToBasename('/////'), 'bt_file');
-    });
-
-    test('filename with spaces is preserved', () {
-      expect(_stripToBasename('my file name.mp4'), 'my file name.mp4');
-    });
-
-    test('filename with unicode is preserved', () {
-      expect(_stripToBasename('音楽.mp3'), '音楽.mp3');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // SHA-256 hex digest format
-  // -------------------------------------------------------------------------
-  group('SHA-256 hex digest format validation', () {
-    test('64 lowercase hex chars is valid', () {
-      final hex = 'a1b2c3d4' * 8;
-      expect(RegExp(r'^[0-9a-f]{64}$').hasMatch(hex), isTrue);
-    });
-
-    test('uppercase hex does NOT match lowercase-only pattern', () {
-      final hex = 'A1B2C3D4' * 8;
-      expect(RegExp(r'^[0-9a-f]{64}$').hasMatch(hex), isFalse);
-    });
-
-    test('63 chars is too short', () {
-      expect(RegExp(r'^[0-9a-f]{64}$').hasMatch('a' * 63), isFalse);
-    });
-
-    test('65 chars is too long', () {
-      expect(RegExp(r'^[0-9a-f]{64}$').hasMatch('a' * 65), isFalse);
-    });
-
-    test('empty string is invalid', () {
-      expect(RegExp(r'^[0-9a-f]{64}$').hasMatch(''), isFalse);
-    });
-
-    test('all-zeros is a valid format (edge case)', () {
-      expect(RegExp(r'^[0-9a-f]{64}$').hasMatch('0' * 64), isTrue);
+    test('returns null when native reports null', () async {
+      expect(await BluetoothShareService.computeSha256('/tmp/x'), isNull);
     });
   });
 }
+

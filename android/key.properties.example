@@ -1,0 +1,17 @@
+# Release signing configuration — TEMPLATE
+#
+# Copy to `android/key.properties` and fill in real values.
+# `android/key.properties` is git-ignored and must NEVER be committed.
+#
+# Generate a keystore (PKCS12) with:
+#   keytool -genkeypair -v -keystore ~/keystores/swordfm-release.p12 \
+#     -storetype PKCS12 -keyalg RSA -keysize 2048 -validity 10950 \
+#     -alias swordfm
+#
+# Keep an offline backup of the keystore: if it is lost you can never publish
+# an update to the same Play listing again.
+
+storeFile=/absolute/path/to/swordfm-release.p12
+storePassword=CHANGE_ME
+keyAlias=swordfm
+keyPassword=CHANGE_ME

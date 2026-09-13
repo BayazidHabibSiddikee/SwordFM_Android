@@ -71,16 +71,15 @@ class _ConvertDialogState extends State<ConvertDialog> {
     });
     try {
       final String? outPath;
-      final src = widget.filePath.toLowerCase();
-      final isDocx = src.endsWith('.docx');
-      final isPdf = src.endsWith('.pdf');
-
       if (_isImage && format != 'TXT') {
         outPath = await _imageToPdf();
       } else if (_isImage && format == 'TXT') {
         outPath = await _imageToText();
       } else {
-        outPath = await _textConvert(format, isDocx: isDocx, isPdf: isPdf);
+        // Shared routing with batch conversion (DocConverter.convertOne) —
+        // DOCX/PDF round-trip through markdown identically in both dialogs.
+        final label = format == 'OCR → TXT' ? 'TXT' : format;
+        outPath = await DocConverter.convertOne(widget.filePath, label);
       }
 
       if (outPath == null) {
@@ -92,41 +91,6 @@ class _ConvertDialogState extends State<ConvertDialog> {
       setState(() => _error = 'Conversion failed: $e');
     } finally {
       if (mounted) setState(() => _converting = false);
-    }
-  }
-
-  Future<String?> _textConvert(
-      String format, {required bool isDocx, required bool isPdf}) async {
-    switch (format) {
-      case 'PDF':
-        if (isDocx) {
-          final md = await DocConverter.toMarkdown(widget.filePath);
-          return md != null ? await DocConverter.toPdf(md) : null;
-        }
-        return await DocConverter.toPdf(widget.filePath);
-      case 'DOCX':
-        if (isPdf) {
-          final md = await DocConverter.toMarkdown(widget.filePath);
-          return md != null ? await DocConverter.toDocx(md) : null;
-        } else if (isDocx) {
-          final md = await DocConverter.toMarkdown(widget.filePath);
-          return md != null ? await DocConverter.toDocx(md) : null;
-        }
-        return await DocConverter.toDocx(widget.filePath);
-      case 'HTML':
-        if (isPdf || isDocx) {
-          final md = await DocConverter.toMarkdown(widget.filePath);
-          return md != null ? await DocConverter.markdownFileToHtml(md) : null;
-        }
-        return await DocConverter.markdownFileToHtml(widget.filePath);
-      case 'Markdown':
-      case 'MD':
-        return await DocConverter.toMarkdown(widget.filePath);
-      default:
-        if (isDocx) {
-          return await DocConverter.fromDocx(widget.filePath);
-        }
-        return await DocConverter.toText(widget.filePath);
     }
   }
 

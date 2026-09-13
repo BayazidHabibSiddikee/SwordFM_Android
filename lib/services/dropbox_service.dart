@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -28,6 +27,16 @@ class DropboxService {
     baseUrl: 'https://api.dropboxapi.com/2',
     contentType: 'application/json',
   ));
+
+  /// Overrides the HTTP transport used by [_dio].
+  ///
+  /// Exists so tests can serve canned Dropbox API responses instead of making
+  /// real network calls (the field itself is private and final, so the adapter
+  /// cannot be swapped from outside).
+  @visibleForTesting
+  set httpClientAdapter(HttpClientAdapter adapter) {
+    _dio.httpClientAdapter = adapter;
+  }
 
   String? _appKey;
   String? _appSecret;

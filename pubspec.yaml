@@ -65,6 +65,8 @@ dependencies:
   video_thumbnail: ^0.5.6
   # OCR (Tesseract 4 via Tesseract4Android / SwiftyTesseract)
   flutter_tesseract_ocr: ^0.4.31
+  audio_metadata_reader: ^1.8.0
+  basic_utils: ^5.8.2
 
 dev_dependencies:
   flutter_test:
@@ -73,6 +75,14 @@ dev_dependencies:
   # Round-trip converter tests under test/round_trip/ use package:test
   # matchers (contains, isNotNull, …) directly.
   test: any
+  # Used by entitlement_service_test.dart to install a fake
+  # FirebaseFirestorePlatform. Both are transitive deps of firebase_core /
+  # cloud_firestore, but must be declared to be imported directly.
+  cloud_firestore_platform_interface: ^8.0.6
+  firebase_core_platform_interface: ^8.1.0
+  network_info_plus_platform_interface: ^3.1.0
+  plugin_platform_interface: ^2.1.8
+
 
 flutter:
   generate: true

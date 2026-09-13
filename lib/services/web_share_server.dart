@@ -4,11 +4,13 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:network_info_plus/network_info_plus.dart';
+import 'package:network_info_plus_platform_interface/network_info_plus_platform_interface.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:mime/mime.dart';
 import '../utils/file_utils.dart';
 import '../theme/theme.dart';
+import 'tls_cert_service.dart';
 
 /// Maximum number of entries kept in the client-access log.
 const int _kMaxAccessLog = 200;
@@ -256,15 +258,26 @@ class WebShareServer {
   /// Linux SwordFM share); tests inject a free port.
   final int port;
 
-  WebShareServer({this.port = 8080});
+  /// Resolves the LAN address the server advertises. Defaults to
+  /// [NetworkInfo.getWifiIP] (the `network_info_plus` platform channel).
+  ///
+  /// Injected in tests so the HTTP layer can be exercised on a loopback port
+  /// without a WiFi platform implementation — the mDNS/QR advertisement path
+  /// is irrelevant to request handling.
+  final Future<String?> Function()? wifiIpResolver;
+
+  WebShareServer({this.port = 8080, this.wifiIpResolver});
 
   HttpServer? _server;
-  final NetworkInfo _networkInfo = NetworkInfo();
   final _MdnsBeacon _beacon = _MdnsBeacon();
 
   String? _currentIp;
   bool _isRunning = false;
   String _pin = "";
+
+  /// True when the bound server speaks HTTPS (self-signed). Advertised in
+  /// the QR/URL so clients use the right scheme.
+  bool _useTls = false;
 
   /// Path to the root directory being shared (default: ~/Downloads/SwordFM).
   late String _shareRoot;
@@ -292,6 +305,15 @@ class WebShareServer {
   String get pin => _pin;
   String get shareRoot => _shareRoot;
 
+  /// `https` when TLS is active, else `http`. The QR code and LAN-screen URL
+  /// both build from this so clients never try the wrong scheme.
+  String get scheme => _useTls ? 'https' : 'http';
+  bool get useTls => _useTls;
+
+  /// Full share URL advertised to clients (scheme + IP + port).
+  String? get shareUrl =>
+      _currentIp == null ? null : '$scheme://$_currentIp:$port';
+
   /// Generate a random 6-digit PIN for client authorization (CSPRNG).
   String _generatePin() {
     final r = Random.secure();
@@ -310,9 +332,10 @@ class WebShareServer {
     currentSubDir = '';
   }
 
-  Future<String?> start({String? shareRootOverride}) async {
+  Future<String?> start({String? shareRootOverride, bool useTls = false}) async {
     try {
-      _currentIp = await _networkInfo.getWifiIP();
+      _currentIp = await (wifiIpResolver ??
+          (() => NetworkInfoPlatform.instance.getWifiIP()))();
       // Fallback: scan network interfaces if WiFi IP is null (e.g. hotspot, USB)
       if (_currentIp == null) {
         _currentIp = await _getLocalIp();
@@ -323,10 +346,37 @@ class WebShareServer {
       _pin = _generatePin();
       _sessions.clear();
       _accessLog.clear();
+      _useTls = false;
 
-      _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+      if (useTls) {
+        // Self-signed identity (TlsCertService): browsers warn on first
+        // connect — expected, documented on the LAN screen. Any failure
+        // (keygen, file IO) falls back to plain HTTP rather than refusing
+        // to start the share.
+        try {
+          final context = await TlsCertService.contextForIp(_currentIp!);
+          _server = await HttpServer.bindSecure(
+            InternetAddress.anyIPv4,
+            port,
+            context,
+          );
+          _useTls = true;
+        } catch (e) {
+          debugPrint('WebShareServer: TLS unavailable, plain HTTP: $e');
+          _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+        }
+      } else {
+        _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
+      }
       _isRunning = true;
-      unawaited(_beacon.startWithInfo(_pin, _currentIp!, port));
+      // Capture the IP in a local: _currentIp is nullable and could be
+      // reassigned while the beacon starts — the old `_currentIp!`
+      // force-unwrap crashed deterministically whenever IP resolution
+      // returned null paths raced with startup.
+      final beaconIp = _currentIp;
+      if (beaconIp != null) {
+        unawaited(_beacon.startWithInfo(_pin, beaconIp, port));
+      }
 
       _server!.listen((HttpRequest request) async {
         try {
@@ -428,18 +478,32 @@ class WebShareServer {
   }
 
   /// Sanitize a user-supplied filename/path segment:
+  ///   • percent-decode first, so `%00` cannot smuggle a NUL past the guard
   ///   • take only the basename (strip directories)
   ///   • reject .., null bytes, empty result
   ///   • cap at [_kMaxSafeNameLen] chars
   static String sanitizeName(String input) {
     if (input.isEmpty) return '';
+    // Decode percent-escapes BEFORE inspection. The router matches against
+    // `request.uri.path`, which is the *raw* (still-escaped) path, so a
+    // request for `a%00b` would otherwise be inspected as the literal four
+    // characters `a%00b` and the NUL check below would never fire.
+    String decoded;
+    try {
+      decoded = Uri.decodeComponent(input);
+    } catch (_) {
+      return ''; // Malformed escape sequence — reject outright.
+    }
+    // A decoded NUL byte would truncate the path inside any C-level syscall.
+    if (decoded.contains(String.fromCharCode(0))) return '';
     // Take last path component (handles / \ both directions).
-    var name = input.replaceAll(r'\', '/').split('/').last;
+    var name = decoded.replaceAll(r'\', '/').split('/').last;
     // Reject dangerous substrings.
-    if (name.contains('..') || name.contains(String.fromCharCode(0))) return '';
+    if (name.contains('..')) return '';
     if (name.isEmpty) return '';
-    if (name.length > _kMaxSafeNameLen)
+    if (name.length > _kMaxSafeNameLen) {
       name = name.substring(0, _kMaxSafeNameLen);
+    }
     return name;
   }
 
@@ -964,7 +1028,7 @@ class WebShareServer {
     if (_currentIp == null) {
       return const Center(child: Text('No IP address available'));
     }
-    final url = 'http://$_currentIp:$port';
+    final url = shareUrl ?? 'http://$_currentIp:$port';
     // Just the QR — the URL and PIN are already shown in the status card
     // above the code, so duplicating them here only crowds the layout.
     return QrImageView(

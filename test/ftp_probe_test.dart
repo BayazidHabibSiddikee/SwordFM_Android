@@ -19,6 +19,9 @@ void main() {
     File(p.join(root.path, 'hello.txt')).writeAsStringSync('hello world\n');
 
     final srv = FtpServerService(port: 0);
+    // A PIN is mandatory: start() refuses to bind without one, because an
+    // unauthenticated FTP server exposes LIST/RETR/STOR/DELE to the whole LAN.
+    srv.sharePin = 'probe-pin';
     await srv.start(shareRootOverride: root.path);
     final socket = await Socket.connect('127.0.0.1', srv.boundPort);
     final buf = StringBuffer();
@@ -40,7 +43,7 @@ void main() {
     buf.clear();
 
     expect(await cmd('USER x'), contains('331'));
-    expect(await cmd('PASS x'), contains('230'));
+    expect(await cmd('PASS probe-pin'), contains('230'));
     expect(await cmd('PWD'), contains('257'));
     expect(await cmd('CWD /'), contains('250'), reason: 'CWD / must resolve to the share root');
     expect(await cmd('PWD'), contains('257 "/"'));

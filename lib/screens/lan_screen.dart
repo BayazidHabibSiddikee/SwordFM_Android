@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/web_share_server.dart';
+import '../services/tls_cert_service.dart';
 import '../services/ftp_server_service.dart';
 import '../services/bluetooth_share_service.dart';
 import '../services/bt_permissions.dart';
@@ -34,6 +35,12 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
   late final FtpServerService _ftpServer = FtpServerService();
   String? _statusMessage;
   String? _ftpStatus;
+
+  /// Opt-in HTTPS for the share server (self-signed cert). Off by default:
+  /// plain HTTP keeps QR-scan-to-browse frictionless, and the PIN still
+  /// gates every endpoint either way.
+  bool _wantTls = false;
+  String? _tlsFingerprint;
 
   // ── Bluetooth state ───────────────────────────────────────────────────
   final BluetoothShareService _btService = BluetoothShareService();
@@ -139,9 +146,16 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
 
   Future<void> _startServer() async {
     setState(() => _statusMessage = 'Starting server...');
-    final ip = await _server.start(shareRootOverride: widget.initialShareRoot);
+    final ip = await _server.start(
+      shareRootOverride: widget.initialShareRoot,
+      useTls: _wantTls,
+    );
     if (ip != null) {
+      final fingerprint =
+          _server.useTls ? await TlsCertService.fingerprint() : null;
+      if (!mounted) return;
       setState(() {
+        _tlsFingerprint = fingerprint;
         _statusMessage =
             'Sharing: ${widget.initialShareRoot ?? _server.shareRoot}';
       });
@@ -442,7 +456,8 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
                               ),
                               if (_server.currentIp != null)
                                 Text(
-                                  'http://${_server.currentIp}:${_server.port}',
+                                  _server.shareUrl ??
+                                      'http://${_server.currentIp}:${_server.port}',
                                   style: TextStyle(
                                     color: OneDarkColors.cyan,
                                     fontSize: 13,
@@ -456,6 +471,15 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
                                     fontSize: 11,
                                   ),
                                 ),
+                              if (_server.isRunning && _server.useTls)
+                                Text(
+                                  'HTTPS (self-signed) — accept the browser warning once.'
+                                  '${_tlsFingerprint != null ? '\nSHA-256: $_tlsFingerprint' : ''}',
+                                  style: TextStyle(
+                                    color: OneDarkColors.green,
+                                    fontSize: 11,
+                                  ),
+                                ),
                             ],
                           ),
                         ),
@@ -465,7 +489,8 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
                     if (_server.isRunning && _server.currentIp != null)
                       Center(
                         child: QrImageView(
-                          data: 'http://${_server.currentIp}:${_server.port}',
+                          data: _server.shareUrl ??
+                              'http://${_server.currentIp}:${_server.port}',
                           version: QrVersions.auto,
                           size: 180.0,
                           gapless: false,
@@ -474,6 +499,30 @@ class _LANSharingScreenState extends State<LANSharingScreen> {
                             color: OneDarkColors.cyan,
                           ),
                         ),
+                      ),
+                    // TLS toggle — only before start (restart to change).
+                    if (!_server.isRunning)
+                      SwitchListTile(
+                        value: _wantTls,
+                        onChanged: (v) => setState(() => _wantTls = v),
+                        title: Text(
+                          'Encrypt with HTTPS',
+                          style: TextStyle(
+                            color: OneDarkColors.fg,
+                            fontSize: 13,
+                          ),
+                        ),
+                        subtitle: Text(
+                          'Self-signed certificate — browsers warn once, '
+                          'then traffic is encrypted. PIN still required.',
+                          style: TextStyle(
+                            color: OneDarkColors.fgDim,
+                            fontSize: 11,
+                          ),
+                        ),
+                        activeColor: OneDarkColors.green,
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
                       ),
                     const SizedBox(height: 12),
                     Wrap(

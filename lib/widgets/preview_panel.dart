@@ -28,7 +28,9 @@ import '../utils/media_kit_guard.dart';
 import '../screens/cbz_reader_screen.dart';
 import '../screens/epub_reader_screen.dart';
 import '../screens/music_player_screen.dart';
+import '../screens/pptx_viewer_screen.dart';
 import '../utils/file_utils.dart';
+import 'archive_password_prompt.dart';
 import 'package:path/path.dart' as p;
 
 /// A collapsible panel that previews the selected file.
@@ -178,6 +180,14 @@ class _PreviewPanelState extends State<PreviewPanel> {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => ArchiveBrowserScreen(archivePath: item.path),
+        ),
+      );
+      return;
+    }
+    if (target.type == FileOpenTargetType.pptxOutline) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PptxViewerScreen(filePath: item.path),
         ),
       );
       return;
@@ -519,7 +529,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
                 Icon(Icons.slideshow, size: 18, color: cs.primary),
                 const SizedBox(width: 6),
                 Text(
-                  'Slides — tap to open',
+                  'Slides outline — tap for fullscreen',
                   style: TextStyle(
                       color: cs.onSurfaceVariant, fontSize: 11),
                 ),
@@ -792,7 +802,11 @@ class _PreviewPanelState extends State<PreviewPanel> {
   bool _extracting = false;
 
   /// Extracts [item] into a folder named after the archive, next to it.
-  Future<void> _extractArchive(FileItem item) async {
+  ///
+  /// [password] is the retry path: when the archive is encrypted the typed
+  /// [ArchivePasswordRequiredException] triggers a prompt and this method
+  /// re-invokes itself once with the entered password.
+  Future<void> _extractArchive(FileItem item, {String? password}) async {
     if (_extracting) return;
     setState(() => _extracting = true);
     final destDir = p.join(
@@ -818,7 +832,7 @@ class _PreviewPanelState extends State<PreviewPanel> {
       ),
     );
     try {
-      await ArchiveService.extract(item.path, destDir);
+      await ArchiveService.extract(item.path, destDir, password: password);
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -829,8 +843,20 @@ class _PreviewPanelState extends State<PreviewPanel> {
         );
       }
     } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      if (e is ArchivePasswordRequiredException) {
+        setState(() => _extracting = false);
+        final entered = await promptForArchivePassword(
+          context,
+          wasRejected: e.passwordWasSupplied,
+        );
+        if (entered != null && mounted) {
+          await _extractArchive(item, password: entered);
+        }
+        return;
+      }
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Extract failed: $e'),

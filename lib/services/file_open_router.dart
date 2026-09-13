@@ -196,7 +196,8 @@ class FileOpenRouter {
         path,
         source,
         FileOpenTargetType.pptxOutline,
-        reason: 'PPTX is supported as an outline preview; full slide rendering is unavailable.',
+        reason:
+            'PPTX opens as a text outline in-app; full slide rendering (shapes, images, themes) is unavailable.',
       );
     }
     if (_supportedArchiveExtensions.contains(ext) ||

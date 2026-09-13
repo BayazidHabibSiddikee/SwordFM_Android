@@ -53,6 +53,105 @@ class _DigestCapture implements Sink<Digest> {
   void close() {}
 }
 
+/// A ZIP archive that is encrypted and needs a password we were not given,
+/// or were given incorrectly.
+///
+/// Callers should prompt the user for a password on this specific error rather
+/// than showing a generic failure — it is the only signal that the archive is
+/// readable but locked.
+class ArchivePasswordRequiredException implements Exception {
+  /// Human-readable guidance for the UI.
+  final String message;
+
+  /// True when a password was supplied but rejected, false when none was given.
+  final bool passwordWasSupplied;
+
+  ArchivePasswordRequiredException({
+    required this.message,
+    required this.passwordWasSupplied,
+  });
+
+  @override
+  String toString() => message;
+}
+
+/// Decodes a ZIP, applying [password] when the archive is encrypted.
+///
+/// The `archive` package is deliberately lazy: `decodeBytes` succeeds even for
+/// an encrypted archive, and the password failure surfaces later when entry
+/// bytes are read. So this decodes, then probes the first encrypted entry's
+/// content to convert that late, opaque failure into a precise
+/// [ArchivePasswordRequiredException] at the point callers can act on it.
+List<ArchiveFile> _decodeZip(List<int> data, String? password) {
+  final hasPassword = password != null && password.isNotEmpty;
+  final Archive archive;
+  try {
+    archive = ZipDecoder().decodeBytes(
+      data,
+      password: hasPassword ? password : null,
+    );
+  } on ArchiveException catch (e) {
+    if (hasPassword || _looksEncrypted(e)) {
+      throw ArchivePasswordRequiredException(
+        message: hasPassword
+            ? 'Incorrect password for this ZIP archive.'
+            : 'This ZIP archive is password protected.',
+        passwordWasSupplied: hasPassword,
+      );
+    }
+    rethrow;
+  }
+
+  // Verify the password works by attempting to decrypt the first file entry.
+  // `archive` does not expose encryption state on `ArchiveFile`, and a wrong or
+  // missing password only fails when bytes are actually read — so probe eagerly
+  // here and translate the failure into an actionable, typed error.
+  final firstFile = archive.files.where((f) => !f.isDirectory).firstOrNull;
+  if (firstFile != null) {
+    try {
+      firstFile.readBytes();
+    } catch (_) {
+      throw ArchivePasswordRequiredException(
+        message: hasPassword
+            ? 'Incorrect password for this ZIP archive.'
+            : 'This ZIP archive is password protected.',
+        passwordWasSupplied: hasPassword,
+      );
+    }
+  } else if (hasPassword) {
+    announceUnusedPassword();
+  }
+
+  return archive.files;
+}
+
+/// Set by [_decodeZip] when a password was supplied for an unencrypted archive,
+/// so the UI can inform the user their password was not needed.
+///
+/// Kept as a simple flag rather than a return-value change to avoid churning
+/// every call site in the extraction path.
+bool unusedPasswordSupplied = false;
+
+/// Resets [unusedPasswordSupplied] and returns its previous value.
+bool takeUnusedPasswordFlag() {
+  final v = unusedPasswordSupplied;
+  unusedPasswordSupplied = false;
+  return v;
+}
+
+void announceUnusedPassword() => unusedPasswordSupplied = true;
+
+/// Best-effort detection that an [ArchiveException] indicates encryption
+/// rather than corruption. The upstream message is not a stable API, so this
+/// errs toward offering a password prompt.
+bool _looksEncrypted(ArchiveException e) {
+  final m = e.message.toLowerCase();
+  return m.contains('password') ||
+      m.contains('encrypt') ||
+      m.contains('aes') ||
+      m.contains('decrypt');
+}
+
 /// Top-level worker for [ArchiveService.findDuplicates] — runs inside a
 /// background isolate so SHA-256 hashing doesn't block the UI thread.
 Future<Map<String, List<String>>> _findDuplicatesWorker(
@@ -234,8 +333,9 @@ class ArchiveService {
   ///   `invalid:`, or `io:`.
   static Future<List<String>> extract(
     String archivePath,
-    String destDir,
-  ) async {
+    String destDir, {
+    String? password,
+  }) async {
     final name = p.basename(archivePath).toLowerCase();
     final ext = p.extension(archivePath).toLowerCase();
 
@@ -281,7 +381,7 @@ class ArchiveService {
     String? singleFileName;
     switch (ext) {
       case '.zip':
-        files = ZipDecoder().decodeBytes(data).files;
+        files = _decodeZip(data, password);
         break;
       case '.tar':
         files = TarDecoder().decodeBytes(data).files;
@@ -492,9 +592,10 @@ class ArchiveService {
   /// Decodes the archive and returns its entries (name / size / isDirectory),
   /// without writing anything. Used by the archive-browser screen.
   static Future<List<ArchiveEntryInfo>> listArchiveContents(
-    String archivePath,
-  ) async {
-    final files = await _decodeArchive(archivePath);
+    String archivePath, {
+    String? password,
+  }) async {
+    final files = await _decodeArchive(archivePath, password: password);
     return files
         .where(
           (af) =>
@@ -516,27 +617,42 @@ class ArchiveService {
   static Future<String> extractEntry(
     String archivePath,
     String entryName,
-    String destDir,
-  ) async {
+    String destDir, {
+    String? password,
+  }) async {
     // Safety: reject path traversal / NUL / absolute paths so a crafted entry
-    // can't escape [destDir] (mirrors the guards in [extract]).
-    var name = entryName;
-    if (name.contains('..') || name.contains(String.fromCharCode(0))) {
-      throw Exception('io:unsafe archive entry name: $entryName');
+    // can't escape [destDir]. Mirrors the component-wise guards in [extract] —
+    // a substring check alone would accept names like "a/../b" once joined.
+    final rawName = entryName;
+    if (rawName.contains(String.fromCharCode(0))) {
+      throw Exception('io:unsafe archive entry name: $rawName');
     }
-    name = name.replaceAll('\\\\', '/');
+    var name = rawName.replaceAll('\\', '/');
     while (name.startsWith('/')) {
       name = name.substring(1);
     }
     if (name.isEmpty) {
-      throw Exception('io:empty archive entry name: $entryName');
+      throw Exception('io:empty archive entry name: $rawName');
     }
-    final files = await _decodeArchive(archivePath);
+    final parts = name.split('/');
+    if (parts.any((c) => c == '..' || c.isEmpty && parts.length > 1)) {
+      throw Exception('io:unsafe archive entry name: $rawName');
+    }
+    final files = await _decodeArchive(archivePath, password: password);
     final af = files.where((f) => f.name == name && !f.isDirectory).firstOrNull;
     if (af == null) {
-      throw Exception('io:no such archive entry: $entryName');
+      throw Exception('io:no such archive entry: $rawName');
     }
     final destPath = p.join(destDir, name);
+
+    // Canonical check: the resolved destination must stay inside [destDir].
+    final canonDest = p.canonicalize(destPath);
+    final canonBase = p.canonicalize(destDir);
+    if (!canonDest.startsWith('$canonBase${p.separator}') &&
+        canonDest != canonBase) {
+      throw Exception('io:unsafe archive entry name: $rawName');
+    }
+
     await Directory(p.dirname(destPath)).create(recursive: true);
     final outStream = File(destPath).openWrite();
     outStream.add(af.content as List<int>);
@@ -544,7 +660,10 @@ class ArchiveService {
     return destPath;
   }
 
-  static Future<List<ArchiveFile>> _decodeArchive(String archivePath) async {
+  static Future<List<ArchiveFile>> _decodeArchive(
+    String archivePath, {
+    String? password,
+  }) async {
     final name = p.basename(archivePath).toLowerCase();
     final ext = p.extension(archivePath).toLowerCase();
     final archiveFile = File(archivePath);
@@ -571,7 +690,7 @@ class ArchiveService {
     }
     switch (ext) {
       case '.zip':
-        return ZipDecoder().decodeBytes(data).files;
+        return _decodeZip(data, password);
       case '.tar':
         return TarDecoder().decodeBytes(data).files;
       case '.gz':
@@ -617,13 +736,20 @@ class ArchiveService {
   static Future<String> createZip({
     required String outputPath,
     required List<String> sources,
+    String? password,
   }) {
     return Isolate.run(() {
       final archive = Archive();
       for (final source in sources) {
         _addPathSync(source, archive, '');
       }
-      final bytes = ZipEncoder().encode(archive);
+      // A non-empty password produces an AES-256 encrypted ZIP. Note the
+      // `archive` package writes AES (AE-1) entries, the format WinZip/7-Zip
+      // and modern Android extractors accept; empty string is treated as "no
+      // password" so a blank UI field never produces a spuriously locked file.
+      final usePassword = password != null && password.isNotEmpty;
+      final bytes = ZipEncoder(password: usePassword ? password : null)
+          .encode(archive);
       File(outputPath).writeAsBytesSync(bytes);
       return outputPath;
     });

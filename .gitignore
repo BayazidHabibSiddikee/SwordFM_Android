@@ -59,3 +59,8 @@ firebase_local.properties
 default-*.jar
 help.txt
 logo/
+
+# Coverage output is generated per-run by `flutter test --coverage`.
+# Committing it produced a misleading 3-week-old 36.7% figure; CI uploads the
+# fresh artifact instead.
+coverage/

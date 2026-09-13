@@ -16,8 +16,9 @@ import '../utils/media_kit_guard.dart';
 /// Codecs: H.264/H.265/VP8/VP9/AV1, AC3, DTS, EAC3, TrueHD, MP3, AAC, FLAC
 /// Features: subtitles (.srt/.ass/embedded sidecars + embedded tracks),
 ///           speed control, audio-track selection, auto-next playlist,
-///           hardware-decode toggle (persisted, default OFF).
-/// Roadmap (not yet shipped): aspect-ratio switch, PiP.
+///           hardware-decode toggle (persisted, default OFF),
+///           aspect-fit switch (contain/cover/16:9),
+///           Picture-in-Picture (Android 8+, native).
 class VideoPlayerScreen extends StatefulWidget {
   final String filePath;
 
@@ -38,6 +39,9 @@ class VideoPlayerScreen extends StatefulWidget {
 
 class _VideoPlayerState extends State<VideoPlayerScreen>
     with WidgetsBindingObserver {
+  /// Native PiP bridge (MainActivity `com.swordfm/video` channel).
+  static const _videoChannel = MethodChannel('com.swordfm/video');
+
   Player? _player;
   VideoController? _controller;
 
@@ -48,6 +52,9 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
   bool _showSubtitles = true;
   bool _hwDecode =
       false; // persisted via shared_preferences key 'video_hw_decode'
+  BoxFit _fit =
+      BoxFit.contain; // persisted via shared_preferences key 'video_fit'
+  bool _pipAvailable = false;
   String? _error;
   PlaybackResumeStore? _resumeStore;
   PlaybackMediaIdentity? _currentIdentity;
@@ -67,11 +74,86 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
   }
 
   static const _kHwDecodeKey = 'video_hw_decode';
+  static const _kFitKey = 'video_fit';
 
   Future<void> _loadHwDecodePref() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
-      setState(() => _hwDecode = prefs.getBool(_kHwDecodeKey) ?? false);
+      setState(() {
+        _hwDecode = prefs.getBool(_kHwDecodeKey) ?? false;
+        _fit = _fitFromName(prefs.getString(_kFitKey));
+      });
+    }
+    await _checkPip();
+  }
+
+  static BoxFit _fitFromName(String? name) {
+    return switch (name) {
+      'cover' => BoxFit.cover,
+      'fill' => BoxFit.fill,
+      _ => BoxFit.contain,
+    };
+  }
+
+  static String _fitName(BoxFit fit) {
+    return switch (fit) {
+      BoxFit.cover => 'cover',
+      BoxFit.fill => 'fill',
+      _ => 'contain',
+    };
+  }
+
+  String get _fitLabel => switch (_fit) {
+        BoxFit.cover => 'Cover',
+        BoxFit.fill => '16:9 fill',
+        _ => 'Fit',
+      };
+
+  /// Cycles contain → cover → 16:9 fill → contain. Persisted.
+  Future<void> _cycleFit() async {
+    final next = switch (_fit) {
+      BoxFit.contain => BoxFit.cover,
+      BoxFit.cover => BoxFit.fill,
+      _ => BoxFit.contain,
+    };
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kFitKey, _fitName(next));
+    if (mounted) setState(() => _fit = next);
+  }
+
+  /// Queries the native PiP bridge once (desktop/tests → false, no crash).
+  Future<void> _checkPip() async {
+    try {
+      final ok = await _videoChannel.invokeMethod<bool>('pipAvailable');
+      if (mounted) setState(() => _pipAvailable = ok ?? false);
+    } catch (_) {
+      if (mounted) setState(() => _pipAvailable = false);
+    }
+  }
+
+  /// Enters Picture-in-Picture, keeping audio playing. Failures surface a
+  /// snackbar instead of silently doing nothing.
+  Future<void> _enterPip() async {
+    try {
+      final ok = await _videoChannel.invokeMethod<bool>('enterPip', {
+        'width': 16,
+        'height': 9,
+      });
+      if (ok != true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Picture-in-Picture is not available right now'),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Picture-in-Picture is not available right now'),
+          ),
+        );
+      }
     }
   }
 
@@ -414,6 +496,7 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
             if (_controller != null)
               Video(
                 controller: _controller!,
+                fit: _fit,
                 subtitleViewConfiguration: SubtitleViewConfiguration(
                   visible: _showSubtitles,
                 ),
@@ -503,31 +586,67 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
                         tooltip: 'Audio track',
                       ),
                       // Subtitles
-                      IconButton(
-                        icon: Icon(
-                          _showSubtitles
-                              ? Icons.subtitles
-                              : Icons.subtitles_off,
-                          color: Colors.white,
-                          size: 20,
+                      Semantics(
+                        button: true,
+                        label: _showSubtitles
+                            ? 'Hide subtitle tracks'
+                            : 'Show subtitle tracks',
+                        child: IconButton(
+                          icon: Icon(
+                            _showSubtitles
+                                ? Icons.subtitles
+                                : Icons.subtitles_off,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          onPressed: _showSubtitleTracks,
+                          tooltip: 'Subtitles',
                         ),
-                        onPressed: _showSubtitleTracks,
-                        tooltip: 'Subtitles',
                       ),
                       // Hardware decode toggle
-                      IconButton(
-                        icon: Icon(
-                          Icons.memory,
-                          color: _hwDecode
-                              ? OneDarkColors.cyan
-                              : Colors.white54,
-                          size: 20,
+                      Semantics(
+                        button: true,
+                        toggled: _hwDecode,
+                        label: _hwDecode
+                            ? 'Hardware decoding on. Double tap to disable.'
+                            : 'Hardware decoding off. Double tap to enable.',
+                        child: IconButton(
+                          icon: Icon(
+                            Icons.memory,
+                            color: _hwDecode
+                                ? OneDarkColors.cyan
+                                : Colors.white54,
+                            size: 20,
+                          ),
+                          onPressed: _toggleHwDecode,
+                          tooltip: _hwDecode
+                              ? 'HW decode ON (tap to disable)'
+                              : 'HW decode OFF (tap to enable)',
                         ),
-                        onPressed: _toggleHwDecode,
-                        tooltip: _hwDecode
-                            ? 'HW decode ON (tap to disable)'
-                            : 'HW decode OFF (tap to enable)',
                       ),
+                      // Aspect-fit switch: Fit → Cover → 16:9 fill.
+                      IconButton(
+                        icon: Text(
+                          _fitLabel,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                          ),
+                        ),
+                        onPressed: _cycleFit,
+                        tooltip: 'Aspect ratio (${_fitLabel})',
+                      ),
+                      // Picture-in-Picture (Android 8+; hidden elsewhere).
+                      if (_pipAvailable)
+                        IconButton(
+                          icon: const Icon(
+                            Icons.picture_in_picture_alt,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          onPressed: _enterPip,
+                          tooltip: 'Picture-in-Picture',
+                        ),
                     ],
                   ),
                 ),
