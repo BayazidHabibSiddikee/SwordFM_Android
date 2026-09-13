@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:audio_metadata_reader/audio_metadata_reader.dart'
     show readMetadata;
@@ -42,6 +43,42 @@ class TrackTags {
     final t = v?.trim();
     return (t == null || t.isEmpty) ? null : t;
   }
+
+  /// Synchronous tag read for use inside [Isolate.run]. Never throws.
+  static TrackTags readSync(String path) {
+    try {
+      final meta = readMetadata(File(path));
+      return TrackTags(
+        title: _clean(meta.title),
+        artist: _clean(meta.artist ?? meta.albumArtist),
+        album: _clean(meta.album),
+      );
+    } catch (_) {
+      return const TrackTags();
+    }
+  }
+}
+
+/// Top-level batch tag reader for [Isolate.run].
+///
+/// Returns plain maps (NOT TrackTags): custom class instances do not cross
+/// the isolate boundary reliably, so each map holds title/artist/album
+/// strings (or nothing) and the caller re-wraps them into TrackTags.
+/// Must stay a top-level function so it can be passed to [Isolate.run].
+/// The [List<String>] argument is sendable, so capturing the local batch
+/// list in the Isolate.run closure is allowed (verified: no MethodChannel
+/// or plugin use inside readMetadata — pure dart:io parsing).
+Future<List<Map<String, String?>>> _readAllTags(List<String> paths) async {
+  final out = <Map<String, String?>>[];
+  for (final p in paths) {
+    try {
+      final t = TrackTags.readSync(p);
+      out.add({'title': t.title, 'artist': t.artist, 'album': t.album});
+    } catch (_) {
+      out.add(const <String, String?>{});
+    }
+  }
+  return out;
 }
 
 /// The single instance of the background audio handler, set once in main().
@@ -129,10 +166,13 @@ class SwiftAudioHandler extends BaseAudioHandler
 
     // Track changes → current media item and persisted position.
     _currentIndexSubscription = _player.currentIndexStream.listen((index) {
+      if (_disposed) return;
       if (_player.sequence != null &&
           index != null &&
           index >= 0 &&
           index < _player.sequence!.length) {
+        // Fill tags lazily for tracks beyond the background batch.
+        unawaited(_ensureTagsFor(index));
         final source = _player.sequence![index];
         final tag = (source as dynamic).tag as Map<String, dynamic>?;
         final tags = index >= 0 && index < _queueTags.length
@@ -198,7 +238,7 @@ class SwiftAudioHandler extends BaseAudioHandler
       ..addAll(paths);
     _queueIdentities
       ..clear()
-      ..addAll(await Future.wait(paths.map(_identityFor)));
+      ..addAll(paths.map(_identityForSync));
     _queueTags
       ..clear()
       ..addAll(List.filled(paths.length, const TrackTags()));
@@ -223,23 +263,58 @@ class SwiftAudioHandler extends BaseAudioHandler
 
   int _queueGeneration = 0;
 
-  /// Reads all queue tags off-isolate, then refreshes the media item.
+  /// Max tracks tag-fetched in one background batch. Huge folders
+  /// (thousands of songs) must not be stat'ed + parsed at once in an
+  /// isolate: cap the batch and lazily fill the rest on track change.
+  static const int _maxTagBatch = 200;
+
+  /// Reads queue tags off-isolate, then refreshes the media item.
   /// A newer loadQueue supersedes this run via the generation check.
   Future<void> _loadTagsInBackground(
     List<String> paths,
     int generation,
   ) async {
     try {
-      final tags = await Isolate.run(() => _readAllTags(paths));
+      final batch = paths.length > _maxTagBatch
+          ? paths.sublist(0, _maxTagBatch)
+          : paths;
+      final maps = await Isolate.run(() => _readAllTags(batch));
       if (_disposed || generation != _queueGeneration) return;
-      for (var i = 0; i < tags.length && i < _queueTags.length; i++) {
-        _queueTags[i] = tags[i];
+      for (var i = 0; i < maps.length && i < _queueTags.length; i++) {
+        final m = maps[i];
+        _queueTags[i] = TrackTags(
+          title: _nonEmpty(m['title']),
+          artist: _nonEmpty(m['artist']),
+          album: _nonEmpty(m['album']),
+        );
       }
       final index = _player.currentIndex;
       if (index != null) _emitMediaItem(index);
     } catch (e) {
       debugPrint('SwiftAudioHandler: tag preload failed: $e');
     }
+  }
+
+  static String? _nonEmpty(String? v) {
+    final t = v?.trim();
+    return (t == null || t.isEmpty) ? null : t;
+  }
+
+  /// Lazily fills tags for [index] when the user skips beyond the initial
+  /// background batch (or when the batch had not finished yet). Never
+  /// blocks playback: failures keep the filename fallback.
+  Future<void> _ensureTagsFor(int index) async {
+    if (index < 0 || index >= _queueTags.length || index >= _queuePaths.length) {
+      return;
+    }
+    final cur = _queueTags[index];
+    if (cur.title != null || cur.artist != null || cur.album != null) return;
+    try {
+      final t = await TrackTags.read(_queuePaths[index]);
+      if (_disposed) return;
+      if (index < _queueTags.length) _queueTags[index] = t;
+      if (_player.currentIndex == index) _emitMediaItem(index);
+    } catch (_) {}
   }
 
   /// Publishes the MediaItem (notification + UI) for queue position [index].
@@ -262,9 +337,11 @@ class SwiftAudioHandler extends BaseAudioHandler
     );
   }
 
-  Future<PlaybackMediaIdentity?> _identityFor(String path) async {
+  /// Synchronous stat-based identity — cheap and non-blocking, so queue
+  /// start never awaits filesystem I/O for every track.
+  PlaybackMediaIdentity? _identityForSync(String path) {
     try {
-      final stat = await File(path).stat();
+      final stat = File(path).statSync();
       return PlaybackMediaIdentity.fromMilliseconds(
         path: path,
         fileSize: stat.size,

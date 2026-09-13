@@ -218,7 +218,7 @@ class DocConverter {
         final docXmlBytes = docXml.readBytes();
         if (docXmlBytes == null) return '';
         final xml = utf8.decode(docXmlBytes, allowMalformed: true);
-        return xml
+        return _stripDocxHiddenText(xml)
             .replaceAll('</w:p>', '\n')
             .replaceAll('</w:tr>', '\n')
             .replaceAll('<w:tab/>', '\t')
@@ -557,6 +557,36 @@ class DocConverter {
 
   /// Decodes a PDF hex string (`<414243>` → `ABC`). Digits are pairs of hex
   /// bytes; whitespace is ignored.
+  static final RegExp _bareNumber = RegExp(r'^\d{1,4}$');
+  static final RegExp _pageN = RegExp(r'^page\s+\d{1,4}$', caseSensitive: false);
+  static final RegExp _pageNofM = RegExp(r'^(page\s+)?\d{1,4}\s*(of|/)\s*\d{1,4}$', caseSensitive: false);
+  static final RegExp _dashFolio = RegExp(r'^-\s*\d{1,4}\s*-$');
+  static final RegExp _romanFolio = RegExp(r'^[ivxlcdm]{1,6}$', caseSensitive: false);
+
+  /// Shared folio/noise predicate (also used by tests via [isPdfPageNoise]).
+  static bool isPdfPageNoise(String line) {
+    final s = line.trim();
+    if (s.isEmpty) return true;
+    // A 4-digit year standing alone (2024) is content, not a folio.
+    if (RegExp(r'^(19|20)\d{2}$').hasMatch(s)) return false;
+    if (_bareNumber.hasMatch(s)) return true;
+    if (_pageN.hasMatch(s)) return true;
+    if (_pageNofM.hasMatch(s)) return true;
+    if (_dashFolio.hasMatch(s)) return true;
+    if (s.length <= 4 && _romanFolio.hasMatch(s)) return true;
+    return false;
+  }
+
+  /// Normalises ligature mojibake from embedded subset fonts.
+  static String fixLigatures(String s) => s
+      .replaceAll('ﬀ', 'ff')
+      .replaceAll('ﬁ', 'fi')
+      .replaceAll('ﬂ', 'fl')
+      .replaceAll('ﬃ', 'ffi')
+      .replaceAll('ﬄ', 'ffl')
+      .replaceAll('ﬅ', 'st')
+      .replaceAll('ﬆ', 'st');
+
   static String _decodePdfHex(String hex) {
     final buf = StringBuffer();
     final cleaned = hex.replaceAll(RegExp(r'\s+'), '');
@@ -639,8 +669,13 @@ class DocConverter {
       final docXmlBytes = docXml.readBytes();
       if (docXmlBytes == null) return null;
       final xml = utf8.decode(docXmlBytes);
-      // Strip tags; break paragraphs/rows onto separate lines.
-      final text = xml
+      // Strip Word field-code/deleted/hidden text BEFORE the generic tag
+      // strip: <w:instrText>PAGE...</w:instrText> instruction source,
+      // <w:delText> tracked deletions, <w:del>/<w:moveFrom> blocks, and
+      // <w:fldChar> markers carry no visible text. Without this, the
+      // converter emits stale cached page numbers ("Page 1", "3", ...) the
+      // user never typed - the DOCX->PDF/TXT "extra page number" bug.
+      final text = _stripDocxHiddenText(xml)
           .replaceAll(RegExp(r'</w:p>'), '\n')
           .replaceAll(RegExp(r'</w:tr>'), '\n')
           .replaceAll(RegExp(r'<[^>]+>'), '')
@@ -827,7 +862,12 @@ class DocConverter {
       final raw = latin1.decode(bytes, allowInvalid: true);
 
       final runs = <_PdfRun>[];
+      var truncated = false;
       for (final part in raw.split('endstream')) {
+        // Large PDFs (the 'failed conversion' reports) blow the single-isolate
+        // render that follows when every run is kept. Cap runs; the notice
+        // below tells the reader the file was truncated instead of failing.
+        if (runs.length > 60000) { truncated = true; break; }
         final s = part.indexOf('stream');
         if (s < 0) continue;
         var data = part.substring(s + 'stream'.length);
@@ -940,6 +980,20 @@ class DocConverter {
         }
         mergedLines.add(_PdfLine(y: ln.y, runs: pieces));
       }
+      // Two-column graft fix: a line whose runs are separated by a gap wider
+      // than ~3x the modal font size is two side-by-side columns. Mark the
+      // boundary so the paragraph join below keeps them as separate clauses
+      // instead of fusing '...left right...' into one garbled DOCX line.
+      for (final ln in mergedLines) {
+        for (var k = 1; k < ln.runs.length; k++) {
+          final prev = ln.runs[k - 1];
+          final cur = ln.runs[k];
+          final prevEnd = prev.x + prev.text.length * prev.fontSize * 0.5;
+          if (cur.x - prevEnd > modal * 3.0 && !cur.text.startsWith(' | ')) {
+            ln.runs[k] = _PdfRun(cur.x, cur.y, cur.fontSize, ' | ${cur.text}');
+          }
+        }
+      }
 
       // Group lines into paragraphs by Y-gap (>= 1.5× modal font size).
       final paragraphs = <List<_PdfRun>>[];
@@ -963,11 +1017,17 @@ class DocConverter {
         final maxSize = para
             .map((r) => r.fontSize)
             .reduce((a, b) => a > b ? a : b);
-        final text = para.map((r) => r.text).join().trim();
+        var text = para.map((r) => r.text).join().trim();
         if (text.isEmpty) {
           md.writeln();
           continue;
         }
+        // Running header/footer noise pdfium emits as body lines: bare page
+        // numbers, 'Page X' / 'Page X of Y', '- N -' folios, short roman
+        // numerals. Dropping them here stops page numbers grafting into
+        // paragraphs of the converted DOCX.
+        if (isPdfPageNoise(text)) continue;
+        text = fixLigatures(text);
         if (maxSize >= headingThreshold) {
           final level = maxSize >= headingThreshold * 1.4
               ? 1
@@ -987,6 +1047,10 @@ class DocConverter {
           md.writeln();
         }
       }
+      if (truncated) {
+        md.writeln();
+        md.writeln('> Note: this is a large PDF - only the first part was converted. Convert a page range for the rest.');
+      }
       return md.toString().trim();
     } catch (e) {
       debugPrint('_extractPdfMarkdownSync failed: $e');
@@ -995,6 +1059,43 @@ class DocConverter {
   }
 
   /// else passes through unchanged.
+  /// Removes Word hidden text from raw `word/document.xml` so converters
+  /// never emit what the user never typed.
+  ///
+  /// Drops, in order: (1) `w:instrText` field-code source
+  /// (`PAGE`/`NUMPAGES`/`TOC` formulas), (2) `w:delText` tracked
+  /// deletions, (3) whole `w:del` and `w:moveFrom`
+  /// blocks, (4) `w:fldChar` markers, and (5) any surviving complex-field
+  /// run sequence `w:r...begin...separate...cached-number...end.../w:r`
+  /// whose cached result is a stale page number. Plain `w:t` body text is
+  /// untouched.
+  /// Test-only entry point for the hidden-text strip.
+  static String stripDocxHiddenTextForTest(String xml) =>
+      _stripDocxHiddenText(xml);
+
+  /// Test-only access to the OOXML content-type stubs used when building
+  /// synthetic .docx fixtures in tests.
+  static _TestBlobs get testContentTypes =>
+      _TestBlobs(_kDocxContentTypes.codeUnits);
+  static _TestBlobs get testRels => _TestBlobs(_kDocxRels.codeUnits);
+
+  static String _stripDocxHiddenText(String xml) {
+    var s = xml;
+    s = s.replaceAll(RegExp(r'<w:instrText[\s\S]*?</w:instrText>'), '');
+    s = s.replaceAll(RegExp(r'<w:delText[\s\S]*?</w:delText>'), '');
+    s = s.replaceAll(RegExp(r'<w:del[\s\S]*?</w:del>'), '');
+    s = s.replaceAll(RegExp(r'<w:moveFrom[\s\S]*?</w:moveFrom>'), '');
+    s = s.replaceAll(RegExp(r'<w:fldChar[^>]*?/>'), '');
+    s = s.replaceAll(RegExp(r'<w:fldChar[^>]*?>[\s\S]*?</w:fldChar>'), '');
+    // Complex-field leftovers: a run run-sequence still containing the
+    // begin/separate/end markers textually (namespaced or not).
+    s = s.replaceAll(
+      RegExp(r'<w:r[^>]*>[\s\S]*?fldChar[\s\S]*?</w:r>'),
+      '',
+    );
+    return s;
+  }
+
   static String _preprocessForMarkdown(String sourcePath, String content) {
     final ext = p.extension(sourcePath).toLowerCase();
     if (ext == '.html' || ext == '.htm') {
@@ -1008,8 +1109,10 @@ class DocConverter {
       return content;
     }
     if (ext == '.docx') {
-      // DOCX content is raw XML from word/document.xml — extract text
-      return content
+      // DOCX content is raw XML from word/document.xml — extract text.
+      // Hidden field/deleted text is stripped first (see _stripDocxHiddenText)
+      // so stale PAGE caches never reach the PDF/DOCX builders.
+      return _stripDocxHiddenText(content)
           .replaceAll('</w:p>', '\n')
           .replaceAll('</w:tr>', '\n')
           .replaceAll('<w:tab/>', '\t')
@@ -1797,4 +1900,11 @@ class BatchConvertResult {
     required this.outputPath,
     required this.error,
   });
+}
+
+/// Minimal byte-list wrapper so tests can build synthetic .docx fixtures
+/// without importing the OOXML template constants.
+class _TestBlobs {
+  final List<int> bytes;
+  const _TestBlobs(this.bytes);
 }

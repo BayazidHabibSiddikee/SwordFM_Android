@@ -260,19 +260,115 @@ class DocxReader {
     // 2. Walk runs. Group consecutive runs that share formatting? For now we
     //    emit one DocxRun per <w:r>, since the renderer is happy to merge
     //    adjacent text via Text.rich.
+    //
+    //    Hidden-text filter (the "extra page numbers" bug): Word stores
+    //    PAGE / NUMPAGES / PAGEREF / TOC fields as a begin→instrText→separate
+    //    →cached-result→end run sequence. The cached result is a STALE page
+    //    number from the last Word save — it is not body text and must not
+    //    leak into conversions. We track the fldChar state machine across
+    //    the paragraph's runs: everything from begin up to and including
+    //    the matching end is skipped (instruction text AND stale result).
+    //    Runs inside <w:del> (tracked deletions) are also skipped, and
+    //    <w:instrText> children never contribute text.
     final runs = <DocxRun>[];
+    var fieldDepth = 0;
+    var fieldIsPageLike = false;
     for (final child in p.children.whereType<XmlElement>()) {
-      switch (child.name.local) {
-        case 'r':
-          final run = _parseRun(child, rels, imageDir);
-          if (run != null) runs.add(run);
-          break;
-        case 'hyperlink':
-          final linkRuns = _parseHyperlink(child, rels, imageDir);
-          runs.addAll(linkRuns);
-          break;
-        // bookmarks, proofErr, etc. — ignore
+      final local = child.name.local;
+      if (local == 'del' || local == 'moveFrom') {
+        // Tracked-change deletion (or moved-from) block — its <w:r> runs
+        // are not direct children of <w:p>, so skipping this subtree here
+        // drops the deleted text entirely.
+        continue;
       }
+      if (local == 'ins' || local == 'moveTo') {
+        // Tracked-change insertion — visible in Word's "final" view.
+        // Unwrap: parse the inner <w:r> runs as normal.
+        for (final r in child.findElements('w:r')) {
+          final run = _parseRun(r, rels, imageDir);
+          if (run != null) runs.add(run);
+        }
+        continue;
+      }
+      if (local != 'r' && local != 'hyperlink') {
+        // bookmarks, proofErr, etc. — ignore
+        continue;
+      }
+      if (local == 'hyperlink') {
+        if (fieldDepth > 0 && fieldIsPageLike) continue;
+        final linkRuns = _parseHyperlink(child, rels, imageDir);
+        runs.addAll(linkRuns);
+        continue;
+      }
+      // local == 'r': first update field state from its fldChar children,
+      // then decide whether its text is visible.
+      var sawBegin = false;
+      var sawEnd = false;
+      var sawSeparate = false;
+      for (final f in child.findElements('w:fldChar')) {
+        final t = (f.getAttribute('w:fldCharType') ?? '').toLowerCase();
+        if (t == 'begin') sawBegin = true;
+        if (t == 'separate') sawSeparate = true;
+        if (t == 'end') sawEnd = true;
+      }
+      final hasInstr = child.findElements('w:instrText').isNotEmpty;
+      if (sawBegin) {
+        fieldDepth++;
+        // Classify the field from its instruction text when present in the
+        // same run (common: <w:r><w:fldChar begin/><w:instrText>PAGE…).
+        final instr = child
+            .findElements('w:instrText')
+            .map((e) => e.innerText)
+            .join(' ')
+            .toUpperCase();
+        if (instr.contains('PAGE') ||
+            instr.contains('NUMPAGES') ||
+            instr.contains('PAGEREF') ||
+            instr.contains('SECTIONPAGES') ||
+            instr.contains(' TOC ') ||
+            instr.startsWith('TOC')) {
+          fieldIsPageLike = true;
+        }
+        // A begin run carries no visible text itself.
+        if (sawEnd && fieldDepth > 0) {
+          fieldDepth--;
+          if (fieldDepth == 0) fieldIsPageLike = false;
+        }
+        continue;
+      }
+      if (hasInstr) {
+        // Standalone instruction run (field split across runs): classify,
+        // never visible.
+        final instr = child
+            .findElements('w:instrText')
+            .map((e) => e.innerText)
+            .join(' ')
+            .toUpperCase();
+        if (instr.contains('PAGE') ||
+            instr.contains('NUMPAGES') ||
+            instr.contains('PAGEREF') ||
+            instr.contains('SECTIONPAGES') ||
+            instr.contains('TOC')) {
+          fieldIsPageLike = true;
+        }
+        if (sawEnd && fieldDepth > 0) {
+          fieldDepth--;
+          if (fieldDepth == 0) fieldIsPageLike = false;
+        }
+        continue;
+      }
+      if (sawSeparate) {
+        // Everything after separate up to end is the cached result.
+        // Fall through to the visibility check below (skipped when page-like).
+      }
+      if (sawEnd && fieldDepth > 0) {
+        fieldDepth--;
+        if (fieldDepth == 0) fieldIsPageLike = false;
+        continue;
+      }
+      if (fieldDepth > 0 && fieldIsPageLike) continue;
+      final run = _parseRun(child, rels, imageDir);
+      if (run != null) runs.add(run);
     }
 
     // 3. Decide the block kind. If the paragraph is empty AND there's a
@@ -330,6 +426,13 @@ class DocxReader {
     // Plain text run.
     final rPr = r.findElements('w:rPr').firstOrNull;
     final props = _parseRunProps(rPr);
+    // <w:delText> is tracked-change deleted text (never visible in Word
+    // with "final" view) — drop it. <w:instrText> is field-code source,
+    // also never visible. Only <w:t> contributes.
+    if (r.findElements('w:delText').isNotEmpty &&
+        r.findElements('w:t').isEmpty) {
+      return null;
+    }
     // Concatenate <w:t> children — Word often splits a phrase into multiple <w:t>
     // elements for no good reason.
     final buffer = StringBuffer();

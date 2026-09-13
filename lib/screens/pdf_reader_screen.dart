@@ -3,7 +3,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
+import 'dart:ui' as ui;
+import 'package:pdf/pdf.dart' hide PdfDocument, PdfPage;
+import 'package:pdf/widgets.dart' as pw;
 import 'package:pdfx/pdfx.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/doc_converter.dart';
@@ -369,6 +374,138 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
         });
     } else {
       _setError('Cannot open this PDF.\n$reason');
+    }
+  }
+
+  bool _exportingMarks = false;
+
+  Future<void> _exportMarks() async {
+    if (_exportingMarks) return;
+    if (_marks.isEmpty) {
+      _toast('Mark something first - nothing to save yet');
+      return;
+    }
+    if (_doc == null) {
+      _toast('PDF is still loading - try again in a moment');
+      return;
+    }
+    if (mounted) setState(() => _exportingMarks = true);
+    _toast('Saving marks into PDF...');
+    String? outPath;
+    try {
+      outPath = await _buildMarkedPdf();
+    } catch (e) {
+      debugPrint('PdfReader: export marks failed: $e');
+    }
+    if (!mounted) return;
+    setState(() => _exportingMarks = false);
+    if (outPath == null) {
+      _toast('Could not save - try again');
+      return;
+    }
+    _toast('Saved: ${p.basename(outPath)}');
+    unawaited(ShareService.share([outPath]));
+  }
+
+  Future<String?> _buildMarkedPdf() async {
+    final doc = _doc;
+    if (doc == null || _totalPages <= 0) return null;
+    final byPage = <int, List<PdfMark>>{};
+    for (final m in _marks) {
+      (byPage[m.page] ??= <PdfMark>[]).add(m);
+    }
+    final out = pw.Document();
+    var rendered = 0;
+    for (var pageNum = 1; pageNum <= _totalPages; pageNum++) {
+      PdfPage? page;
+      try {
+        page = await doc.getPage(pageNum);
+        final w = page.width.toInt().clamp(200, 1600);
+        final h = (page.height * w / page.width).toInt().clamp(200, 2300);
+        final img = await page.render(
+          width: w.toDouble(),
+          height: h.toDouble(),
+          format: PdfPageImageFormat.jpeg,
+          quality: 85,
+          backgroundColor: '#FFFFFF',
+        );
+        if (img == null || img.bytes.isEmpty) {
+          debugPrint('PdfReader: export skipped page $pageNum (render empty)');
+          continue; // skip one bad page instead of failing the whole export
+        }
+        final marks = byPage[pageNum] ?? const <PdfMark>[];
+        final bytes = marks.isEmpty ? img.bytes : await _paintMarksOnJpeg(img.bytes, marks, w.toDouble(), h.toDouble());
+        final mem = pw.MemoryImage(bytes);
+        out.addPage(pw.Page(pageFormat: PdfPageFormat(w.toDouble(), h.toDouble()), margin: pw.EdgeInsets.zero, build: (_) => pw.Image(mem, fit: pw.BoxFit.fill)));
+        rendered++;
+        // Keep the UI alive on big documents: progress every 10 pages.
+        if (mounted && _totalPages > 10 && rendered % 10 == 0) {
+          _toast('Saving... $rendered/$_totalPages pages');
+          await Future<void>.delayed(const Duration(milliseconds: 1));
+        }
+      } catch (e) {
+        debugPrint('PdfReader: export skipped page $pageNum: $e');
+        continue;
+      } finally {
+        try {
+          await page?.close();
+        } catch (_) {}
+      }
+    }
+    if (rendered == 0) return null;
+    final bytes = await out.save();
+    // Prefer next-to-original (same folder = same marks live with the PDF),
+    // fall back to the app cache dir when scoped storage denies the write.
+    final stem = p.basenameWithoutExtension(widget.filePath);
+    var outPath = p.join(p.dirname(widget.filePath), '${stem}_marked.pdf');
+    try {
+      await File(outPath).writeAsBytes(bytes, flush: true);
+    } catch (e) {
+      debugPrint('PdfReader: export next-to-original failed, using cache: $e');
+      final cache = await getTemporaryDirectory();
+      outPath = p.join(cache.path, '${stem}_marked.pdf');
+      await File(outPath).writeAsBytes(bytes, flush: true);
+    }
+    return outPath;
+  }
+
+  Future<Uint8List> _paintMarksOnJpeg(Uint8List bytes, List<PdfMark> marks, double w, double h) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawImage(image, Offset.zero, Paint());
+      for (final m in marks) {
+        final sx = m.start.dx * w;
+        final sy = m.start.dy * h;
+        final ex = m.end.dx * w;
+        final ey = m.end.dy * h;
+        final left = sx < ex ? sx : ex;
+        final right = sx > ex ? sx : ex;
+        if (m.tool == MarkTool.highlight) {
+          // Band padding scales with page height so marks look identical
+          // on small phones and large tablets.
+          final pad = (h * 0.008).clamp(4.0, 14.0);
+          final top = (sy < ey ? sy : ey) - pad;
+          final bottom = (sy > ey ? sy : ey) + pad;
+          canvas.drawRect(Rect.fromLTRB(left, top, right, bottom), Paint()..color = const Color(0x66FFEB3B));
+        } else if (m.tool == MarkTool.underline) {
+          final y = (sy + ey) / 2 + (h * 0.008).clamp(4.0, 14.0);
+          canvas.drawLine(Offset(left, y), Offset(right, y), Paint()..color = const Color(0xFFFF1744)..strokeWidth = (w * 0.0022).clamp(1.5, 4.0));
+        }
+      }
+      final picture = recorder.endRecording();
+      final outImg = await picture.toImage(w.toInt(), h.toInt());
+      final data = await outImg.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      outImg.dispose();
+      picture.dispose();
+      if (data == null) return bytes;
+      return data.buffer.asUint8List();
+    } catch (_) {
+      return bytes;
     }
   }
 
@@ -871,6 +1008,19 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
                 MarkTool.eraser,
                 Colors.white70,
                 'Eraser',
+              ),
+              // Export marks burned into a new PDF (opens anywhere).
+              IconButton(
+                icon: _exportingMarks
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : Icon(
+                        Icons.save_outlined,
+                        color: _marks.isEmpty ? Colors.white30 : Colors.white,
+                      ),
+                tooltip: _marks.isEmpty
+                    ? 'Mark something first, then save'
+                    : 'Save marks into PDF',
+                onPressed: _exportMarks,
               ),
               // Bookmark
               IconButton(

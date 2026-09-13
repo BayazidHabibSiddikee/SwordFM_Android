@@ -51,12 +51,6 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
     _handler = swiftAudioHandler;
     if (_handler != null) {
       _player = _handler!.player;
-      if (!reopened) {
-        final paths = widget.playlist.isNotEmpty
-            ? widget.playlist
-            : [widget.filePath!];
-        await _handler!.loadQueue(paths, initialIndex: widget.initialIndex);
-      }
       _currentIndex = _player!.currentIndex ?? widget.initialIndex;
       // Sync existing speed/shuffle/loop from player
       _speed = _player!.speed;
@@ -65,6 +59,24 @@ class _MusicPlayerState extends State<MusicPlayerScreen> {
       _indexSubscription = _player!.currentIndexStream.listen((i) {
         if (i != null && mounted) setState(() => _currentIndex = i);
       });
+      // Paint the controller immediately — queue load + setAudioSource run
+      // after first frame so the buttons never wait on I/O or tag reads.
+      if (mounted) setState(() => _initialized = true);
+      if (!reopened) {
+        final paths = widget.playlist.isNotEmpty
+            ? widget.playlist
+            : [widget.filePath!];
+        await _handler!.loadQueue(paths, initialIndex: widget.initialIndex);
+        if (mounted) {
+          setState(() {
+            _currentIndex = _player!.currentIndex ?? widget.initialIndex;
+          });
+          await _player!.play();
+        } else {
+          await _player!.play();
+        }
+      }
+      return;
     } else {
       if (reopened) {
         if (mounted) Navigator.of(context).pop();
