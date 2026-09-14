@@ -407,21 +407,34 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
     unawaited(ShareService.share([outPath]));
   }
 
+  /// Creates a new PDF with marks embedded in the page content.
+  /// The resulting PDF can be opened in any PDF viewer and marks will be visible.
+  /// 
+  /// This renders each page to an image, draws the marks on the image,
+  /// and creates a new PDF with those marked images.
   Future<String?> _buildMarkedPdf() async {
     final doc = _doc;
     if (doc == null || _totalPages <= 0) return null;
+    
+    // Group marks by page
     final byPage = <int, List<PdfMark>>{};
     for (final m in _marks) {
       (byPage[m.page] ??= <PdfMark>[]).add(m);
     }
+    
+    // Create new PDF document
     final out = pw.Document();
     var rendered = 0;
+    
     for (var pageNum = 1; pageNum <= _totalPages; pageNum++) {
       PdfPage? page;
       try {
         page = await doc.getPage(pageNum);
+        
+        // Render page at high resolution
         final w = page.width.toInt().clamp(200, 1600);
         final h = (page.height * w / page.width).toInt().clamp(200, 2300);
+        
         final img = await page.render(
           width: w.toDouble(),
           height: h.toDouble(),
@@ -429,16 +442,29 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
           quality: 85,
           backgroundColor: '#FFFFFF',
         );
+        
         if (img == null || img.bytes.isEmpty) {
           debugPrint('PdfReader: export skipped page $pageNum (render empty)');
-          continue; // skip one bad page instead of failing the whole export
+          continue;
         }
+        
+        // Get marks for this page and paint them on the image
         final marks = byPage[pageNum] ?? const <PdfMark>[];
-        final bytes = marks.isEmpty ? img.bytes : await _paintMarksOnJpeg(img.bytes, marks, w.toDouble(), h.toDouble());
+        final bytes = marks.isEmpty 
+            ? img.bytes 
+            : await _paintMarksOnJpeg(img.bytes, marks, w.toDouble(), h.toDouble());
+        
+        // Add marked page to PDF
         final mem = pw.MemoryImage(bytes);
-        out.addPage(pw.Page(pageFormat: PdfPageFormat(w.toDouble(), h.toDouble()), margin: pw.EdgeInsets.zero, build: (_) => pw.Image(mem, fit: pw.BoxFit.fill)));
+        out.addPage(pw.Page(
+          pageFormat: PdfPageFormat(w.toDouble(), h.toDouble()),
+          margin: pw.EdgeInsets.zero,
+          build: (_) => pw.Image(mem, fit: pw.BoxFit.fill),
+        ));
+        
         rendered++;
-        // Keep the UI alive on big documents: progress every 10 pages.
+        
+        // Keep UI responsive for large PDFs
         if (mounted && _totalPages > 10 && rendered % 10 == 0) {
           _toast('Saving... $rendered/$_totalPages pages');
           await Future<void>.delayed(const Duration(milliseconds: 1));
@@ -452,12 +478,16 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
         } catch (_) {}
       }
     }
+    
     if (rendered == 0) return null;
+    
+    // Save the PDF
     final bytes = await out.save();
-    // Prefer next-to-original (same folder = same marks live with the PDF),
-    // fall back to the app cache dir when scoped storage denies the write.
+    
+    // Save to same directory as original if possible
     final stem = p.basenameWithoutExtension(widget.filePath);
     var outPath = p.join(p.dirname(widget.filePath), '${stem}_marked.pdf');
+    
     try {
       await File(outPath).writeAsBytes(bytes, flush: true);
     } catch (e) {
@@ -466,6 +496,7 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
       outPath = p.join(cache.path, '${stem}_marked.pdf');
       await File(outPath).writeAsBytes(bytes, flush: true);
     }
+    
     return outPath;
   }
 

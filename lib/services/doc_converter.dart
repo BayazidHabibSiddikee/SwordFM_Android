@@ -6,6 +6,7 @@ import 'package:archive/archive.dart';
 import 'package:path/path.dart' as p;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:pdfx/pdfx.dart' as pdfx;
 import 'docx_reader.dart';
 import 'ocr_service.dart';
 import '../utils/constants.dart' show AppPaths;
@@ -17,6 +18,13 @@ import '../utils/safe_file_writer.dart';
 /// Markdown -> DOCX conversion entirely in Dart (no native helpers required).
 /// PDF export uses the `pdf` package; DOCX export is built as a real OOXML
 /// (ZIP) document via the `archive` package.
+///
+/// ADDITIONAL CONVERSIONS:
+/// - PDF → Images (PNG/JPEG) per page
+/// - Images → PDF (combine multiple images)
+/// - PDF → Text (with OCR fallback for scanned PDFs)
+/// - Image → Text (OCR)
+/// - Image → Image (format conversion, resize, etc.)
 class DocConverter {
   /// Output formats offered by the convert dialogs (single + batch).
   static const List<String> outputFormats = [
@@ -25,6 +33,8 @@ class DocConverter {
     'HTML',
     'TXT',
     'Markdown',
+    'Images (PNG)',
+    'Images (JPEG)',
   ];
 
   /// Converts one file to [format] (one of [outputFormats]).
@@ -39,11 +49,16 @@ class DocConverter {
       final lower = sourcePath.toLowerCase();
       final isDocx = lower.endsWith('.docx');
       final isPdf = lower.endsWith('.pdf');
+      final isImage = _isImageFile(sourcePath);
+
       switch (format) {
         case 'PDF':
           if (isDocx) {
             final md = await toMarkdown(sourcePath);
             return md != null ? await toPdf(md) : null;
+          }
+          if (isImage) {
+            return await imageToPdf(sourcePath);
           }
           return await toPdf(sourcePath);
         case 'DOCX':
@@ -61,14 +76,31 @@ class DocConverter {
         case 'Markdown':
         case 'MD':
           return await toMarkdown(sourcePath);
-        default: // TXT
+        case 'TXT':
           if (isDocx) return await fromDocx(sourcePath);
+          if (isPdf) return await pdfToText(sourcePath);
+          if (isImage) return await imageToText(sourcePath);
           return await toText(sourcePath);
+        case 'Images (PNG)':
+          if (isPdf) return (await pdfToImages(sourcePath))?.first;
+          return null;
+        case 'Images (JPEG)':
+          if (isPdf) return (await pdfToImages(sourcePath, jpeg: true))?.first;
+          return null;
+        default:
+          return null;
       }
     } catch (e) {
       debugPrint('convertOne failed for $sourcePath → $format: $e');
       return null;
     }
+  }
+
+  /// Check if file is an image by extension
+  static bool _isImageFile(String path) {
+    final ext = p.extension(path).toLowerCase();
+    return ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tiff', '.tif']
+        .contains(ext);
   }
 
   /// Converts [sources] to [format] one after another, reporting progress.
@@ -487,6 +519,286 @@ class DocConverter {
       debugPrint('fromPdf OCR fallback failed: $e');
     }
     return null;
+  }
+
+  /// Converts a PDF to images (one image file per page).
+  ///
+  /// Returns a list of output image paths (PNG by default, or JPEG if [jpeg]
+  /// is true). Each image is named `<base>_page_<n>.<ext>` in the same
+  /// directory as the source (or the cache dir if the source dir is not
+  /// writable). Returns null if the PDF cannot be opened.
+  ///
+  /// [dpi] controls render resolution (default 150, typical range 72–300).
+  /// Higher DPI = better quality but larger files and slower rendering.
+  static Future<List<String>?> pdfToImages(
+    String pdfPath, {
+    bool jpeg = false,
+    int dpi = 150,
+    void Function(int page, int total)? onProgress,
+  }) async {
+    final file = File(pdfPath);
+    if (!await file.exists()) return null;
+
+    final ext = jpeg ? 'jpg' : 'png';
+    final stem = p.basenameWithoutExtension(pdfPath);
+    final sourceDir = p.dirname(pdfPath);
+
+    pdfx.PdfDocument? doc;
+    try {
+      doc = await pdfx.PdfDocument.openFile(pdfPath);
+    } catch (e) {
+      debugPrint('pdfToImages: cannot open $pdfPath: $e');
+      return null;
+    }
+
+    try {
+      final result = <String>[];
+      final tmp = await Directory.systemTemp.createTemp('swordfm_img_');
+      for (var i = 1; i <= doc!.pagesCount; i++) {
+        onProgress?.call(i, doc!.pagesCount);
+        final page = await doc!.getPage(i);
+        final renderDpi = dpi.toDouble();
+        final pageW = (page.width * renderDpi / 72.0);
+        final pageH = (page.height * renderDpi / 72.0);
+        final img = await page.render(
+          width: pageW,
+          height: pageH,
+          format: jpeg ? pdfx.PdfPageImageFormat.jpeg : pdfx.PdfPageImageFormat.png,
+          quality: jpeg ? 90 : 100,
+          backgroundColor: '#FFFFFF',
+        );
+        await page.close();
+        if (img == null || img.bytes.isEmpty) continue;
+        final outName = '$stem${_pageSuffix(i)}.$ext';
+        final outPath = await _tryWriteNextToSource(
+          sourceDir,
+          outName,
+          img.bytes,
+        );
+        if (outPath != null) {
+          result.add(outPath);
+        } else {
+          final tmpFile = File('${tmp.path}/$outName');
+          await tmpFile.writeAsBytes(img.bytes);
+          result.add(tmpFile.path);
+        }
+      }
+      return result.isEmpty ? null : result;
+    } finally {
+      await doc!.close();
+    }
+  }
+
+  /// Creates a suffix for page-numbered files (e.g., "_page_1", "_page_2").
+  static String _pageSuffix(int pageNumber) => '_page_${pageNumber.toString().padLeft(3, '0')}';
+
+  /// Converts one or more images into a single PDF.
+  ///
+  /// [images] can be image file paths. Each image becomes one page in the
+  /// output PDF, scaled to fit an A4 page while preserving aspect ratio.
+  /// Returns the output PDF path, or null on failure.
+  ///
+  /// [title] sets the PDF metadata title.
+  static Future<String?> imagesToPdf(
+    List<String> images, {
+    String? title,
+    String? outputPath,
+  }) async {
+    if (images.isEmpty) return null;
+    final doc = pw.Document(title: title ?? '');
+    var pageCount = 0;
+    for (final imgPath in images) {
+      final file = File(imgPath);
+      if (!await file.exists()) continue;
+      try {
+        final bytes = await file.readAsBytes();
+        final mem = pw.MemoryImage(bytes);
+        doc.addPage(
+          pw.Page(
+            pageFormat: PdfPageFormat.a4,
+            build: (context) => pw.Center(
+              child: pw.Image(
+                mem,
+                fit: pw.BoxFit.contain,
+              ),
+            ),
+          ),
+        );
+        pageCount++;
+      } catch (e) {
+        debugPrint('imagesToPdf: skipping $imgPath: $e');
+      }
+    }
+    if (pageCount == 0) return null;
+    final out = (outputPath != null && outputPath.isNotEmpty) ? outputPath : _defaultOutputPath(images.first, '.pdf');
+    final bytes = await doc.save();
+    await File(out).writeAsBytes(bytes);
+    return out;
+  }
+
+  /// Converts a single image to a PDF document.
+  ///
+  /// The image will be placed on a single PDF page sized to fit the image
+  /// while maintaining aspect ratio. Returns the path to the created PDF
+  /// or null if conversion fails.
+  static Future<String?> imageToPdf(String imagePath, {String? outputPath}) async {
+    try {
+      final imageFile = File(imagePath);
+      if (!await imageFile.exists()) {
+        debugPrint('imageToPdf: file not found: $imagePath');
+        return null;
+      }
+
+      // Determine output path
+      final outPath = outputPath ??
+          p.join(p.dirname(imagePath), '${p.basenameWithoutExtension(imagePath)}.pdf');
+
+      // Read image bytes
+      final bytes = await imageFile.readAsBytes();
+
+      // Create PDF with image on a page
+      final doc = pw.Document();
+      doc.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          build: (pw.Context context) {
+            return pw.Center(
+              child: pw.Image(
+                pw.MemoryImage(bytes),
+                fit: pw.BoxFit.contain,
+              ),
+            );
+          },
+        ),
+      );
+
+      final pdfBytes = await doc.save();
+      await File(outPath).writeAsBytes(pdfBytes);
+
+      debugPrint('imageToPdf: created $outPath');
+      return outPath;
+    } catch (e) {
+      debugPrint('imageToPdf failed: $e');
+      return null;
+    }
+  }
+
+  /// Converts a PDF to plain text using OCR (Tesseract) on every page.
+  ///
+  /// This is the reliable path when a PDF has no text layer (scanned images,
+  /// faxes, screenshots saved as PDF). Each page is rasterised at 2× scale,
+  /// run through Tesseract, and the results are joined with page headers.
+  ///
+  /// This is an alias for [pdfToTextOcr] for consistent API naming.
+  static Future<String?> pdfToText(String pdfPath) => pdfToTextOcr(pdfPath);
+
+  /// Converts a PDF to plain text using OCR (Tesseract) on every page.
+  ///
+  /// This is the reliable path when a PDF has no text layer (scanned images,
+  /// faxes, screenshots saved as PDF). Each page is rasterised at 2× scale,
+  /// run through Tesseract, and the results are joined with page headers.
+  static Future<String?> pdfToTextOcr(String pdfPath) async {
+    try {
+      final text = await OcrService.extractFromDocument(pdfPath);
+      if (text.trim().isEmpty) return null;
+      final outPath = _resolveOutputPath(pdfPath, '.txt');
+      await _writeOutput(outPath, utf8.encode(text));
+      return outPath;
+    } catch (e) {
+      debugPrint('pdfToTextOcr failed: $e');
+      return null;
+    }
+  }
+
+  /// Converts an image to text using OCR (Tesseract).
+  ///
+  /// Returns the output .txt path, or null if OCR produces nothing.
+  static Future<String?> imageToText(String imagePath) async {
+    try {
+      final text = await OcrService.extractText(imagePath);
+      if (text.trim().isEmpty) return null;
+      final outPath = _resolveOutputPath(imagePath, '.txt');
+      await _writeOutput(outPath, utf8.encode(text));
+      return outPath;
+    } catch (e) {
+      debugPrint('imageToText failed: $e');
+      return null;
+    }
+  }
+
+  /// Converts a PDF to HTML.
+  ///
+  /// First tries to extract the text layer, then falls back to OCR if needed.
+  /// The HTML preserves page breaks and basic structure.
+  static Future<String?> pdfToHtml(String sourcePath) async {
+    final text = await fromPdf(sourcePath);
+    if (text == null) {
+      // Try OCR path
+      final ocrText = await pdfToTextOcr(sourcePath);
+      if (ocrText == null) return null;
+      final html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
+          '<title>${_safeTitle(sourcePath)}</title></head><body><pre>$ocrText</pre></body></html>';
+      final outPath = _resolveOutputPath(sourcePath, '.html');
+      await _writeOutput(outPath, utf8.encode(html));
+      return outPath;
+    }
+    // Convert extracted text to simple HTML
+    final escaped = _escapeHtml(text);
+    final html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
+        '<title>${_safeTitle(sourcePath)}</title>'
+        '<style>body{font-family:sans-serif;line-height:1.6;max-width:800px;margin:auto;}</style>'
+        '</head><body><pre>$escaped</pre></body></html>';
+    final outPath = _resolveOutputPath(sourcePath, '.html');
+    await _writeOutput(outPath, utf8.encode(html));
+    return outPath;
+  }
+
+  /// Converts a text file to PDF.
+  ///
+  /// The text is rendered as a properly formatted PDF with word wrapping.
+  static Future<String?> textToPdf(String textPath) async {
+    final file = File(textPath);
+    if (!await file.exists()) return null;
+    final text = await file.readAsString();
+    if (text.isEmpty) return null;
+    return _textContentToPdf(text, _safeTitle(textPath));
+  }
+
+  /// Helper: safe title from filename.
+  static String _safeTitle(String path) {
+    final name = p.basenameWithoutExtension(path);
+    return name.length > 100 ? name.substring(0, 100) : name;
+  }
+
+  /// Helper: escapes HTML special characters.
+  static String _escapeHtml(String text) {
+    return text
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+  }
+
+  /// Internal: converts text content to a PDF document.
+  static Future<String?> _textContentToPdf(String text, String title) async {
+    final doc = pw.Document(title: title);
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(40),
+        build: (context) => [
+          pw.Paragraph(
+            text: text,
+            textAlign: pw.TextAlign.center,
+          ),
+        ],
+      ),
+    );
+    final bytes = await doc.save();
+    final outPath = _defaultOutputPath(title, '.pdf');
+    await _writeOutput(outPath, bytes);
+    return outPath;
   }
 
   /// Synchronous PDF text extraction. Handles both `(…)Tj` literal strings and
@@ -1443,14 +1755,6 @@ class DocConverter {
     return out;
   }
 
-  static String _escapeHtml(String s) {
-    return s
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;');
-  }
-
   /// Checks if the file can be converted. Accepts every plain-text format —
   /// markdown, code and data files all flow through the same text pipeline.
   /// PDF and DOCX are also accepted as source inputs (DOCX→text, PDF→cover
@@ -1832,6 +2136,44 @@ class DocConverter {
       debugPrint('_ocrPdf: $e');
       return null;
     }
+  }
+
+  /// Tries to write [bytes] to a file in [directory] with [fileName].
+  ///
+  /// Returns the path if successful, null if the write fails (e.g., due to
+  /// permissions). Used as a fallback-safe write for PDF-to-images output.
+  static Future<String?> _tryWriteNextToSource(
+    String directory,
+    String fileName,
+    List<int> bytes,
+  ) async {
+    try {
+      final file = File(p.join(directory, fileName));
+      await file.writeAsBytes(bytes, flush: true);
+      return file.path;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Resolves a writable output path for a converted file.
+  ///
+  /// Prefers the source directory (output next to the original) but falls back
+  /// to a dedicated, guaranteed-writable folder when the source directory cannot
+  /// be written (e.g. a read-only scoped-storage location on Android without
+  /// MANAGE_EXTERNAL_STORAGE), or when the source is in a temp location.
+  static String _defaultOutputPath(String sourcePath, String newExt) {
+    final sourceDir = p.dirname(sourcePath);
+    // Heuristic: if the source is in a temp dir or the path looks inaccessible,
+    // fall back to the app's temporary directory.
+    if (sourceDir.startsWith('/data/local/tmp') ||
+        sourceDir.startsWith('/data/tmp') ||
+        sourceDir.contains('cache')) {
+      return p.join(Directory.systemTemp.path,
+          '${p.basenameWithoutExtension(sourcePath)}$newExt');
+    }
+    // Default: write next to the source.
+    return p.join(sourceDir, '${p.basenameWithoutExtension(sourcePath)}$newExt');
   }
 }
 

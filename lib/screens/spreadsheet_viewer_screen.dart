@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import '../services/spreadsheet_html_builder.dart';
 import '../theme/theme.dart';
 
 /// In-app spreadsheet viewer for XLSX / XLS / ODS / CSV files.
@@ -60,153 +62,74 @@ class _SpreadsheetViewerScreenState extends State<SpreadsheetViewerScreen> {
   // ── CSV ─────────────────────────────────────────────────────────────────
   Future<void> _loadCsv() async {
     final raw = await File(widget.filePath).readAsString();
-    final rows = raw.split('\n').where((r) => r.trim().isNotEmpty).toList();
-    final tableRows = rows.map((row) {
-      final cells = _parseCsvRow(row);
-      final tds = cells.map((c) => '<td>${_esc(c)}</td>').join();
-      return '<tr>$tds</tr>';
-    }).join('\n');
-
-    final html = _wrapHtml('<table>$tableRows</table>');
-    await _controller.loadHtmlString(html);
-  }
-
-  List<String> _parseCsvRow(String row) {
-    final cells = <String>[];
-    final buf = StringBuffer();
-    bool inQuotes = false;
-    for (var i = 0; i < row.length; i++) {
-      final c = row[i];
-      if (c == '"') {
-        inQuotes = !inQuotes;
-      } else if (c == ',' && !inQuotes) {
-        cells.add(buf.toString());
-        buf.clear();
-      } else {
-        buf.write(c);
-      }
-    }
-    cells.add(buf.toString());
-    return cells;
+    final html = buildCsvViewerHtml(raw);
+    await _loadInWebView(html);
   }
 
   // ── XLSX / XLS / ODS ────────────────────────────────────────────────────
   Future<void> _loadBinarySheet() async {
-    final bytes = await File(widget.filePath).readAsBytes();
-    final b64 = base64Encode(bytes);
+    try {
+      // Read the file bytes
+      final bytes = await File(widget.filePath).readAsBytes();
+      final b64 = base64Encode(bytes);
 
-    // Load SheetJS from the bundled asset (assets/js/xlsx.full.min.js) so the
-    // viewer works fully offline. The JS is inlined into the HTML string to
-    // avoid cross-origin/file:// restrictions in the WebView.
-    final sheetJsBytes =
-        await DefaultAssetBundle.of(context).loadString('assets/js/xlsx.full.min.js');
+      // Load SheetJS from the bundled asset
+      final bundle = DefaultAssetBundle.of(context);
+      final sheetJs = await bundle.loadString('assets/js/xlsx.full.min.js');
 
-    final html = '''<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-  body { font-family: monospace; font-size: 12px;
-         background: #282c34; color: #abb2bf; margin: 0; }
-  #msg { padding: 16px; color: #e5c07b; }
-  .sheet-tabs { display:flex; flex-wrap:wrap; gap:4px;
-                padding: 6px 8px; background:#21252b; }
-  .sheet-tab  { padding: 4px 10px; border-radius: 4px; cursor: pointer;
-                background:#3e4451; color:#abb2bf; border:none; font-size:12px; }
-  .sheet-tab.active { background:#61afef; color:#282c34; }
-  .tbl-wrap { overflow:auto; max-height: calc(100vh - 60px); }
-  table { border-collapse: collapse; width: max-content; }
-  th, td { border: 1px solid #3e4451; padding: 4px 8px;
-            white-space: nowrap; min-width: 60px; }
-  th { background:#2c313a; color:#e5c07b; position:sticky; top:0; z-index:1; }
-  tr:nth-child(even) td { background:#2c313a; }
-</style>
-</head>
-<body>
-<div id="msg">Loading spreadsheet\u2026</div>
-<script>
-$sheetJsBytes
-</script>
-<script>
-var B64 = "$b64";
-function b64ToUint8(b){ var bin=atob(b),buf=new Uint8Array(bin.length);
-  for(var i=0;i<bin.length;i++) buf[i]=bin.charCodeAt(i); return buf; }
+      // Build the HTML with SheetJS embedded
+      final html = buildSheetJsViewerHtml(sheetJsSource: sheetJs, base64Bytes: b64);
 
-function renderSheet(wb, name){
-  var ws = wb.Sheets[name];
-  if(!ws){ document.getElementById("tbl-wrap").innerHTML="<p>Empty sheet</p>"; return; }
-  var html = XLSX.utils.sheet_to_html(ws,{editable:false});
-  var wrap = document.getElementById("tbl-wrap");
-  wrap.innerHTML = html;
-  wrap.querySelectorAll("table").forEach(function(t){
-    t.style.borderCollapse="collapse";
-    t.querySelectorAll("td,th").forEach(function(c){
-      c.style.border="1px solid #3e4451";
-      c.style.padding="4px 8px";
-      c.style.whiteSpace="nowrap";
-      c.style.background="";
-      c.style.color="#abb2bf";
-    });
-  });
-}
+      // Load into WebView
+      await _loadInWebView(html);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to load spreadsheet: $e\n\n'
+              'The file may be corrupted or in an unsupported format.\n'
+              'Try opening it with another app.';
+        });
+      }
+    }
+  }
 
-function buildTabs(wb, active){
-  var tabs = document.getElementById("tabs");
-  tabs.innerHTML="";
-  wb.SheetNames.forEach(function(n){
-    var btn=document.createElement("button");
-    btn.className="sheet-tab"+(n===active?" active":"");
-    btn.textContent=n;
-    btn.onclick=function(){ renderSheet(wb,n);
-      tabs.querySelectorAll(".sheet-tab").forEach(function(b){b.classList.remove("active");});
-      btn.classList.add("active");
-    };
-    tabs.appendChild(btn);
-  });
-}
+  /// Loads [html] in the WebView.
+  ///
+  /// Uses temp file approach which is more reliable than loadHtmlString
+  /// for large documents with embedded JS.
+  Future<void> _loadInWebView(String html) async {
+    try {
+      final dir = await getTemporaryDirectory();
+      // Use unique filename to avoid conflicts
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final tmp = File('${dir.path}/swordfm_sheet_$timestamp.html');
+      await tmp.writeAsString(html, flush: true);
 
-try {
-  var data = b64ToUint8(B64);
-  var wb = XLSX.read(data, {type:"array"});
-  document.getElementById("msg").style.display="none";
-  document.getElementById("tabs").style.display="flex";
-  document.getElementById("tbl-wrap").style.display="block";
-  buildTabs(wb, wb.SheetNames[0]);
-  renderSheet(wb, wb.SheetNames[0]);
-} catch(e){
-  document.getElementById("msg").textContent = "Error: "+e;
-}
-</script>
-<div class="sheet-tabs" id="tabs" style="display:none"></div>
-<div id="tbl-wrap" class="tbl-wrap" style="display:none"></div>
-</body></html>''';
+      // Load the file
+      await _controller.loadFile(tmp.path);
 
-    await _controller.loadHtmlString(html);
+      // Clean up temp file after loading (with delay to ensure WebView has it)
+      Future.delayed(const Duration(seconds: 2), () {
+        try {
+          tmp.delete();
+        } catch (_) {}
+      });
+    } catch (e) {
+      // If temp file approach fails, try inline loading
+      try {
+        await _controller.loadHtmlString(html);
+      } catch (e2) {
+        if (mounted) {
+          setState(() {
+            _error = 'Failed to display spreadsheet: $e2';
+            _loading = false;
+          });
+        }
+      }
+    }
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
-  String _esc(String s) => s
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;');
-
-  String _wrapHtml(String body) => '''<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-  body { font-family: monospace; font-size: 12px;
-         background: #282c34; color: #abb2bf; margin: 0; overflow-x: auto; }
-  .tbl-wrap { overflow: auto; }
-  table { border-collapse: collapse; width: max-content; }
-  th, td { border: 1px solid #3e4451; padding: 4px 8px; white-space: nowrap; }
-  th { background: #2c313a; color: #e5c07b; position: sticky; top: 0; }
-  tr:nth-child(even) td { background: #2c313a; }
-</style>
-</head>
-<body><div class="tbl-wrap">$body</div></body>
-</html>''';
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(

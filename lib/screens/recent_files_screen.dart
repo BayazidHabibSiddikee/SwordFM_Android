@@ -9,6 +9,7 @@ import '../screens/cbz_reader_screen.dart';
 import '../screens/epub_reader_screen.dart';
 import '../screens/spreadsheet_viewer_screen.dart';
 import '../utils/constants.dart' show AppPaths;
+import '../utils/app_paths.dart' show StoragePermissions;
 import '../widgets/preview_panel.dart';
 import 'video_player_screen.dart';
 import 'music_player_screen.dart';
@@ -29,6 +30,7 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
   List<_RecentEntry> _entries = [];
   bool _loading = true;
   String? _error;
+  bool _permissionDenied = false;
   FileItem? _previewItem;
 
   @override
@@ -41,8 +43,29 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _permissionDenied = false;
     });
     try {
+      // Check storage permissions before scanning. On Android 10+ (API 29+),
+      // Directory.listSync() throws a FileSystemException for media dirs
+      // without MANAGE_EXTERNAL_STORAGE. Those exceptions are silently caught
+      // per-directory in _scanRecent, so without this check the user would see
+      // an empty list instead of a meaningful error.
+      final granted = await StoragePermissions.isGranted();
+      if (!granted) {
+        if (mounted) {
+          setState(() {
+            _loading = false;
+            _permissionDenied = true;
+            _error = 'Storage permission required\n\n'
+                'Recent files scans directories like Documents, Downloads, '
+                'DCIM, Telegram, and WhatsApp. Grant "All files access" in '
+                'the system settings to let SwordFM read them.';
+          });
+        }
+        return;
+      }
+
       // 30-day window so academic files (sessionals, lab reports, scanned
       // coursework from a couple weeks ago) still surface. The original
       // 7-day window was tuned for media folders where anything older is
@@ -126,9 +149,28 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (_permissionDenied) ...[
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: () async {
+                          await StoragePermissions.openStorageSettings();
+                          _loadRecent();
+                        },
+                        icon: const Icon(Icons.folder_open),
+                        label: const Text('Grant Permission'),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             )

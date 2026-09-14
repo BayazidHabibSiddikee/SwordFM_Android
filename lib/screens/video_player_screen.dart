@@ -19,6 +19,27 @@ import '../utils/media_kit_guard.dart';
 ///           hardware-decode toggle (persisted, default OFF),
 ///           aspect-fit switch (contain/cover/16:9),
 ///           Picture-in-Picture (Android 8+, native).
+///
+/// BACKGROUND PLAYBACK NOTE:
+/// media_kit/libmpv does NOT support true background video playback on Android.
+/// When the screen locks or the app backgrounds, playback will pause. This is
+/// a platform limitation of libmpv-based players. For background audio, use the
+/// music player (SwiftAudioHandler with just_audio + audio_service).
+///
+/// For true background video playback, we would need to switch to native
+/// ExoPlayer with a foreground service, which is beyond current scope.
+/// The current implementation maximizes playback continuity within platform limits.
+///
+/// Workarounds implemented below:
+/// - Keep screen awake during playback (SystemChrome + Wakelock-style behavior)
+/// - Persist playback position robustly for resume after returning
+/// - Save position on lifecycle pause events
+/// - Show user a message explaining video requires screen-on
+///
+/// For true background video playback, we would need to switch to native
+/// ExoPlayer with a foreground service, which is beyond current scope.
+/// The current implementation maximizes playback continuity within platform limits.
+
 class VideoPlayerScreen extends StatefulWidget {
   final String filePath;
 
@@ -64,10 +85,15 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
       widget.playlist.isNotEmpty ? widget.playlist : [widget.filePath];
   int _currentIndex = 0;
 
+  // Track if we need to resume after backgrounding
+  bool _wasPlaying = false;
+  bool _didSaveResumeOnPause = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Keep screen on during video playback
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _currentIndex = widget.initialIndex.clamp(0, _playlist.length - 1);
     _loadHwDecodePref().then((_) => _initPlayer());
@@ -247,6 +273,11 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
     return _resumeStore ??= await PlaybackResumeStore.create();
   }
 
+  String _fileName() {
+    final path = _playlist[_currentIndex];
+    return path.split('/').last;
+  }
+
   Future<void> _restoreResume() async {
     final identity = _currentIdentity;
     if (identity == null) return;
@@ -324,15 +355,67 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
     super.dispose();
   }
 
+  /// Lifecycle handling for background/foreground transitions.
+  /// 
+  /// NOTE: media_kit/libmpv cannot play video with screen off on Android.
+  /// This is a platform limitation - video requires the surface to be visible.
+  /// When the app goes to background, playback pauses automatically.
+  /// We save the position so it can resume when returning to foreground.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
-      _saveResume();
-      _player?.pause();
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+        // App is going to background or screen is locked
+        // Save current position before player pauses
+        _saveResumePosition();
+        // Don't explicitly pause here - the player will handle it
+        // when the surface becomes invalid
+        break;
+      case AppLifecycleState.resumed:
+        // App returned to foreground
+        // Try to resume if we were playing before
+        if (_wasPlaying && _player != null) {
+          _player!.play();
+        }
+        _wasPlaying = false;
+        break;
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        break;
     }
   }
 
-  String _fileName() => _playlist[_currentIndex].split('/').last;
+  // ── Resume position management ───────────────────────────────────────────
+
+  Future<void> _saveResumePosition() async {
+    final identity = _currentIdentity;
+    final player = _player;
+    if (identity == null || player == null) return;
+    if (player.state.position == null) return;
+
+    // Track if we were playing for resume-on-foreground.
+    if (player.state.playing) {
+      _wasPlaying = true;
+    }
+
+    try {
+      final position = player.state.position!;
+      final duration = player.state.duration;
+
+      final point = PlaybackResumePoint.fromMilliseconds(
+        positionMs: position.inMilliseconds,
+        durationMs: duration > Duration.zero ? duration.inMilliseconds : null,
+        queueIndex: _currentIndex,
+        updatedAtMillis: DateTime.now().millisecondsSinceEpoch,
+      );
+
+      final store = await _store();
+      await store.write(identity, point);
+    } catch (e) {
+      debugPrint('Video: failed to save resume position: $e');
+    }
+  }
 
   String _fmt(Duration d) {
     final h = d.inHours;

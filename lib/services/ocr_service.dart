@@ -149,13 +149,44 @@ class OcrService {
   ///
   /// Throws when OCR has not been initialised or the engine fails; callers
   /// surface the error to the user.
+  ///
+  /// Uses proper Tesseract initialization with:
+  /// - Language set from preferences (default: eng)
+  /// - Page segmentation mode from preferences
+  /// - Preserve interword spaces for better accuracy
+  /// - Proper tessdata path configuration
   static Future<String> extractText(String imagePath) async {
-    if (tessDataPath.isEmpty) await ensureReady();
-    return FlutterTesseractOcr.extractText(
-      imagePath,
-      language: _language,
-      args: {'preserve_interword_spaces': '1', if (_psm != '3') 'psm': _psm},
-    );
+    if (tessDataPath.isEmpty) {
+      await ensureReady();
+    }
+
+    if (tessDataPath.isEmpty) {
+      throw Exception('OCR not initialized: tessdata path not available');
+    }
+
+    try {
+      // Verify the image file exists
+      final imgFile = File(imagePath);
+      if (!await imgFile.exists()) {
+        throw Exception('Image file not found: $imagePath');
+      }
+
+      final result = await FlutterTesseractOcr.extractText(
+        imagePath,
+        language: _language,
+        args: {
+          'preserve_interword_spaces': '1',
+          if (_psm != '3') 'psm': _psm,
+          // Additional parameters for better accuracy
+          'oem': '1', // LSTM engine only
+        },
+      );
+
+      return result ?? '';
+    } catch (e) {
+      debugPrint('OcrService.extractText failed: $e');
+      rethrow;
+    }
   }
 
   /// OCR for any document the user picks. Images go straight to the engine;
