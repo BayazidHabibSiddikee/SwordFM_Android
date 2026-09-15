@@ -18,7 +18,8 @@ import 'screens/trash_screen.dart';
 import 'screens/lan_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/storage_analysis_screen.dart';
-import 'screens/network_screen.dart';
+import 'screens/unified_network_screen.dart';
+import 'screens/tools_screen.dart';
 import 'screens/recent_files_screen.dart';
 import 'screens/notepad_screen.dart';
 import 'screens/document_scanner_screen.dart';
@@ -942,25 +943,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   ),
               ],
             ),
-            // Tab 1-6: Full-screen screens.
+            // Tab 1-5: Full-screen screens.
             LANSharingScreen(
               key: ValueKey(_lanShareRoot), // force rebuild if it changes
               initialShareRoot: _lanShareRoot,
             ),
-            SettingsScreen(
-              onToolTap: (index) {
-                // Navigate to the corresponding bottom-bar tab instead of
-                // pushing a full-screen route that hides the nav bar.
-                setState(() {
-                  _selectedIndex = index;
-                  _sidebarTool = null;
-                  if (index == 0) _previewVisible = true;
-                });
-              },
-            ),
+            const UnifiedNetworkScreen(),
+            const ToolsScreen(),
             StorageAnalysisScreen(rootPath: AppPaths.home),
-            const NetworkScreen(),
-            const CloudBrowserScreen(),
+            const SettingsScreen(),
           ],
         ),
             ),
@@ -986,10 +977,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.folder), label: 'Files'),
           NavigationDestination(icon: Icon(Icons.wifi), label: 'LAN'),
-          NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
+          NavigationDestination(icon: Icon(Icons.cloud_sync), label: 'Network & Cloud'),
+          NavigationDestination(icon: Icon(Icons.handyman), label: 'Tools'),
           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Storage'),
-          NavigationDestination(icon: Icon(Icons.cloud), label: 'Network'),
-          NavigationDestination(icon: Icon(Icons.cloud_queue), label: 'Cloud'),
+          NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     ),

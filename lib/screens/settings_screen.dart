@@ -18,14 +18,7 @@ import '../widgets/file_browser.dart'
         savePersistedRootMode;
 import 'privacy_policy_screen.dart';
 import 'auth_screen.dart';
-import 'duplicates_screen.dart';
-import 'document_scanner_screen.dart';
 import 'help_screen.dart';
-import '../services/ocr_service.dart';
-import 'cast_screen.dart';
-import 'notepad_screen.dart';
-import 'cloud_browser_screen.dart';
-import 'storage_analysis_screen.dart';
 
 /// Settings screen for configuring the app.
 class SettingsScreen extends StatefulWidget {
@@ -33,9 +26,9 @@ class SettingsScreen extends StatefulWidget {
   /// (Storage=3, Cloud=5, App Analyzer=2+tool). Instead of pushing
   /// a full-screen route (which hides the bottom navigation bar), the caller
   /// switches the bottom tab via this callback.
-  final void Function(int index)? onToolTap;
+  
 
-  const SettingsScreen({super.key, this.onToolTap});
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -437,113 +430,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 16),
 
-                  // Tools
-          _sectionTitle('Tools'),
-          _settingTile(
-            icon: Icons.bar_chart,
-            title: 'Storage Analysis',
-            subtitle: 'See disk usage by folder',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              if (widget.onToolTap != null) {
-                widget.onToolTap!(3);
-              } else {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          StorageAnalysisScreen(rootPath: AppPaths.home),
-                    ),
-                  );
-              }
-            },
-          ),
-          const SizedBox(height: 8),
-          _settingTile(
-            icon: Icons.all_inclusive,
-            title: 'Find Duplicates',
-            subtitle: 'Scan for duplicate files by hash',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const DuplicatesScreen())),
-          ),
-          const SizedBox(height: 8),
-          _settingTile(
-            icon: Icons.cloud_sync,
-            title: 'Cloud Storage',
-            subtitle: 'Connect Google Drive or Dropbox',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              if (widget.onToolTap != null) {
-                widget.onToolTap!(5);
-              } else {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const CloudBrowserScreen()),
-                  );
-              }
-            },
-          ),
-          const SizedBox(height: 8),
-          _settingTile(
-            icon: Icons.cloud,
-            title: 'rclone Cloud Mounts',
-            subtitle: 'Browse cloud storage via rclone (requires Termux)',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: _openRcloneBrowser,
-          ),
-          const SizedBox(height: 8),
-          _settingTile(
-            icon: Icons.document_scanner,
-            title: 'Document Scanner',
-            subtitle: 'Scan pages into a PDF',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const DocumentScannerScreen()),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const SizedBox(height: 8),
-          _settingTile(
-            icon: Icons.cast,
-            title: 'Cast',
-            subtitle: 'Discover Chromecast / DLNA devices',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const CastScreen())),
-          ),
-          const SizedBox(height: 8),
-          _settingTile(
-            icon: Icons.sticky_note_2,
-            title: 'Notepad',
-            subtitle: 'Create and edit text documents',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const NotepadScreen())),
-          ),
-
-          const SizedBox(height: 16),
-
-          // OCR
-          _sectionTitle('OCR / Text Recognition'),
-          _settingTile(
-            icon: Icons.translate,
-            title: 'Recognition Language',
-            subtitle: 'Language used by Tesseract OCR',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showOcrLanguagePicker(context),
-          ),
-          const SizedBox(height: 8),
-          _settingTile(
-            icon: Icons.tune,
-            title: 'Page Segmentation Mode',
-            subtitle: 'How Tesseract analyses the page layout',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showOcrPsmPicker(context),
-          ),
-          const SizedBox(height: 8),
-          _settingTile(
+                  _settingTile(
             icon: Icons.help_outline,
             title: 'Help & How-To',
             subtitle: 'Learn how features and cloud storage work',
@@ -864,93 +751,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// Opens rclone browser via Termux. Prefers URL scheme; falls back to
   /// instructions if the scheme is unavailable.
-  Future<void> _openRcloneBrowser() async {
-    // Try opening rclone browser in Termux via URI scheme
-    final uri = Uri.parse(
-      'termux://com.termux.app?action=run_command&command=rclone%20browser',
-    );
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri);
-      } else {
-        // Fallback: show instructions
-        if (!mounted) return;
-        showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            backgroundColor: OneDarkColors.bg,
-            title: Text(
-              'rclone Browser',
-              style: TextStyle(color: OneDarkColors.fg),
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Open Termux and run:',
-                  style: TextStyle(color: OneDarkColors.fg),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'rclone browser',
-                  style: TextStyle(
-                    color: OneDarkColors.cyan,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-                SizedBox(height: 12),
-                Text(
-                  'Or browse a specific remote:',
-                  style: TextStyle(color: OneDarkColors.fgDim),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  'rclone browser remote:path',
-                  style: TextStyle(
-                    color: OneDarkColors.cyan,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-                SizedBox(height: 12),
-                Text(
-                  'Prerequisites: Termux + rclone installed.',
-                  style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
-              ),
-              FilledButton(
-                onPressed: () async {
-                  if (!mounted) return;
-                  Navigator.pop(context);
-                  final termuxUri = Uri.parse(
-                    'https://f-droid.org/packages/com.termux/',
-                  );
-                  if (await canLaunchUrl(termuxUri)) {
-                    await launchUrl(termuxUri);
-                  }
-                },
-                child: const Text('Install Termux'),
-              ),
-            ],
-          ),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not open rclone: $e'),
-          backgroundColor: OneDarkColors.red,
-        ),
-      );
-    }
-  }
+  
 
   Widget _trashAutoEmptyTile() {
     final labels = {0: 'Never', 1: 'After 7 days', 2: 'After 30 days'};
@@ -975,82 +776,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _showOcrLanguagePicker(BuildContext ctx) async {
-    await OcrService.ensureReady();
-    final prefs = await OcrService.loadPrefs();
-    String current = prefs[0];
-    final langs = OcrService.availableLanguages;
-    if (!ctx.mounted) return;
-    await showDialog<void>(
-      context: ctx,
-      builder: (dc) => AlertDialog(
-        title: const Text('OCR Language'),
-        content: StatefulBuilder(
-          builder: (_, setSt) => SizedBox(
-            width: double.maxFinite,
-            child: ListView(
-              shrinkWrap: true,
-              children: langs.map((lang) {
-                return RadioListTile<String>(
-                  title: Text(lang),
-                  value: lang,
-                  groupValue: current,
-                  onChanged: (v) async {
-                    if (v == null) return;
-                    await OcrService.savePrefs(language: v);
-                    setSt(() => current = v);
-                  },
-                );
-              }).toList(),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dc),
-            child: const Text('Done'),
-          ),
-        ],
-      ),
-    );
-  }
+  
 
-  Future<void> _showOcrPsmPicker(BuildContext ctx) async {
-    final prefs = await OcrService.loadPrefs();
-    String currentPsm = prefs[1];
-    final modes = OcrService.psmModes;
-    if (!ctx.mounted) return;
-    await showDialog<void>(
-      context: ctx,
-      builder: (dc) => AlertDialog(
-        title: const Text('Page Segmentation Mode'),
-        content: StatefulBuilder(
-          builder: (_, setSt) => SizedBox(
-            width: double.maxFinite,
-            child: ListView(
-              shrinkWrap: true,
-              children: modes.entries.map((e) {
-                return RadioListTile<String>(
-                  title: Text(e.key),
-                  value: e.value,
-                  groupValue: currentPsm,
-                  onChanged: (v) async {
-                    if (v == null) return;
-                    await OcrService.savePrefs(psm: v);
-                    setSt(() => currentPsm = v);
-                  },
-                );
-              }).toList(),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dc),
-            child: const Text('Done'),
-          ),
-        ],
-      ),
-    );
-  }
+  
 }
