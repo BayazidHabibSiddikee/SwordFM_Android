@@ -86,7 +86,7 @@ class _DocxReaderScreenState extends State<DocxReaderScreen>
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: cs.surface,
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: cs.surfaceContainerHighest,
         foregroundColor: cs.onSurface,
@@ -252,7 +252,7 @@ class _BlockRenderer extends StatelessWidget {
       child: _InlineRuns(
         runs: h.runs,
         base: TextStyle(
-          color: cs.onSurface,
+          color: Colors.black87,
           fontSize: baseSize,
           fontWeight: h.level <= 2 ? FontWeight.w700 : FontWeight.w600,
           height: 1.3,
@@ -264,7 +264,7 @@ class _BlockRenderer extends StatelessWidget {
   Widget _renderParagraph(DocxParagraph p, ColorScheme cs) {
     return _InlineRuns(
       runs: p.runs,
-      base: TextStyle(color: cs.onSurface, fontSize: 15, height: 1.5),
+      base: TextStyle(color: Colors.black87, fontSize: 15, height: 1.5),
       alignment: p.alignment,
     );
   }
@@ -284,7 +284,7 @@ class _BlockRenderer extends StatelessWidget {
                   child: Text(
                     l.ordered ? '${i + 1}.' : '•',
                     style: TextStyle(
-                      color: cs.onSurface,
+                      color: Colors.black87,
                       fontSize: 15,
                       height: 1.5,
                     ),
@@ -294,7 +294,7 @@ class _BlockRenderer extends StatelessWidget {
                   child: _InlineRuns(
                     runs: l.items[i],
                     base: TextStyle(
-                        color: cs.onSurface, fontSize: 15, height: 1.5),
+                        color: Colors.black87, fontSize: 15, height: 1.5),
                   ),
                 ),
               ],
@@ -331,7 +331,7 @@ class _BlockRenderer extends StatelessWidget {
                     Expanded(
                       child: Container(
                         color: r == 0
-                            ? cs.surfaceContainerHighest
+                            ? Colors.grey[200]
                             : Colors.transparent,
                         padding: const EdgeInsets.all(8),
                         child: _InlineRuns(
@@ -339,7 +339,7 @@ class _BlockRenderer extends StatelessWidget {
                               ? t.rows[r][c]
                               : const <DocxRun>[],
                           base: TextStyle(
-                              color: cs.onSurface,
+                              color: Colors.black87,
                               fontSize: 13,
                               fontWeight: r == 0
                                   ? FontWeight.w600

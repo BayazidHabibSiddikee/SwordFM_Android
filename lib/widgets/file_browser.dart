@@ -264,6 +264,10 @@ class FileBrowser extends StatefulWidget {
   /// context-menu "Bookmark This Folder"). Receives the folder path.
   final ValueChanged<String>? onBookmarkCurrentPath;
 
+  /// Called when a folder's 'Share via LAN' context menu is selected.
+  /// If provided, the parent can handle switching to the LAN tab instead of showing a modal sheet.
+  final void Function(String path)? onShareViaLan;
+
   const FileBrowser({
     super.key,
     required this.initialPath,
@@ -274,6 +278,7 @@ class FileBrowser extends StatefulWidget {
     this.onMarksChanged,
     this.onItemCountChanged,
     this.onBookmarkCurrentPath,
+    this.onShareViaLan,
   });
 
   @override
@@ -1485,6 +1490,10 @@ class _FileBrowserState extends State<FileBrowser> {
   /// Shares a folder over LAN: opens the LAN screen with this folder as
   /// the share root, so another device can browse/download it in a browser.
   void _shareFolderViaLan(String path) {
+    if (widget.onShareViaLan != null) {
+      widget.onShareViaLan!(path);
+      return;
+    }
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,

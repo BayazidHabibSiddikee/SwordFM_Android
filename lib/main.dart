@@ -168,6 +168,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   FileItem? _selectedItem;
 
   int _itemCount = 0; // item count in the current directory
+  String? _lanShareRoot;
 
   /// When a tool from the left sidebar (Scanner, Notepad, Cast)
   /// is opened, it is embedded here inside the Files tab so the bottom
@@ -914,6 +915,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                                       setState(() => _itemCount = count),
                                   onBookmarkCurrentPath: (path) =>
                                       _addBookmark(path),
+                                  onShareViaLan: (path) {
+                                    setState(() {
+                                      _lanShareRoot = path;
+                                      _selectedIndex = 1; // switch to LAN tab
+                                    });
+                                  },
                                 ),
                               ),
                       ),
@@ -936,8 +943,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               ],
             ),
             // Tab 1-6: Full-screen screens.
-            LANSharingScreen(),
-                        SettingsScreen(
+            LANSharingScreen(
+              key: ValueKey(_lanShareRoot), // force rebuild if it changes
+              initialShareRoot: _lanShareRoot,
+            ),
+            SettingsScreen(
               onToolTap: (index) {
                 // Navigate to the corresponding bottom-bar tab instead of
                 // pushing a full-screen route that hides the nav bar.

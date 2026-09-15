@@ -96,6 +96,22 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
     // Keep screen on during video playback
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _currentIndex = widget.initialIndex.clamp(0, _playlist.length - 1);
+    
+    // Listen to video action from Foreground Service
+    const MethodChannel('com.swordfm/video_actions').setMethodCallHandler((call) async {
+      if (call.method == 'onVideoAction') {
+        final action = call.arguments as String?;
+        if (action == 'com.swordfm.swordfm.PLAY') {
+          _player?.play();
+        } else if (action == 'com.swordfm.swordfm.PAUSE') {
+          _player?.pause();
+        } else if (action == 'com.swordfm.swordfm.STOP') {
+          _player?.pause();
+          Navigator.of(context).pop();
+        }
+      }
+    });
+    
     _loadHwDecodePref().then((_) => _initPlayer());
   }
 
@@ -232,6 +248,20 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
       _player!.stream.completed.listen((completed) {
         if (completed) _tryPlayNext();
       });
+      
+      _player!.stream.playing.listen((playing) {
+        if (playing) {
+          const MethodChannel('com.swordfm/video_actions').invokeMethod('startService', {
+            'title': _fileName(),
+            'isPlaying': true
+          });
+        } else {
+          const MethodChannel('com.swordfm/video_actions').invokeMethod('startService', {
+            'title': _fileName(),
+            'isPlaying': false
+          });
+        }
+      });
 
       await _openCurrent();
       _resumeTimer = Timer.periodic(const Duration(seconds: 15), (_) {
@@ -346,6 +376,10 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    
+    // Stop the background service if it's running
+    const MethodChannel('com.swordfm/video_actions').invokeMethod('stopService');
+    
     _hideTimer?.cancel();
     _resumeTimer?.cancel();
     _saveResume();
@@ -364,24 +398,16 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
-      case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
-        // App is going to background or screen is locked
-        // Save current position before player pauses
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
         _saveResumePosition();
-        // Don't explicitly pause here - the player will handle it
-        // when the surface becomes invalid
+        // We do NOT pause the player here anymore, so background playback (audio)
+        // continues, supported by the Kotlin Foreground Service we just added!
         break;
       case AppLifecycleState.resumed:
-        // App returned to foreground
-        // Try to resume if we were playing before
-        if (_wasPlaying && _player != null) {
-          _player!.play();
-        }
-        _wasPlaying = false;
         break;
       case AppLifecycleState.detached:
-      case AppLifecycleState.hidden:
         break;
     }
   }

@@ -61,26 +61,26 @@ class _PptxViewerScreenState extends State<PptxViewerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: OneDarkColors.bg,
+      backgroundColor: Colors.white,
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               p.basename(widget.filePath),
-              style: TextStyle(color: OneDarkColors.fg, fontSize: 14),
+              style: const TextStyle(color: Colors.black87, fontSize: 14),
               overflow: TextOverflow.ellipsis,
             ),
             if (_outline != null && _outline!.slides.isNotEmpty)
               Text(
                 '${_outline!.slideCount} slides · outline',
-                style: TextStyle(color: OneDarkColors.fgDim, fontSize: 11),
+                style: const TextStyle(color: Colors.black54, fontSize: 11),
               ),
           ],
         ),
-        backgroundColor: OneDarkColors.bgDark,
-        foregroundColor: OneDarkColors.fg,
-        iconTheme: IconThemeData(color: OneDarkColors.fg),
+        backgroundColor: Colors.grey[200],
+        foregroundColor: Colors.black87,
+        iconTheme: const IconThemeData(color: Colors.black87),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -97,15 +97,15 @@ class _PptxViewerScreenState extends State<PptxViewerScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
+            const Icon(
               Icons.slideshow,
               size: 48,
-              color: OneDarkColors.fgDim,
+              color: Colors.black54,
             ),
             const SizedBox(height: 12),
             Text(
               _error!,
-              style: TextStyle(color: OneDarkColors.fgDim),
+              style: const TextStyle(color: Colors.black54),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
@@ -129,10 +129,11 @@ class _PptxViewerScreenState extends State<PptxViewerScreen> {
       itemBuilder: (context, i) {
         final slide = slides[i];
         return Card(
-          color: OneDarkColors.bgDark,
+          color: Colors.white,
+          elevation: 2,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
-            side: BorderSide(color: OneDarkColors.border),
+            side: BorderSide(color: Colors.grey[300]!),
           ),
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -147,13 +148,13 @@ class _PptxViewerScreenState extends State<PptxViewerScreen> {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: OneDarkColors.cyan.withValues(alpha: 0.15),
+                        color: Colors.blue.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         'Slide ${slide.number > 0 ? slide.number : i + 1}',
-                        style: TextStyle(
-                          color: OneDarkColors.cyan,
+                        style: const TextStyle(
+                          color: Colors.blue,
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                         ),
@@ -165,8 +166,8 @@ class _PptxViewerScreenState extends State<PptxViewerScreen> {
                 if (slide.title.isNotEmpty)
                   Text(
                     slide.title,
-                    style: TextStyle(
-                      color: OneDarkColors.fg,
+                    style: const TextStyle(
+                      color: Colors.black87,
                       fontSize: 15,
                       fontWeight: FontWeight.bold,
                     ),
@@ -179,18 +180,18 @@ class _PptxViewerScreenState extends State<PptxViewerScreen> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        const Text(
                           '• ',
                           style: TextStyle(
-                            color: OneDarkColors.fgDim,
+                            color: Colors.black54,
                             fontSize: 13,
                           ),
                         ),
                         Expanded(
                           child: Text(
                             line,
-                            style: TextStyle(
-                              color: OneDarkColors.fg,
+                            style: const TextStyle(
+                              color: Colors.black87,
                               fontSize: 13,
                             ),
                           ),
@@ -199,10 +200,10 @@ class _PptxViewerScreenState extends State<PptxViewerScreen> {
                     ),
                   ),
                 if (slide.isEmpty)
-                  Text(
+                  const Text(
                     '(empty slide)',
                     style: TextStyle(
-                      color: OneDarkColors.fgDim,
+                      color: Colors.black54,
                       fontSize: 13,
                       fontStyle: FontStyle.italic,
                     ),

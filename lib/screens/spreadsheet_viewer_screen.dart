@@ -133,18 +133,18 @@ class _SpreadsheetViewerScreenState extends State<SpreadsheetViewerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: OneDarkColors.bg,
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: OneDarkColors.bgDark,
+        backgroundColor: Colors.grey[200],
         title: Text(_fileName,
-            style: TextStyle(color: OneDarkColors.fg, fontSize: 14)),
+            style: const TextStyle(color: Colors.black87, fontSize: 14)),
         leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: OneDarkColors.fg),
+          icon: const Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.refresh, color: OneDarkColors.fgDim),
+            icon: const Icon(Icons.refresh, color: Colors.black54),
             tooltip: 'Reload',
             onPressed: _loadFile,
           ),

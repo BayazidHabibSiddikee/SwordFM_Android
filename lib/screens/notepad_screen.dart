@@ -146,7 +146,6 @@ class _NotepadScreenState extends State<NotepadScreen> {
                 style: TextStyle(color: OneDarkColors.fg),
                 decoration: InputDecoration(
                   labelText: 'Filename',
-                  suffixText: '.txt',
                   border: OutlineInputBorder(),
                 ),
                 autofocus: true,
@@ -206,7 +205,6 @@ class _NotepadScreenState extends State<NotepadScreen> {
     if (choice == null) return;
     var name = choice['name'] ?? '';
     if (name.isEmpty) return;
-    if (!name.endsWith('.txt')) name = '$name.txt';
     final dir = choice['dir'] ?? AppPaths.documents;
     _currentPath = p.join(dir, name);
     _isNewDocument = false;

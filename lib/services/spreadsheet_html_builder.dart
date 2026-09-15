@@ -46,12 +46,12 @@ String wrapSheetHtml(String body) => '''<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
   body { font-family: monospace; font-size: 12px;
-         background: #282c34; color: #abb2bf; margin: 0; overflow-x: auto; }
+         background: #ffffff; color: #000000; margin: 0; overflow-x: auto; }
   .tbl-wrap { overflow: auto; }
   table { border-collapse: collapse; width: max-content; }
-  th, td { border: 1px solid #3e4451; padding: 4px 8px; white-space: nowrap; }
-  th { background: #2c313a; color: #e5c07b; position: sticky; top: 0; }
-  tr:nth-child(even) td { background: #2c313a; }
+  th, td { border: 1px solid #ccc; padding: 4px 8px; white-space: nowrap; }
+  th { background: #f0f0f0; color: #333; position: sticky; top: 0; }
+  tr:nth-child(even) td { background: #f9f9f9; }
 </style>
 </head>
 <body><div class="tbl-wrap">$body</div></body>
@@ -87,19 +87,19 @@ String buildSheetJsViewerHtml({
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
   body { font-family: monospace; font-size: 12px;
-         background: #282c34; color: #abb2bf; margin: 0; }
-  #msg { padding: 16px; color: #e5c07b; }
+         background: #ffffff; color: #000000; margin: 0; }
+  #msg { padding: 16px; color: #333; }
   .sheet-tabs { display:flex; flex-wrap:wrap; gap:4px;
-                padding: 6px 8px; background:#21252b; }
+                padding: 6px 8px; background:#f5f5f5; border-bottom: 1px solid #ccc; }
   .sheet-tab  { padding: 4px 10px; border-radius: 4px; cursor: pointer;
-                background:#3e4451; color:#abb2bf; border:none; font-size:12px; }
-  .sheet-tab.active { background:#61afef; color:#282c34; }
+                background:#e0e0e0; color:#333; border:none; font-size:12px; }
+  .sheet-tab.active { background:#61afef; color:#fff; }
   .tbl-wrap { overflow:auto; max-height: calc(100vh - 60px); }
   table { border-collapse: collapse; width: max-content; }
-  th, td { border: 1px solid #3e4451; padding: 4px 8px;
+  th, td { border: 1px solid #ccc; padding: 4px 8px;
             white-space: nowrap; min-width: 60px; }
-  th { background:#2c313a; color:#e5c07b; position:sticky; top:0; z-index:1; }
-  tr:nth-child(even) td { background:#2c313a; }
+  th { background:#f0f0f0; color:#333; position:sticky; top:0; z-index:1; }
+  tr:nth-child(even) td { background:#f9f9f9; }
 </style>
 </head>
 <body>
@@ -121,11 +121,11 @@ function renderSheet(wb, name){
   wrap.querySelectorAll("table").forEach(function(t){
     t.style.borderCollapse="collapse";
     t.querySelectorAll("td,th").forEach(function(c){
-      c.style.border="1px solid #3e4451";
+      c.style.border="1px solid #ccc";
       c.style.padding="4px 8px";
       c.style.whiteSpace="nowrap";
       c.style.background="";
-      c.style.color="#abb2bf";
+      c.style.color="#000";
     });
   });
 }

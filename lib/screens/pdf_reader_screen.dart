@@ -403,8 +403,15 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
       _toast('Could not save - try again');
       return;
     }
-    _toast('Saved: ${p.basename(outPath)}');
-    unawaited(ShareService.share([outPath]));
+    
+    // Clear marks since they are now embedded in the file
+    setState(() => _marks.clear());
+    await _saveMarks();
+    
+    _toast('Saved to original file successfully');
+    
+    // Reload the document to show the embedded marks
+    _restartInMode(_horizontalMode);
   }
 
   /// Creates a new PDF with marks embedded in the page content.
@@ -484,15 +491,15 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
     // Save the PDF
     final bytes = await out.save();
     
-    // Save to same directory as original if possible
-    final stem = p.basenameWithoutExtension(widget.filePath);
-    var outPath = p.join(p.dirname(widget.filePath), '${stem}_marked.pdf');
+    // Save to the original file to persist marks across devices
+    var outPath = widget.filePath;
     
     try {
       await File(outPath).writeAsBytes(bytes, flush: true);
     } catch (e) {
-      debugPrint('PdfReader: export next-to-original failed, using cache: $e');
+      debugPrint('PdfReader: export to original failed, using cache: $e');
       final cache = await getTemporaryDirectory();
+      final stem = p.basenameWithoutExtension(widget.filePath);
       outPath = p.join(cache.path, '${stem}_marked.pdf');
       await File(outPath).writeAsBytes(bytes, flush: true);
     }

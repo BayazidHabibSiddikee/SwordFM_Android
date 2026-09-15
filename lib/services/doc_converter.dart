@@ -494,21 +494,9 @@ class DocConverter {
   /// (Tj / TJ). For image-only / scanned PDFs where that yields nothing,
   /// falls back to Tesseract OCR (requires the bundled eng.traineddata).
   static Future<String?> fromPdf(String sourcePath) async {
-    // 1. Fast text-stream extraction (works for text-layer PDFs)
-    final text = _extractPdfTextSync(sourcePath);
-    if (text != null && text.isNotEmpty) {
-      try {
-        final outPath = _resolveOutputPath(sourcePath, '.txt');
-        await _writeOutput(outPath, utf8.encode(text));
-        return outPath;
-      } catch (e) {
-        debugPrint('fromPdf write failed for $sourcePath: $e');
-        return null;
-      }
-    }
-    // 2. OCR fallback for scanned / image-only PDFs
+    // User requested: "don't go for dart use C ocr tessaract etc"
+    // Bypass Dart parser and strictly use OCR.
     try {
-      // Import lazily to avoid a hard dependency when OCR is not needed.
       final ocrText = await _ocrPdf(sourcePath);
       if (ocrText != null && ocrText.trim().isNotEmpty) {
         final outPath = _resolveOutputPath(sourcePath, '.txt');
@@ -516,7 +504,7 @@ class DocConverter {
         return outPath;
       }
     } catch (e) {
-      debugPrint('fromPdf OCR fallback failed: $e');
+      debugPrint('fromPdf OCR failed: $e');
     }
     return null;
   }
@@ -1061,13 +1049,9 @@ class DocConverter {
     try {
       String md;
       if (ext == '.pdf') {
-        md = _extractPdfMarkdownSync(sourcePath);
-        // Fallback: if text extraction yielded nothing (scanned/image PDF),
-        // use OCR to get text then treat it as plain markdown.
-        if (md.trim().isEmpty) {
-          final ocrText = await _ocrPdf(sourcePath);
-          md = ocrText ?? '';
-        }
+        // User requested: "don't go for dart use C ocr tessaract etc"
+        // Bypass Dart parser and strictly use OCR to extract text from the PDF.
+        md = await _ocrPdf(sourcePath) ?? '';
       } else if (ext == '.docx') {
         final doc = await DocxReader.parse(sourcePath);
         md = _docxBlocksToMarkdown(doc);
@@ -1887,6 +1871,21 @@ class DocConverter {
         continue;
       }
 
+      // Image (e.g. ![alt text](path))
+      final img = RegExp(r'^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$').firstMatch(line);
+      if (img != null) {
+        flushPara();
+        nodes.add(
+          _MdNode(
+            kind: 'image',
+            text: img.group(1) ?? '',
+            src: img.group(2) ?? '',
+          ),
+        );
+        i++;
+        continue;
+      }
+
       // Unordered list.
       if (RegExp(r'^\s*[-*+]\s+').hasMatch(line)) {
         flushPara();
@@ -2009,6 +2008,21 @@ class DocConverter {
         case 'hr':
           widgets.add(pw.Divider());
           break;
+        case 'image':
+          try {
+            final file = File(n.src);
+            if (file.existsSync()) {
+              final img = pw.MemoryImage(file.readAsBytesSync());
+              widgets.add(
+                pw.Center(child: pw.Image(img)),
+              );
+            } else {
+              widgets.add(pw.Text('[Image: ${n.src}]'));
+            }
+          } catch (_) {
+            widgets.add(pw.Text('[Image: ${n.src}]'));
+          }
+          break;
       }
     }
     doc.addPage(
@@ -2050,7 +2064,7 @@ class DocConverter {
 
   static String _escapeXml(String s) => _escapeHtml(s);
 
-  static void _writeDocxNode(StringBuffer buffer, _MdNode n) {
+  static void _writeDocxNode(StringBuffer buffer, _MdNode n, int imageIndex) {
     final esc = _escapeXml;
     switch (n.kind) {
       case 'heading':
@@ -2090,6 +2104,12 @@ class DocConverter {
       case 'hr':
         buffer.write('<w:p><w:r><w:t>\u2014\u2014\u2014</w:t></w:r></w:p>');
         break;
+      case 'image':
+        final rId = 'rIdImg$imageIndex';
+        buffer.write(
+          '<w:p><w:r><w:drawing><wp:inline><wp:extent cx="3000000" cy="3000000"/><wp:docPr id="$imageIndex" name="Picture"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="$imageIndex" name="Pic"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="$rId"/></pic:blipFill><pic:spPr><a:presetGeom prst="rect"/></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
+        );
+        break;
     }
   }
 
@@ -2097,26 +2117,69 @@ class DocConverter {
   static Future<Uint8List> _buildDocxBytes(String markdown) async {
     final nodes = _parseMarkdown(markdown);
     final buffer = StringBuffer();
+    final images = <String>[];
+
     buffer.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
     buffer.write(
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">',
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+      'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+      'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" '
+      'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
     );
     buffer.write('<w:body>');
     for (final n in nodes) {
-      _writeDocxNode(buffer, n);
+      if (n.kind == 'image') {
+        images.add(n.src);
+        _writeDocxNode(buffer, n, images.length);
+      } else {
+        _writeDocxNode(buffer, n, 0);
+      }
     }
     buffer.write('<w:sectPr/>');
     buffer.write('</w:body></w:document>');
 
     final archive = Archive();
+    
+    var contentTypes = _kDocxContentTypes;
+    if (images.isNotEmpty) {
+      contentTypes = contentTypes.replaceAll('</Types>', '<Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpg" ContentType="image/jpeg"/></Types>');
+    }
+
     archive.addFile(
-      ArchiveFile.bytes('[Content_Types].xml', utf8.encode(_kDocxContentTypes)),
+      ArchiveFile.bytes('[Content_Types].xml', utf8.encode(contentTypes)),
     );
     archive.addFile(ArchiveFile.bytes('_rels/.rels', utf8.encode(_kDocxRels)));
+    
+    var docRels = _kDocxDocRels;
+    if (images.isNotEmpty) {
+      final relsBuf = StringBuffer();
+      relsBuf.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
+      relsBuf.write('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">');
+      for (var i = 0; i < images.length; i++) {
+        var ext = p.extension(images[i]).replaceAll('.', '');
+        if (ext.isEmpty) ext = 'jpeg';
+        relsBuf.write('<Relationship Id="rIdImg${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${i + 1}.$ext"/>');
+      }
+      relsBuf.write('</Relationships>');
+      docRels = relsBuf.toString();
+      
+      for (var i = 0; i < images.length; i++) {
+        try {
+          final file = File(images[i]);
+          if (file.existsSync()) {
+            var ext = p.extension(images[i]).replaceAll('.', '');
+            if (ext.isEmpty) ext = 'jpeg';
+            archive.addFile(ArchiveFile.bytes('word/media/image${i + 1}.$ext', file.readAsBytesSync()));
+          }
+        } catch (_) {}
+      }
+    }
+
     archive.addFile(
       ArchiveFile.bytes(
         'word/_rels/document.xml.rels',
-        utf8.encode(_kDocxDocRels),
+        utf8.encode(docRels),
       ),
     );
     archive.addFile(
@@ -2187,12 +2250,14 @@ class _MdNode {
   final int level; // heading level (1..6)
   final List<String> items; // list items (ul/ol)
   final String lang; // code-fence language
+  final String src; // image source path
   const _MdNode({
     required this.kind,
     this.text = '',
     this.level = 0,
     this.items = const [],
     this.lang = '',
+    this.src = '',
   });
 }
 

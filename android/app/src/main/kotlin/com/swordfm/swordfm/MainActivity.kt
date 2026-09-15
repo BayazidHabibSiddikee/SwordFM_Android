@@ -89,6 +89,8 @@ class MainActivity : AudioServiceActivity(), MethodChannel.MethodCallHandler {
                 null
             }
         }
+        
+        var videoActionChannel: MethodChannel? = null
     }
 
     private var pendingInstallResult: MethodChannel.Result? = null
@@ -177,6 +179,35 @@ class MainActivity : AudioServiceActivity(), MethodChannel.MethodCallHandler {
         flutterEngine?.let {
             methodChannel = MethodChannel(it.dartExecutor.binaryMessenger, CHANNEL)
             methodChannel?.setMethodCallHandler(this)
+            
+            videoActionChannel = MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/video_actions")
+            videoActionChannel?.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "startService" -> {
+                        val title = call.argument<String>("title") ?: "Playing Video"
+                        val isPlaying = call.argument<Boolean>("isPlaying") ?: true
+                        val intent = Intent(this, VideoForegroundService::class.java).apply {
+                            putExtra("title", title)
+                            putExtra("isPlaying", isPlaying)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(null)
+                    }
+                    "stopService" -> {
+                        val intent = Intent(this, VideoForegroundService::class.java).apply {
+                            action = VideoForegroundService.ACTION_STOP
+                        }
+                        startService(intent)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
             // "Open With…" app chooser live on their own channel so the bluetooth channel stays focused.
             MethodChannel(it.dartExecutor.binaryMessenger, "com.swordfm/openwith")
                 .setMethodCallHandler(this)
