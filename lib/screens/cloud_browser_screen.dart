@@ -328,7 +328,7 @@ class _CloudBrowserScreenState extends State<CloudBrowserScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Get your key at dev.openrazer.com',
+              'Get your key at dev.opendrive.com',
               style: TextStyle(color: OneDarkColors.cyan, fontSize: 11),
             ),
             const SizedBox(height: 12),

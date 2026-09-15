@@ -50,6 +50,8 @@
 # ---------------------------------------------------------------------------
 -keep class com.swordfm.swordfm.MainActivity { *; }
 -keep class com.swordfm.swordfm.InstallReceiver { *; }
+-keep class com.swordfm.swordfm.VideoForegroundService { *; }
+-keep class com.swordfm.swordfm.VideoActionReceiver { *; }
 
 # ---------------------------------------------------------------------------
 # Suppress warnings for missing classes in optional/platform deps

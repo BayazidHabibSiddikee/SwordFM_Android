@@ -58,7 +58,7 @@ class OpenDriveService {
     try {
       // OpenDrive uses OAuth2 with client credentials or authorization code
       final authUrl = Uri.parse(
-        'https://dev.openrazer.com/oauth2/authorize'
+        'https://dev.opendrive.com/oauth2/authorize'
         '?client_id=$key'
         '&response_type=code'
         '&redirect_uri=storagesfm://opendrive-callback',
@@ -81,7 +81,7 @@ class OpenDriveService {
 
     try {
       final response = await http.post(
-        Uri.parse('https://dev.openrazer.com/oauth2/token'),
+        Uri.parse('https://dev.opendrive.com/oauth2/token'),
         body: {
           'code': authCode,
           'grant_type': 'authorization_code',
@@ -118,7 +118,7 @@ class OpenDriveService {
 
     try {
       final response = await http.post(
-        Uri.parse('https://dev.openrazer.com/oauth2/token'),
+        Uri.parse('https://dev.opendrive.com/oauth2/token'),
         body: {
           'grant_type': 'refresh_token',
           'refresh_token': _refreshToken!,
@@ -160,8 +160,8 @@ class OpenDriveService {
 
     try {
       final uri = folderId != null
-          ? Uri.parse('https://dev.openrazer.com/api/2/files?folder_id=$folderId')
-          : Uri.parse('https://dev.openrazer.com/api/2/files');
+          ? Uri.parse('https://dev.opendrive.com/api/2/files?folder_id=$folderId')
+          : Uri.parse('https://dev.opendrive.com/api/2/files');
 
       final response = await http.get(uri, headers: {
         'Authorization': 'Bearer $_accessToken',
@@ -192,7 +192,7 @@ class OpenDriveService {
 
     try {
       final response = await http.post(
-        Uri.parse('https://dev.openrazer.com/api/2/files/folder'),
+        Uri.parse('https://dev.opendrive.com/api/2/files/folder'),
         headers: {
           'Authorization': 'Bearer $_accessToken',
           'Content-Type': 'application/json',
@@ -220,7 +220,7 @@ class OpenDriveService {
 
     try {
       final response = await http.delete(
-        Uri.parse('https://dev.openrazer.com/api/2/files/$fileId'),
+        Uri.parse('https://dev.opendrive.com/api/2/files/$fileId'),
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
       return response.statusCode == 200 || response.statusCode == 204;
@@ -236,7 +236,7 @@ class OpenDriveService {
 
     try {
       final response = await http.put(
-        Uri.parse('https://dev.openrazer.com/api/2/files/$fileId'),
+        Uri.parse('https://dev.opendrive.com/api/2/files/$fileId'),
         headers: {
           'Authorization': 'Bearer $_accessToken',
           'Content-Type': 'application/json',
@@ -256,7 +256,7 @@ class OpenDriveService {
 
     try {
       final response = await http.get(
-        Uri.parse('https://dev.openrazer.com/api/2/files/$fileId/download'),
+        Uri.parse('https://dev.opendrive.com/api/2/files/$fileId/download'),
         headers: {'Authorization': 'Bearer $_accessToken'},
       );
 
@@ -280,7 +280,7 @@ class OpenDriveService {
       final bytes = await file.readAsBytes();
       final request = http.MultipartRequest(
         'POST',
-        Uri.parse('https://dev.openrazer.com/api/2/files/upload'),
+        Uri.parse('https://dev.opendrive.com/api/2/files/upload'),
       );
       request.headers['Authorization'] = 'Bearer $_accessToken';
       request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: remoteName));
