@@ -368,6 +368,16 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
     });
   }
 
+  void _seekRelative(Duration delta) {
+    if (_player == null) return;
+    final pos = _player!.state.position;
+    final max = _player!.state.duration;
+    var target = pos + delta;
+    if (target < Duration.zero) target = Duration.zero;
+    if (target > max) target = max;
+    _player!.seek(target);
+  }
+
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
     if (_showControls) _scheduleHide();
@@ -863,10 +873,7 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
                               color: Colors.white,
                               size: 28,
                             ),
-                            onPressed: () => _player?.seek(
-                              _player!.state.position -
-                                  const Duration(seconds: 10),
-                            ),
+                            onPressed: () => _seekRelative(const Duration(seconds: -10)),
                           ),
                           // Play / Pause
                           const SizedBox(width: 8),
@@ -895,10 +902,7 @@ class _VideoPlayerState extends State<VideoPlayerScreen>
                               color: Colors.white,
                               size: 28,
                             ),
-                            onPressed: () => _player?.seek(
-                              _player!.state.position +
-                                  const Duration(seconds: 10),
-                            ),
+                            onPressed: () => _seekRelative(const Duration(seconds: 10)),
                           ),
                           // Next in playlist
                           if (_playlist.length > 1)

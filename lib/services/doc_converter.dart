@@ -237,31 +237,11 @@ class DocConverter {
   static Future<String> _readSourceText(String sourcePath) async {
     final ext = p.extension(sourcePath).toLowerCase();
     if (ext == '.docx') {
-      // DOCX is a ZIP binary — pull the text out of word/document.xml
-      // directly (without writing anything).
       try {
-        final bytes = await File(sourcePath).readAsBytes();
-        final archive = ZipDecoder().decodeBytes(bytes);
-        final docXml = archive.files
-            .where((f) => f.name == 'word/document.xml')
-            .firstOrNull;
-        if (docXml == null) return '';
-        // readBytes() — archive 4.x-safe content read (see ArchiveService).
-        final docXmlBytes = docXml.readBytes();
-        if (docXmlBytes == null) return '';
-        final xml = utf8.decode(docXmlBytes, allowMalformed: true);
-        return _stripDocxHiddenText(xml)
-            .replaceAll('</w:p>', '\n')
-            .replaceAll('</w:tr>', '\n')
-            .replaceAll('<w:tab/>', '\t')
-            .replaceAll(RegExp(r'<[^>]+>'), '')
-            .replaceAll('&amp;', '&')
-            .replaceAll('&lt;', '<')
-            .replaceAll('&gt;', '>')
-            .replaceAll('&quot;', '"')
-            .replaceAll('&apos;', "'")
-            .trim();
-      } catch (_) {
+        final doc = await DocxReader.parse(sourcePath);
+        return _docxBlocksToMarkdown(doc);
+      } catch (e) {
+        debugPrint('_readSourceText docx failed: $e');
         return '';
       }
     }

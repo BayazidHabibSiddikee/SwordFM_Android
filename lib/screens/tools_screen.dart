@@ -6,6 +6,7 @@ import 'cast_screen.dart';
 import 'notepad_screen.dart';
 import 'duplicates_screen.dart';
 import '../widgets/batch_convert_dialog.dart';
+import 'file_picker_screen.dart';
 import '../services/ocr_service.dart';
 
 import 'package:url_launcher/url_launcher.dart';
@@ -81,16 +82,16 @@ class _ToolsScreenState extends State<ToolsScreen> {
   }
 
   Future<void> _openConverter() async {
-    final result = await FilePicker.pickFiles(allowMultiple: true);
+    final result = await Navigator.push<List<String>>(
+      context,
+      MaterialPageRoute(builder: (_) => const FilePickerScreen()),
+    );
     if (result == null || result.isEmpty) return;
-    
-    final paths = result.map((f) => f.path).whereType<String>().toList();
-    if (paths.isEmpty) return;
     
     if (mounted) {
       showDialog(
         context: context,
-        builder: (_) => BatchConvertDialog(filePaths: paths),
+        builder: (_) => BatchConvertDialog(filePaths: result),
       );
     }
   }

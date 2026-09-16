@@ -246,7 +246,23 @@ class _DupsState extends State<DuplicatesScreen> {
     if (confirmed == true) {
       try {
         await File(path).delete();
-        if (mounted) _scan();
+        if (mounted) {
+          setState(() {
+             var foundKey = '';
+             for (final k in _duplicates.keys) {
+                if (_duplicates[k]!.contains(path)) {
+                   _duplicates[k]!.remove(path);
+                   if (_duplicates[k]!.length <= 1) {
+                      foundKey = k;
+                   }
+                   break;
+                }
+             }
+             if (foundKey.isNotEmpty) {
+                 _duplicates.remove(foundKey);
+             }
+          });
+        }
       } catch (_) {}
     }
   }

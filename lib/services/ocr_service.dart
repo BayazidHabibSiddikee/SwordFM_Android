@@ -223,11 +223,11 @@ class OcrService {
         final img = File('${tmp.path}/page$i.png');
         await img.writeAsBytes(png.bytes);
         final text = await extractText(img.path);
-        if (buffer.isNotEmpty) buffer.write('\n\n');
-        buffer.write('--- Page $i ---\n$text');
+        if (buffer.isNotEmpty && text.trim().isNotEmpty) buffer.write('\n\n');
+        buffer.write(text.trim());
         await img.delete();
       }
-      return buffer.toString();
+      return buffer.toString().trim();
     } finally {
       await doc.close();
     }

@@ -3028,9 +3028,9 @@ class _FileBrowserState extends State<FileBrowser> {
           padding: const EdgeInsets.all(8),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
-            childAspectRatio: crossAxisCount >= 6 ? 0.7 : 0.75,
-            crossAxisSpacing: 4,
-            mainAxisSpacing: 4,
+            childAspectRatio: 1.0,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
           ),
           itemCount: _filteredItems.length,
           itemBuilder: (context, index) {

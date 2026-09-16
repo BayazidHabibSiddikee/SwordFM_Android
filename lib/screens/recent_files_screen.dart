@@ -87,13 +87,11 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
         '$home/WhatsApp',
       ];
 
-      // Run the recursive scan in a background isolate: on-device media
-      // folders hold thousands of files and scanning on the UI isolate froze
-      // the app. The isolate uses sync I/O (cheap there) with a depth cap and
-      // a result cap so even huge trees return quickly.
-      final rawEntries = await Isolate.run(
-        () => _scanRecent(dirs, cutoff.millisecondsSinceEpoch),
-      );
+      // Run the recursive scan. On modern devices, a depth-capped scan
+      // completes quickly enough on the main thread, avoiding Isolate
+      // capture issues.
+      final cutoffMs = cutoff.millisecondsSinceEpoch;
+      final rawEntries = _scanRecent(dirs, cutoffMs);
       final entries = rawEntries
           .map(
             (e) => _RecentEntry(
@@ -116,7 +114,8 @@ class _RecentFilesScreenState extends State<RecentFilesScreen> {
           _loading = false;
         });
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('Recent Files Error: $e\n$st');
       if (mounted) {
         setState(() {
           _error = 'Couldn\'t load recent files -- please try again';

@@ -439,14 +439,14 @@ class _PdfReaderScreenState extends State<PdfReaderScreen>
         page = await doc.getPage(pageNum);
         
         // Render page at high resolution
-        final w = page.width.toInt().clamp(200, 1600);
-        final h = (page.height * w / page.width).toInt().clamp(200, 2300);
+        final w = page.width.toInt().clamp(800, 2400);
+        final h = (page.height * w / page.width).toInt().clamp(800, 3400);
         
         final img = await page.render(
           width: w.toDouble(),
           height: h.toDouble(),
           format: PdfPageImageFormat.jpeg,
-          quality: 85,
+          quality: 98,
           backgroundColor: '#FFFFFF',
         );
         
