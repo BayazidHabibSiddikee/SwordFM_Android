@@ -96,40 +96,7 @@ class _ToolsScreenState extends State<ToolsScreen> {
     }
   }
 
-  Future<void> _openRcloneBrowser() async {
-    final uri = Uri.parse('termux://com.termux.app?action=run_command&command=rclone%20browser');
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri);
-      } else {
-        if (!mounted) return;
-        showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            backgroundColor: OneDarkColors.bg,
-            title: Text('rclone Browser', style: TextStyle(color: OneDarkColors.fg)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Open Termux and run:', style: TextStyle(color: OneDarkColors.fg)),
-                const SizedBox(height: 8),
-                Text('rclone browser', style: TextStyle(color: OneDarkColors.cyan, fontFamily: 'monospace')),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('_openRcloneBrowser error: $e');
-    }
-  }
+
 
   Widget _toolTile({
     required IconData icon,
@@ -192,12 +159,7 @@ class _ToolsScreenState extends State<ToolsScreen> {
           ),
           
           _sectionTitle('Utilities'),
-          _toolTile(
-            icon: Icons.cloud,
-            title: 'rclone Cloud Mounts',
-            subtitle: 'Browse cloud storage via rclone (requires Termux)',
-            onTap: _openRcloneBrowser,
-          ),
+
           _toolTile(
             icon: Icons.all_inclusive,
             title: 'Find Duplicates',

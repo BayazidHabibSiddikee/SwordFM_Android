@@ -20,6 +20,7 @@ class DuplicatesScreen extends StatefulWidget {
 
 class _DupsState extends State<DuplicatesScreen> {
   Map<String, List<String>> _duplicates = {};
+  Set<String> _markedPaths = {};
   bool _loading = false;
   String? _error;
   int _totalWastedBytes = 0;
@@ -263,7 +264,79 @@ class _DupsState extends State<DuplicatesScreen> {
              }
           });
         }
-      } catch (_) {}
+      } catch (e) {
+        if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+             SnackBar(content: Text('Failed to delete: $e'), backgroundColor: OneDarkColors.red),
+           );
+        }
+      }
+  }
+
+  Future<void> _deleteMarked() async {
+    if (_markedPaths.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: OneDarkColors.bg,
+        title: Text(
+          'Delete ${_markedPaths.length} files?',
+          style: TextStyle(color: OneDarkColors.fg),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Delete', style: TextStyle(color: OneDarkColors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    
+    int success = 0;
+    int failed = 0;
+    for (final path in _markedPaths) {
+      try {
+        await File(path).delete();
+        success++;
+      } catch (e) {
+        failed++;
+      }
+    }
+    
+    if (mounted) {
+      if (failed > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Deleted $success, failed to delete $failed'), backgroundColor: OneDarkColors.red),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Deleted $success files'), backgroundColor: OneDarkColors.green),
+        );
+      }
+      
+      setState(() {
+        for (final path in _markedPaths) {
+           var foundKey = '';
+           for (final k in _duplicates.keys) {
+              if (_duplicates[k]!.contains(path)) {
+                 _duplicates[k]!.remove(path);
+                 if (_duplicates[k]!.length <= 1) {
+                    foundKey = k;
+                 }
+                 break;
+              }
+           }
+           if (foundKey.isNotEmpty) {
+               _duplicates.remove(foundKey);
+           }
+        }
+        _markedPaths.clear();
+      });
     }
   }
 
@@ -424,10 +497,25 @@ class _DupsState extends State<DuplicatesScreen> {
                         children: entry.value.map((path) {
                           return ListTile(
                             dense: true,
-                            leading: Icon(
-                              Icons.insert_drive_file,
-                              size: 16,
-                              color: OneDarkColors.fgDim,
+                            leading: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Checkbox(
+                                  value: _markedPaths.contains(path),
+                                  onChanged: (val) {
+                                    setState(() {
+                                      if (val == true) _markedPaths.add(path);
+                                      else _markedPaths.remove(path);
+                                    });
+                                  },
+                                  activeColor: OneDarkColors.red,
+                                ),
+                                Icon(
+                                  Icons.insert_drive_file,
+                                  size: 16,
+                                  color: OneDarkColors.fgDim,
+                                ),
+                              ],
                             ),
                             title: Text(
                               path,
@@ -460,6 +548,14 @@ class _DupsState extends State<DuplicatesScreen> {
                 ),
               ],
             ),
+      floatingActionButton: _markedPaths.isNotEmpty
+          ? FloatingActionButton.extended(
+              onPressed: _deleteMarked,
+              backgroundColor: OneDarkColors.red,
+              icon: const Icon(Icons.delete, color: Colors.white),
+              label: Text('Delete ${_markedPaths.length}', style: TextStyle(color: Colors.white)),
+            )
+          : null,
     );
   }
 }

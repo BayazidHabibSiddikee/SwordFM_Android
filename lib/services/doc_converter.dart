@@ -43,7 +43,7 @@ class DocConverter {
   /// the Convert dialog does, so batch and single-file conversion agree.
   /// Returns the output path, or null when the source is not convertible or
   /// the conversion produced nothing. Never throws.
-  static Future<String?> convertOne(String sourcePath, String format) async {
+  static Future<String?> convertOne(String sourcePath, String format, {void Function(int, int)? onProgress}) async {
     try {
       if (!canConvert(sourcePath)) return null;
       final lower = sourcePath.toLowerCase();
@@ -54,7 +54,7 @@ class DocConverter {
       switch (format) {
         case 'PDF':
           if (isDocx) {
-            final md = await toMarkdown(sourcePath);
+            final md = await toMarkdown(sourcePath, onProgress: onProgress);
             return md != null ? await toPdf(md) : null;
           }
           if (isImage) {
@@ -63,19 +63,19 @@ class DocConverter {
           return await toPdf(sourcePath);
         case 'DOCX':
           if (isPdf || isDocx) {
-            final md = await toMarkdown(sourcePath);
+            final md = await toMarkdown(sourcePath, onProgress: onProgress);
             return md != null ? await toDocx(md) : null;
           }
           return await toDocx(sourcePath);
         case 'HTML':
           if (isPdf || isDocx) {
-            final md = await toMarkdown(sourcePath);
+            final md = await toMarkdown(sourcePath, onProgress: onProgress);
             return md != null ? await markdownFileToHtml(md) : null;
           }
           return await markdownFileToHtml(sourcePath);
         case 'Markdown':
         case 'MD':
-          return await toMarkdown(sourcePath);
+          return await toMarkdown(sourcePath, onProgress: onProgress);
         case 'TXT':
           if (isDocx) return await fromDocx(sourcePath);
           if (isPdf) return await pdfToText(sourcePath);
@@ -1021,7 +1021,7 @@ class DocConverter {
   /// PDF sources use [_extractPdfMarkdownSync] (layout-aware), DOCX sources
   /// use [DocxReader] and emit real markdown from the parsed blocks, and
   /// text sources are normalised in place. Returns the output path or null.
-  static Future<String?> toMarkdown(String sourcePath) async {
+  static Future<String?> toMarkdown(String sourcePath, {void Function(int, int)? onProgress}) async {
     if (!canConvert(sourcePath)) return null;
     final file = File(sourcePath);
     if (!await file.exists()) return null;
@@ -1031,7 +1031,7 @@ class DocConverter {
       if (ext == '.pdf') {
         // User requested: "don't go for dart use C ocr tessaract etc"
         // Bypass Dart parser and strictly use OCR to extract text from the PDF.
-        md = await _ocrPdf(sourcePath) ?? '';
+        md = await _ocrPdf(sourcePath, onProgress: onProgress) ?? '';
       } else if (ext == '.docx') {
         final doc = await DocxReader.parse(sourcePath);
         md = _docxBlocksToMarkdown(doc);
@@ -2171,9 +2171,9 @@ class DocConverter {
 
   /// Rasterises each PDF page and runs Tesseract OCR on it.
   /// Returns the joined text, or null if OCR service is unavailable.
-  static Future<String?> _ocrPdf(String pdfPath) async {
+  static Future<String?> _ocrPdf(String pdfPath, {void Function(int, int)? onProgress}) async {
     try {
-      final text = await OcrService.extractFromDocument(pdfPath);
+      final text = await OcrService.extractFromDocument(pdfPath, onProgress: onProgress);
       return text.trim().isEmpty ? null : text;
     } catch (e) {
       debugPrint('_ocrPdf: $e');

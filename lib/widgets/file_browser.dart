@@ -517,7 +517,11 @@ class _FileBrowserState extends State<FileBrowser> {
       if (e.toString().contains('Permission denied') && rootModeNotifier.value) {
         msg = 'Access denied -- you may need root privileges to view this folder.';
       } else if (e.toString().contains('Permission denied')) {
-        msg = 'Access denied -- please grant "All files access" in your device Settings.';
+        if (_currentPath.toLowerCase().contains('android/data') || _currentPath.toLowerCase().contains('android/obb')) {
+          msg = 'Access denied -- modern Android versions strictly block access to app data folders.';
+        } else {
+          msg = 'Access denied -- please grant "All files access" in your device Settings.';
+        }
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

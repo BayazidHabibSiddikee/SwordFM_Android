@@ -977,7 +977,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.folder), label: 'Files'),
           NavigationDestination(icon: Icon(Icons.wifi), label: 'LAN'),
-          NavigationDestination(icon: Icon(Icons.cloud_sync), label: 'Network & Cloud'),
+          NavigationDestination(icon: Icon(Icons.cloud_sync), label: 'N&C'),
           NavigationDestination(icon: Icon(Icons.handyman), label: 'Tools'),
           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Storage'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),

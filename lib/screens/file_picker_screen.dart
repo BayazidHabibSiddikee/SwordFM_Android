@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/theme.dart';
 import '../widgets/file_browser.dart';
-import '../utils/app_paths.dart';
+import '../utils/constants.dart' show AppPaths;
 
 class FilePickerScreen extends StatefulWidget {
   final bool allowMultiple;

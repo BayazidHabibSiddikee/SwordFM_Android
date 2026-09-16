@@ -132,6 +132,23 @@ class _CastScreenState extends State<CastScreen> {
       ),
       body: Column(
         children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: OneDarkColors.bgDark,
+            child: Row(
+              children: [
+                Icon(Icons.cast_connected, color: OneDarkColors.cyan, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Cast media to a DLNA/UPnP Smart TV. Ensure your TV and phone are on the same Wi-Fi network. '
+                    'You can also cast local files directly from the Files tab using the "Cast" action in the context menu.',
+                    style: TextStyle(color: OneDarkColors.fgDim, fontSize: 13, height: 1.4),
+                  ),
+                ),
+              ],
+            ),
+          ),
           // ── URL bar ──────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),

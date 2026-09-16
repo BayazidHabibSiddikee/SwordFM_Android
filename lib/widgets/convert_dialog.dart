@@ -38,6 +38,8 @@ class ConvertDialog extends StatefulWidget {
 
 class _ConvertDialogState extends State<ConvertDialog> {
   bool _converting = false;
+  double? _progress;
+  String _progressText = '';
   String? _lastResultPath;
   String? _error;
 
@@ -79,7 +81,18 @@ class _ConvertDialogState extends State<ConvertDialog> {
         // Shared routing with batch conversion (DocConverter.convertOne) —
         // DOCX/PDF round-trip through markdown identically in both dialogs.
         final label = format == 'OCR → TXT' ? 'TXT' : format;
-        outPath = await DocConverter.convertOne(widget.filePath, label);
+        outPath = await DocConverter.convertOne(
+          widget.filePath,
+          label,
+          onProgress: (current, total) {
+            if (mounted) {
+              setState(() {
+                _progress = current / total;
+                _progressText = 'Processing page $current of $total...';
+              });
+            }
+          },
+        );
       }
 
       if (outPath == null) {
@@ -196,7 +209,23 @@ class _ConvertDialogState extends State<ConvertDialog> {
             ],
             if (_converting) ...[
               const SizedBox(height: 16),
-              const Center(child: CircularProgressIndicator()),
+              if (_progress != null)
+                Column(
+                  children: [
+                    LinearProgressIndicator(
+                      value: _progress,
+                      backgroundColor: OneDarkColors.bgDark,
+                      valueColor: AlwaysStoppedAnimation<Color>(OneDarkColors.cyan),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _progressText,
+                      style: TextStyle(color: OneDarkColors.fgDim, fontSize: 12),
+                    ),
+                  ],
+                )
+              else
+                const Center(child: CircularProgressIndicator()),
             ],
             if (_error != null) ...[
               const SizedBox(height: 12),

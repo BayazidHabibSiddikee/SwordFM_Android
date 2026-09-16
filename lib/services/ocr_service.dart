@@ -213,8 +213,8 @@ class OcrService {
         onProgress?.call(i, doc.pagesCount);
         final page = await doc.getPage(i);
         final png = await page.render(
-          width: page.width * 2, // 2× scale for OCR accuracy
-          height: page.height * 2,
+          width: page.width * 3, // 3× scale for better OCR accuracy
+          height: page.height * 3,
           format: PdfPageImageFormat.png,
           backgroundColor: '#FFFFFF',
         );
